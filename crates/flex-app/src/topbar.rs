@@ -2,7 +2,8 @@
 //!
 //! With the remote: Up from the top of a screen focuses it, Left/Right moves between items,
 //! OK on the search box starts typing (needs a keyboard), Down returns to the screen.
-//! With a keyboard: just start typing anywhere to search.
+//! With a keyboard: just start typing anywhere to search. With a mouse there's also a Back
+//! button (the remote and keyboard have their own Back).
 
 use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
 
@@ -31,6 +32,8 @@ pub enum Event {
     Cancel,
     OpenSettings,
     ToggleFullscreen,
+    /// The Back button was clicked.
+    Back,
 }
 
 #[derive(Default)]
@@ -78,7 +81,8 @@ impl TopBar {
         Event::None
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, rect: Rect, sh: &mut Shared) -> Event {
+    /// `can_go_back`: there's a screen to go back to, so show the Back button.
+    pub fn ui(&mut self, ui: &mut Ui, rect: Rect, sh: &mut Shared, can_go_back: bool) -> Event {
         let painter = ui.painter().clone();
         painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", TextStyle::Heading.resolve(ui.style()), theme::FOCUS);
 
@@ -126,6 +130,14 @@ impl TopBar {
         widgets::button(&painter, fs_rect, fs_label, self.focus == Some(Item::Fullscreen), ui.style());
         if ui.interact(fs_rect, egui::Id::new("flex-fullscreen"), Sense::click()).clicked() {
             event = Event::ToggleFullscreen;
+        }
+        if can_go_back {
+            let back_rect = Rect::from_min_size(fs_rect.min - vec2(160.0 + 20.0, 0.0), vec2(160.0, fs_rect.height()));
+            let back = ui.interact(back_rect, egui::Id::new("flex-back"), Sense::click());
+            widgets::button(&painter, back_rect, "‹ Back", back.hovered(), ui.style());
+            if back.clicked() {
+                event = Event::Back;
+            }
         }
         event
     }

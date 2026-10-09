@@ -205,9 +205,20 @@ impl FlexApp {
 
     /// Double-clicking the video toggles fullscreen. Elsewhere the mouse is left free
     /// for normal clicking.
-    fn double_click_fullscreen(&mut self, ctx: &egui::Context) {
-        let double = ctx.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
-        if double && self.top().is_player() {
+    /// On the video a click pauses or plays, and a double-click toggles fullscreen (its two
+    /// clicks pause and unpause, so playback carries on).
+    fn player_clicks(&mut self, ctx: &egui::Context) {
+        if !self.top().is_player() {
+            return;
+        }
+        let (click, double) = ctx.input(|i| {
+            (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary))
+        });
+        if click {
+            let nav = self.route(ctx, Press { action: Action::PlayPause, repeat: false });
+            self.apply(ctx, nav);
+        }
+        if double {
             self.toggle_fullscreen(ctx);
         }
     }
@@ -337,13 +348,13 @@ impl eframe::App for FlexApp {
                 }
             }
         }
-        self.double_click_fullscreen(&ctx);
+        self.player_clicks(&ctx);
 
         ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
         let safe = theme::safe_rect(&ctx);
         let content = if self.top().shows_top_bar() {
             let bar = Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT));
-            match self.top_bar.ui(ui, bar, &mut self.sh) {
+            match self.top_bar.ui(ui, bar, &mut self.sh, self.stack.len() > 1) {
                 topbar::Event::Submit => {
                     self.sync_search();
                     let sh = &mut self.sh;
@@ -353,7 +364,7 @@ impl eframe::App for FlexApp {
                     };
                     self.apply(&ctx, nav);
                 }
-                topbar::Event::Cancel => {
+                topbar::Event::Cancel | topbar::Event::Back => {
                     let sh = &mut self.sh;
                     let back = Press { action: Action::Back, repeat: false };
                     let nav = self.stack.last_mut().expect("never empty").handle(sh, back);
