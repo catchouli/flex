@@ -6,7 +6,7 @@ use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
-use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
+use super::{Nav, Screen, library::LibraryView, picker::FolderPicker, shows::ShowsView};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
 use crate::{theme, widgets};
@@ -150,7 +150,10 @@ impl Home {
             Action::Down if self.lib + cols < count => self.lib += cols,
             _ if press.is_activate() => {
                 return match sh.libs.get(self.lib) {
-                    Some(l) => Nav::push(LibraryView::new(l.lib.id, String::new())),
+                    Some(l) => match sh.library_view(l.lib.id) {
+                        crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(l.lib.id)),
+                        crate::shared::LibraryView::Folders => Nav::push(LibraryView::new(l.lib.id, String::new())),
+                    },
                     None => Nav::push(FolderPicker::new(sh)),
                 };
             }

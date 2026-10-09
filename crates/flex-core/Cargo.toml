@@ -6,7 +6,9 @@ version.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 directories = "6.0.0"
+hunch = "2"
 log = "0.4.34"
 nucleo-matcher = "0.3.1"
+regex = "1.13.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 walkdir = "2.5.0"

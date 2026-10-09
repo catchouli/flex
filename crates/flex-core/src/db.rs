@@ -37,7 +37,55 @@ CREATE TABLE media_files (
 const MIGRATIONS: &[&str] = &[
     // 2: app settings
     "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // 3: shows/movies and which folders (groups) belong to them
+    "CREATE TABLE shows (
+        id           INTEGER PRIMARY KEY,
+        library_id   INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        title        TEXT NOT NULL,
+        norm         TEXT NOT NULL,
+        year         INTEGER,
+        provider     TEXT,
+        provider_id  TEXT,
+        overview     TEXT,
+        poster       TEXT,
+        -- local: from file names only; matched: found online; unmatched: lookup failed
+        state        TEXT NOT NULL DEFAULT 'local'
+    );
+    CREATE INDEX shows_by_library ON shows(library_id, norm);
+    CREATE TABLE group_matches (
+        library_id  INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        group_key   TEXT NOT NULL,
+        show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+        -- set only when chosen by hand; otherwise derived from names each time
+        season      INTEGER,
+        manual      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (library_id, group_key)
+    );",
 ];
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Show {
+    pub id: i64,
+    pub library_id: i64,
+    pub title: String,
+    pub year: Option<i32>,
+    pub provider: Option<String>,
+    pub provider_id: Option<String>,
+    pub overview: Option<String>,
+    pub poster: Option<String>,
+    pub state: String,
+}
+
+/// Which show a group (folder) belongs to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupMatch {
+    pub group_key: String,
+    pub show_id: i64,
+    /// Season chosen by hand, if any.
+    pub season: Option<i32>,
+    /// Set by hand: never changed automatically.
+    pub manual: bool,
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScanSummary {
@@ -94,6 +142,126 @@ impl Db {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    pub fn shows(&self, library_id: i64) -> Result<Vec<Show>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, library_id, title, year, provider, provider_id, overview, poster, state
+             FROM shows WHERE library_id = ?1",
+        )?;
+        let rows = stmt.query_map([library_id], |r| {
+            Ok(Show {
+                id: r.get(0)?,
+                library_id: r.get(1)?,
+                title: r.get(2)?,
+                year: r.get(3)?,
+                provider: r.get(4)?,
+                provider_id: r.get(5)?,
+                overview: r.get(6)?,
+                poster: r.get(7)?,
+                state: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn group_matches(&self, library_id: i64) -> Result<Vec<GroupMatch>> {
+        let mut stmt =
+            self.conn.prepare("SELECT group_key, show_id, season, manual FROM group_matches WHERE library_id = ?1")?;
+        let rows = stmt.query_map([library_id], |r| {
+            Ok(GroupMatch { group_key: r.get(0)?, show_id: r.get(1)?, season: r.get(2)?, manual: r.get(3)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Brings group assignments up to date with the library's current groups: new groups
+    /// join the show with the same normalised title (creating it if needed), assignments
+    /// for vanished groups are dropped unless set by hand, and shows left with no groups
+    /// are removed.
+    pub fn sync_groups(&mut self, library_id: i64, groups: &[crate::catalog::Group]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            // group key -> (show id, manual)
+            let existing: HashMap<String, (i64, bool)> = {
+                let mut stmt =
+                    tx.prepare("SELECT group_key, show_id, manual FROM group_matches WHERE library_id = ?1")?;
+                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let show_norm: HashMap<i64, String> = {
+                let mut stmt = tx.prepare("SELECT id, norm FROM shows WHERE library_id = ?1")?;
+                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut by_norm: HashMap<String, i64> = {
+                let mut stmt = tx.prepare("SELECT norm, id FROM shows WHERE library_id = ?1 ORDER BY id")?;
+                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut insert_show =
+                tx.prepare("INSERT INTO shows (library_id, title, norm, year) VALUES (?1, ?2, ?3, ?4)")?;
+            let mut insert_match = tx.prepare(
+                "INSERT INTO group_matches (library_id, group_key, show_id) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(library_id, group_key) DO UPDATE SET show_id = ?3",
+            )?;
+            let current: std::collections::HashSet<&str> = groups.iter().map(|g| g.key.as_str()).collect();
+            for g in groups {
+                // Keep manual choices, and automatic ones whose show still has this title;
+                // re-place automatic ones whose parsed title has changed.
+                match existing.get(&g.key) {
+                    Some((_, true)) => continue,
+                    Some((show, false)) if show_norm.get(show) == Some(&g.norm) => continue,
+                    _ => {}
+                }
+                let show_id = match by_norm.get(&g.norm) {
+                    Some(id) => *id,
+                    None => {
+                        insert_show.execute(params![library_id, g.title, g.norm, g.year])?;
+                        let id = tx.last_insert_rowid();
+                        by_norm.insert(g.norm.clone(), id);
+                        id
+                    }
+                };
+                insert_match.execute(params![library_id, g.key, show_id])?;
+            }
+            let mut delete_match = tx.prepare("DELETE FROM group_matches WHERE library_id = ?1 AND group_key = ?2")?;
+            for (key, (_, manual)) in &existing {
+                if !manual && !current.contains(key.as_str()) {
+                    delete_match.execute(params![library_id, key])?;
+                }
+            }
+        }
+        Self::delete_empty_shows(&tx, library_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn delete_empty_shows(conn: &Connection, library_id: i64) -> Result<()> {
+        conn.execute(
+            "DELETE FROM shows WHERE library_id = ?1
+             AND id NOT IN (SELECT show_id FROM group_matches WHERE library_id = ?1)",
+            [library_id],
+        )?;
+        Ok(())
+    }
+
+    /// Assigns a group by hand (to `show_id`, optionally with a season). Never undone by scans.
+    pub fn set_group_match(&self, library_id: i64, group_key: &str, show_id: i64, season: Option<i32>) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO group_matches (library_id, group_key, show_id, season, manual) VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT(library_id, group_key) DO UPDATE SET show_id = ?3, season = ?4, manual = 1",
+            params![library_id, group_key, show_id, season],
+        )?;
+        Self::delete_empty_shows(&self.conn, library_id)
+    }
+
+    /// A new show for a group split off by hand.
+    pub fn create_show(&self, library_id: i64, title: &str, year: Option<i32>) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO shows (library_id, title, norm, year) VALUES (?1, ?2, ?3, ?4)",
+            params![library_id, title, crate::parse::normalize(title), year],
+        )?;
+        Ok(self.conn.last_insert_rowid())
     }
 
     pub fn libraries(&self) -> Result<Vec<Library>> {
@@ -230,6 +398,40 @@ mod tests {
 
     fn file(p: &str) -> ScannedFile {
         ScannedFile { rel_path: p.into(), size: 1, mtime: 0 }
+    }
+
+    #[test]
+    fn group_sync_keeps_manual_choices() {
+        use crate::catalog::Group;
+        let group = |key: &str, title: &str| Group {
+            key: key.into(),
+            title: title.into(),
+            norm: crate::parse::normalize(title),
+            year: None,
+            season: None,
+            disc: false,
+            file_ids: vec![],
+        };
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B")]).unwrap();
+        let shows = db.shows(lib).unwrap();
+        assert_eq!(shows.len(), 2, "same title shares a show");
+
+        // Move B's folder into Show A by hand, as season 3: Show B disappears.
+        let a = shows.iter().find(|s| s.title == "Show A").unwrap().id;
+        db.set_group_match(lib, "B", a, Some(3)).unwrap();
+        assert_eq!(db.shows(lib).unwrap().len(), 1);
+
+        // A rescan neither undoes the manual move nor recreates Show B.
+        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B")]).unwrap();
+        let m = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "B").unwrap();
+        assert_eq!((m.show_id, m.season, m.manual), (a, Some(3), true));
+        assert_eq!(db.shows(lib).unwrap().len(), 1);
+
+        // A vanished automatic group is dropped.
+        db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
+        assert_eq!(db.group_matches(lib).unwrap().len(), 2);
     }
 
     #[test]

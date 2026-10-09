@@ -5,7 +5,7 @@ use flex_core::LibraryKind;
 
 use super::{Nav, Screen, picker::FolderPicker, rename::RenameLibrary};
 use crate::input::{Action, Press};
-use crate::shared::{Shared, WATCHED_THRESHOLDS};
+use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 #[derive(Default)]
@@ -76,9 +76,9 @@ impl Screen for LibraryOptions {
         }
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let kind = state.lib.kind;
-        let input = self.list.handle(press, 4);
+        let input = self.list.handle(press, 5);
         // Moving off "Remove" cancels a pending confirmation.
-        self.confirm_remove &= self.list.selected == 3;
+        self.confirm_remove &= self.list.selected == 4;
         match input {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
@@ -92,6 +92,14 @@ impl Screen for LibraryOptions {
                 if let Err(e) = sh.set_kind(self.library_id, next) {
                     sh.toast(format!("{e:#}"));
                 }
+                Nav::None
+            }
+            ListInput::Activate(3) => {
+                let view = match sh.library_view(self.library_id) {
+                    LibraryView::Shows => LibraryView::Folders,
+                    LibraryView::Folders => LibraryView::Shows,
+                };
+                sh.set_library_view(self.library_id, view);
                 Nav::None
             }
             ListInput::Activate(_) if !self.confirm_remove => {
@@ -123,6 +131,11 @@ impl Screen for LibraryOptions {
             Row::new(Icon::Refresh, "Rescan now"),
             Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"),
             Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"),
+            Row::new(Icon::None, match sh.library_view(self.library_id) {
+                LibraryView::Shows => "Opens in: Shows",
+                LibraryView::Folders => "Opens in: Folders",
+            })
+            .detail("OK to change"),
             Row::new(Icon::Remove, remove),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);

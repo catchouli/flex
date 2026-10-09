@@ -108,6 +108,53 @@ pub fn continue_watching<'a>(
     items
 }
 
+/// Continue Watching from organised libraries: one entry per show or movie. For a show,
+/// the episode in progress, else the next unwatched episode after the last one played
+/// (carrying on into later seasons); a finished show doesn't appear.
+pub fn continue_watching_shows<'a>(
+    libraries: impl IntoIterator<Item = (&'a Library, &'a Tree, &'a crate::catalog::Catalog)>,
+    limit: usize,
+) -> Vec<ContinueItem> {
+    let mut candidates: Vec<(i64, ContinueItem)> = Vec::new();
+    for (lib, tree, catalog) in libraries {
+        for show in &catalog.shows {
+            let progress = |id: i64| tree.file(id).map(|f| f.progress).unwrap_or_default();
+            let Some((last_played, latest)) = show
+                .episodes
+                .iter()
+                .filter_map(|e| progress(e.file_id).last_played.map(|t| (t, e)))
+                .max_by_key(|(t, _)| *t)
+            else {
+                continue;
+            };
+            let item = |file_id, kind| ContinueItem { library_id: lib.id, file_id, kind };
+            // Anything partway through, most recently played first.
+            let in_progress = show
+                .episodes
+                .iter()
+                .filter(|e| progress(e.file_id).position.is_some())
+                .max_by_key(|e| progress(e.file_id).last_played);
+            let chosen = match in_progress {
+                Some(e) => Some(item(e.file_id, ContinueKind::Resume)),
+                None if show.is_series() => {
+                    let pos = show.episodes.iter().position(|e| e.file_id == latest.file_id).unwrap_or(0);
+                    show.episodes[pos + 1..]
+                        .iter()
+                        .filter(|e| e.season != 0)
+                        .find(|e| !progress(e.file_id).watched)
+                        .map(|e| item(e.file_id, ContinueKind::Next))
+                }
+                None => None,
+            };
+            if let Some(c) = chosen {
+                candidates.push((last_played, c));
+            }
+        }
+    }
+    candidates.sort_by_key(|(t, _)| std::cmp::Reverse(*t));
+    candidates.into_iter().take(limit).map(|(_, c)| c).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +179,40 @@ mod tests {
 
     fn played(at: i64, position: Option<f64>, watched: bool) -> Progress {
         Progress { position, duration: Some(100.0), watched, last_played: Some(at) }
+    }
+
+    #[test]
+    fn continue_watching_per_show() {
+        use crate::catalog::{self, Catalog};
+        use crate::db::{GroupMatch, Show};
+        let lib = Library { id: 1, name: "Anime".into(), root: "/a".into(), kind: LibraryKind::Anime };
+        let tree = Tree::new(vec![
+            file(1, 1, "Show S1/Show - 01.mkv", played(10, None, true)),
+            file(2, 1, "Show S1/Show - 02.mkv", played(20, None, true)), // end of season 1...
+            file(3, 1, "Show S2/Show S2 - 01.mkv", Progress::default()), // ...so S2E1 is next
+            file(4, 1, "Done/Done - 01.mkv", played(30, None, true)), // complete show: absent
+        ]);
+        let parsed = crate::parse::parse_episodes(tree.files());
+        let groups = catalog::derive_groups(LibraryKind::Anime, &tree, &parsed);
+        let show = |id, title: &str| Show {
+            id,
+            library_id: 1,
+            title: title.into(),
+            year: None,
+            provider: None,
+            provider_id: None,
+            overview: None,
+            poster: None,
+            state: "local".into(),
+        };
+        let m = |key: &str, show_id| GroupMatch { group_key: key.into(), show_id, season: None, manual: false };
+        let matches = [m("Show S1", 1), m("Show S2", 1), m("Done", 2)];
+        let cat = Catalog::build(&tree, &parsed, &groups, vec![show(1, "Show"), show(2, "Done")], &matches);
+        let items = continue_watching_shows([(&lib, &tree, &cat)], 10);
+        assert_eq!(items, [ContinueItem { library_id: 1, file_id: 3, kind: ContinueKind::Next }]);
+        // Up next / next-episode stops at the end of a season.
+        assert_eq!(cat.neighbour_in_season(1, 1), Some(2));
+        assert_eq!(cat.neighbour_in_season(2, 1), None);
     }
 
     #[test]

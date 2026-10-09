@@ -2,6 +2,7 @@
 //! end screen always return to the view playback was started from.
 
 pub mod home;
+pub mod inspector;
 pub mod library;
 pub mod options;
 pub mod picker;
@@ -9,6 +10,7 @@ pub mod rename;
 pub mod resume;
 pub mod search;
 pub mod settings;
+pub mod shows;
 pub mod up_next;
 
 use eframe::egui::{Rect, Ui};

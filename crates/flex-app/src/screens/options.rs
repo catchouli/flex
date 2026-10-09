@@ -11,6 +11,8 @@ use crate::widgets::{self, Icon, ListInput, ListState, Row};
 pub enum Target {
     File { library_id: i64, file_id: i64 },
     Folder { library_id: i64, rel: String },
+    /// Any set of files, e.g. a season.
+    Files { library_id: i64, ids: Vec<i64>, label: String },
 }
 
 enum Choice {
@@ -45,7 +47,7 @@ impl OptionsMenu {
                 }
                 out
             }
-            Target::Folder { .. } => vec![
+            Target::Folder { .. } | Target::Files { .. } => vec![
                 (Row::new(Icon::Add, "Mark all as watched"), Choice::MarkWatched(true)),
                 (Row::new(Icon::Remove, "Mark all as unwatched"), Choice::MarkWatched(false)),
             ],
@@ -58,6 +60,7 @@ impl OptionsMenu {
                 sh.play_request(*library_id, *file_id).map_or_else(String::new, |r| r.title)
             }
             Target::Folder { rel, .. } => rel.rsplit('/').next().unwrap_or(rel).to_owned(),
+            Target::Files { label, .. } => label.clone(),
         }
     }
 }
@@ -77,6 +80,7 @@ impl Screen for OptionsMenu {
                     Target::Folder { library_id, rel } => {
                         (*library_id, sh.lib(*library_id).map_or_else(Vec::new, |l| l.tree.ids_under(rel)))
                     }
+                    Target::Files { library_id, ids, .. } => (*library_id, ids.clone()),
                 };
                 sh.set_watched(library_id, &ids, watched);
                 Nav::Pop
