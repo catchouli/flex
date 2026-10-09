@@ -879,11 +879,43 @@ impl Shared {
         }
     }
 
-    pub fn search(&mut self, query: &str, limit: usize) -> Vec<Item> {
-        let libs = &self.libs;
-        self.search
-            .get_or_insert_with(|| SearchIndex::build(libs.iter().map(|l| (&l.lib, &l.tree))))
-            .search(query, limit)
+    pub fn search(&mut self, query: &str, scope: flex_core::search::Scope, limit: usize) -> Vec<Item> {
+        if self.search.is_none() {
+            let started = std::time::Instant::now();
+            let index = SearchIndex::new(self.search_items());
+            log::info!("search index: {} items in {:?}", index.len(), started.elapsed());
+            self.search = Some(index);
+        }
+        self.search.as_mut().map_or_else(Vec::new, |i| i.search(query, scope, limit))
+    }
+
+    /// Everything searchable: shows/films (matched title plus folder titles as alternative
+    /// names), episodes by clean name, and every folder and file.
+    fn search_items(&self) -> Vec<Item> {
+        use flex_core::search::{Target, path_items};
+        let mut items = Vec::new();
+        for l in &self.libs {
+            if let Some(catalog) = l.catalog() {
+                for entry in &catalog.shows {
+                    let also: Vec<String> = entry.groups.iter().map(|g| g.title.clone()).collect();
+                    let context = match entry.show.year {
+                        Some(y) => format!("{} · {y}", l.lib.name),
+                        None => l.lib.name.clone(),
+                    };
+                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id };
+                    items.push(Item::new(entry.show.title.clone(), context, target, 0, &also));
+                    if entry.is_series() {
+                        for e in &entry.episodes {
+                            let Some(titles) = self.titles(l.lib.id, e.file_id) else { continue };
+                            let target = Target::Episode { library_id: l.lib.id, file_id: e.file_id };
+                            items.push(Item::new(titles.full(), l.lib.name.clone(), target, 0, &[]));
+                        }
+                    }
+                }
+            }
+            items.extend(path_items(&l.lib, &l.tree));
+        }
+        items
     }
 
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {
