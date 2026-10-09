@@ -18,16 +18,21 @@ pub enum Action {
     /// The remote's stop button (Windows only: macOS keeps media keys for itself).
     #[cfg_attr(not(windows), allow(dead_code))]
     Stop,
-    /// Remote next-track button, or Page Down.
+    /// Remote next-track button: next episode.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Next,
-    /// Remote previous-track button, or Page Up.
+    /// Remote previous-track button: previous episode.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Previous,
-    /// Remote search button, or Ctrl/Cmd+F: focuses the search box.
+    /// Page Down (remote or keyboard): jump down a page in lists.
+    PageDown,
+    /// Page Up: jump up a page in lists.
+    PageUp,
+    /// Remote zoom-out or search button, Ctrl/Cmd+F: focuses the search box.
+    /// (The remote's own search button also opens Windows search, so zoom-out is nicer.)
     Search,
-    /// Remote zoom-in (Ctrl + "=" / Ctrl+wheel up / HID zoom-in): toggles fullscreen.
+    /// Remote zoom-in (HID zoom-in / Ctrl + "=" / Ctrl+wheel up): toggles fullscreen.
     ZoomIn,
-    /// Remote zoom-out: leaves fullscreen.
-    ZoomOut,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -56,8 +61,8 @@ fn map_key(key: Key) -> Option<Action> {
         Key::ArrowRight => Action::Right,
         Key::Enter => Action::Ok,
         Key::Space => Action::PlayPause,
-        Key::PageDown => Action::Next,
-        Key::PageUp => Action::Previous,
+        Key::PageDown => Action::PageDown,
+        Key::PageUp => Action::PageUp,
         // Remotes usually send BrowserBack for their Back button.
         Key::Escape | Key::Backspace | Key::BrowserBack => Action::Back,
         _ => return None,
@@ -68,8 +73,7 @@ fn map_key(key: Key) -> Option<Action> {
 fn map_command_key(key: Key) -> Option<Action> {
     match key {
         Key::Plus | Key::Equals => Some(Action::ZoomIn),
-        Key::Minus => Some(Action::ZoomOut),
-        Key::F => Some(Action::Search),
+        Key::Minus | Key::F => Some(Action::Search),
         _ => None,
     }
 }
@@ -82,10 +86,14 @@ pub fn back_held(ctx: &egui::Context) -> bool {
 }
 
 const LOG_LEN: usize = 12;
+/// Ctrl+wheel sends a burst of events per flick; treat it as one press at most this often.
+/// (Buttons are single events and aren't limited.)
+const WHEEL_ZOOM_DEBOUNCE_SECS: f64 = 0.8;
 
 #[derive(Default)]
 pub struct InputLog {
     entries: VecDeque<String>,
+    last_wheel_zoom: Option<f64>,
 }
 
 impl InputLog {
@@ -117,6 +125,7 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
         return presses;
     }
     ctx.input(|i| {
+        let now = i.time;
         for event in &i.events {
             let (raw, action, repeat) = match event {
                 Event::Key { key, physical_key, pressed: true, repeat, modifiers } => {
@@ -137,14 +146,14 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
                     let action = (*button == PointerButton::Extra1).then_some(Action::Back);
                     (format!("Mouse {button:?}"), action, false)
                 }
-                // Some air mice send Ctrl + scroll wheel for their zoom buttons.
-                Event::MouseWheel { delta, modifiers, .. } if modifiers.command && delta.y != 0.0 => {
-                    let action = if delta.y > 0.0 { Action::ZoomIn } else { Action::ZoomOut };
-                    (format!("Ctrl+Wheel {:+.0}", delta.y), Some(action), false)
-                }
-                Event::Zoom(factor) if *factor != 1.0 => {
-                    let action = if *factor > 1.0 { Action::ZoomIn } else { Action::ZoomOut };
-                    (format!("Zoom gesture x{factor:.2}"), Some(action), false)
+                // Some air mice send Ctrl + scroll wheel for their zoom buttons. Only
+                // zooming in is used (fullscreen); zooming out would be too easy to trigger.
+                Event::MouseWheel { delta, modifiers, .. } if modifiers.command && delta.y > 0.0 => {
+                    if log.last_wheel_zoom.is_some_and(|t| now - t < WHEEL_ZOOM_DEBOUNCE_SECS) {
+                        continue;
+                    }
+                    log.last_wheel_zoom = Some(now);
+                    (format!("Ctrl+Wheel {:+.0}", delta.y), Some(Action::ZoomIn), false)
                 }
                 _ => continue,
             };
@@ -291,7 +300,7 @@ pub mod os {
                 for pair in report.windows(2) {
                     match u16::from_le_bytes([pair[0], pair[1]]) {
                         AC_ZOOM_IN => action = Some(Action::ZoomIn),
-                        AC_ZOOM_OUT => action = Some(Action::ZoomOut),
+                        AC_ZOOM_OUT => action = Some(Action::Search),
                         _ => {}
                     }
                 }

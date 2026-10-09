@@ -16,8 +16,6 @@ const TOAST_SECS: f64 = 4.0;
 const QUIT_HOLD_SECS: f64 = 1.5;
 const QUIT_PROMPT_SECS: f64 = 0.4;
 const FULLSCREEN_SETTING: &str = "fullscreen";
-/// Ctrl+wheel zoom sends a burst of events per gesture; toggle at most this often.
-const ZOOM_DEBOUNCE_SECS: f64 = 0.8;
 
 pub struct FlexApp {
     sh: Shared,
@@ -34,7 +32,9 @@ pub struct FlexApp {
     /// on Windows: the window ends up borderless in a corner).
     restore_fullscreen: bool,
     frames: u64,
-    last_zoom: f64,
+    /// Fullscreen state we last asked for. The window's own report can't be relied on:
+    /// on macOS it lags while animating and sometimes stays stale afterwards.
+    fullscreen: bool,
 }
 
 impl FlexApp {
@@ -47,7 +47,7 @@ impl FlexApp {
         let mut app = Self {
             restore_fullscreen,
             frames: 0,
-            last_zoom: f64::NEG_INFINITY,
+            fullscreen: false,
             sh,
             stack: vec![Box::new(Home::default())],
             top_bar: TopBar::default(),
@@ -119,14 +119,15 @@ impl FlexApp {
     }
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
-        self.set_fullscreen(ctx, !fullscreen);
+        self.set_fullscreen(ctx, !self.fullscreen);
     }
 
     fn set_fullscreen(&mut self, ctx: &egui::Context, fullscreen: bool) {
+        self.fullscreen = fullscreen;
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(fullscreen));
         self.sh.set_setting_bool(FULLSCREEN_SETTING, fullscreen);
     }
+
 
     /// Sends a press to the top bar if it has focus, otherwise to the current screen.
     fn route(&mut self, ctx: &egui::Context, press: Press) -> Nav {
@@ -274,7 +275,7 @@ impl eframe::App for FlexApp {
         self.frames += 1;
         if self.restore_fullscreen && self.frames > 2 {
             self.restore_fullscreen = false;
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+            self.set_fullscreen(&ctx, true);
         }
         self.global_keys(&ctx);
 
@@ -286,13 +287,9 @@ impl eframe::App for FlexApp {
         }
         for press in presses {
             match press.action {
-                Action::ZoomIn | Action::ZoomOut => {
-                    if !press.repeat && now - self.last_zoom > ZOOM_DEBOUNCE_SECS {
-                        self.last_zoom = now;
-                        match press.action {
-                            Action::ZoomIn => self.toggle_fullscreen(&ctx),
-                            _ => self.set_fullscreen(&ctx, false),
-                        }
+                Action::ZoomIn => {
+                    if !press.repeat {
+                        self.toggle_fullscreen(&ctx);
                     }
                 }
                 Action::Search => {

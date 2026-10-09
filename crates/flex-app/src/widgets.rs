@@ -66,8 +66,8 @@ impl ListState {
             Action::Up if self.selected == 0 => return if press.repeat { ListInput::None } else { ListInput::AtTop },
             Action::Up => self.selected -= 1,
             Action::Down => self.selected = (self.selected + 1).min(last),
-            Action::Left => self.selected = self.selected.saturating_sub(PAGE),
-            Action::Right => self.selected = (self.selected + PAGE).min(last),
+            Action::Left | Action::PageUp => self.selected = self.selected.saturating_sub(PAGE),
+            Action::Right | Action::PageDown => self.selected = (self.selected + PAGE).min(last),
             _ if press.is_activate() && len > 0 => return ListInput::Activate(self.selected),
             _ => {}
         }
