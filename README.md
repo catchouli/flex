@@ -1,79 +1,45 @@
 # Flex
 
-A simple TV-friendly media player for a folder-based library. Rust + egui, with video
-via libmpv rendered inside the app. Everything is driven by arrows, OK and Back.
+<a href="screenshots/home.jpg"><img src="screenshots/home-thumb.jpg" width="32%"></a>
+<a href="screenshots/anime.jpg"><img src="screenshots/anime-thumb.jpg" width="32%"></a>
+<a href="screenshots/show.jpg"><img src="screenshots/show-thumb.jpg" width="32%"></a>
 
-## Status: Phases 1–4
+A media player and organiser that scans your local libraries (local folders or mounted
+drives) and sorts everything into Movies, Shows and Anime collections. It runs entirely
+locally, so there's no server to set up, and it can import an existing Plex database to
+bring your watch history across.
 
-- Libraries: add/remove in Settings (folder picker with drive letters on Windows), each typed
-  Movies / TV / Anime. Scans run in the background; the index lives in SQLite.
-- Folder view per library, fuzzy search across everything, playback with an "Up next"
-  screen at the end of an episode.
-- Watch progress: position saved every 10s and on leaving the player, resume prompt,
-  watched after a configurable threshold (default 90%), progress shown in lists, and a
-  Continue Watching row on Home.
-- Next: incremental rescans, series matching.
+It's also really fast. I got fed up with how sluggish Plex is on my TV PC, and this
+opens instantly and stays snappy even with tens of thousands of videos.
 
-Data is stored in `%APPDATA%\Flex\data\flex.db` (Windows) or
-`~/Library/Application Support/Flex/flex.db` (macOS).
+It's made to be used from the couch with a TV remote (arrows, OK and back are all you
+need), but a keyboard and mouse work fine too.
 
-## Controls
+## Getting it running
 
-Everyday use only needs the remote; typing (search) needs a keyboard.
+You'll need Rust and a copy of libmpv.
 
-| Action | Keys |
-|---|---|
-| Move | Arrow keys; Page Up/Down (or Left/Right) jump a page in lists |
-| OK | Enter (fires on release) |
-| Options (mark watched/unwatched, play from beginning) | Hold OK, or right-click |
-| Play/Pause | Space, remote play/pause (Windows). Acts as OK outside the player |
-| Back | Esc, Backspace, Browser Back (remote), mouse back button |
-| Stop | Remote stop button (Windows) |
-| Next / previous episode | Remote next/previous buttons (Windows) |
-| Search | Remote zoom-out (the remote's search button works too but also opens Windows search), Ctrl/Cmd+F, or just start typing |
-| Quit | Hold Back for 1.5 seconds |
-| In the search box | Down moves into results, Enter opens the best match, Esc clears |
-| Input log | F1, which shows exactly what each key or remote button sends (on Windows also raw key codes and HID reports) |
-| Fullscreen | Remote zoom-in toggles (handled as HID zoom, Ctrl/Cmd + `=`, or Ctrl+wheel up); also the top-bar button, double-clicking the video, or F11 (Windows; macOS reserves F11). Remembered between runs; `--windowed` ignores it |
+On Windows, run `cargo build --release`, then grab `libmpv-2.dll` from the
+[mpv releases](https://github.com/mpv-player/mpv/releases) page
+and drop it next to `flex.exe`. Those two files are all you need, so you can copy them
+to whichever PC is plugged into your TV.
 
-In the player: **OK/Play** pause · **Left/Right** seek 10s (hold for 30s steps) ·
-**Up** cycle subtitles · **Down** cycle audio · **Back** hide the OSD, then stop · **Stop** stop.
-At the end of an episode, **Up next** offers the next file in the same folder: OK/Play plays
-it, Back returns to where you started. Movies and the last episode in a folder go straight back.
+On a Mac it'll pick up the libmpv that comes with [IINA](https://iina.io) if you have it,
+or you can point `FLEX_LIBMPV` at a `libmpv.2.dylib`.
 
-## Running
+Then:
 
-```
-flex [--windowed] [VIDEO]
-```
+1. Open Settings and add your libraries, picking whether each is Movies, TV or Anime.
+2. If you want posters, descriptions and episode names, get a free API read access token
+   from [TMDB](https://www.themoviedb.org/settings/api) and paste it into Settings.
+3. If you're coming from Plex, use "Import from Plex…" and point it at your
+   `com.plexapp.plugins.library.db`.
 
-Passing a video plays it straight away; normally you'd start with no arguments.
+If something gets matched to the wrong show, open it and pick "Match online…" or
+"Folders & seasons…" to fix it.
 
-libmpv is loaded at runtime, so building needs nothing extra.
+## Remote controls
 
-### Windows
-
-1. `cargo build --release`
-2. Download an `mpv-dev-x86_64-*.7z` build from
-   <https://github.com/shinchiro/mpv-winbuild-cmake/releases> and extract `libmpv-2.dll`.
-3. Put `libmpv-2.dll` next to `target\release\flex.exe`. Those two files are all you need
-   to copy to another PC.
-
-### macOS
-
-Needs `libmpv.2.dylib` from somewhere: Homebrew (`brew install mpv`), or set
-`FLEX_LIBMPV=/path/to/libmpv.2.dylib`.
-
-### Cross-compiling Windows from macOS
-
-```
-rustup target add x86_64-pc-windows-gnu   # plus: brew install mingw-w64
-cargo build --release --target x86_64-pc-windows-gnu
-```
-
-## Troubleshooting
-
-- `FLEX_MPV_OPTS="hwdec=no"` passes extra mpv options (comma separated), e.g. to rule
-  out hardware decoding problems. `hwdec=auto-copy` is a good middle ground.
-  `start=-10` starts every file 10s before its end, handy for testing "Up next".
-- `RUST_LOG=debug` for more logging (debug builds show a console on Windows).
+Arrows to move, OK to select, Back to go back. Hold OK for more options, and hold Back
+to quit. Play/pause, stop and next/previous work if your remote has them, and on my
+remote zoom+ toggles fullscreen and zoom- jumps to search.
