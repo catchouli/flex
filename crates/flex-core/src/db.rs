@@ -124,6 +124,11 @@ impl Db {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn rename_library(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute("UPDATE libraries SET name = ?1 WHERE id = ?2", params![name, id])?;
+        Ok(())
+    }
+
     pub fn set_library_kind(&self, id: i64, kind: LibraryKind) -> Result<()> {
         self.conn.execute("UPDATE libraries SET kind = ?1 WHERE id = ?2", params![kind.as_str(), id])?;
         Ok(())

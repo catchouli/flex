@@ -207,7 +207,8 @@ impl Shared {
         self.libs.iter_mut().find(|l| l.lib.id == id)
     }
 
-    pub fn add_library(&mut self, root: &Path, kind: LibraryKind) -> Result<()> {
+    /// Adds a library (named after its folder) and starts scanning it; returns its id.
+    pub fn add_library(&mut self, root: &Path, kind: LibraryKind) -> Result<i64> {
         let name = root
             .file_name()
             .map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -216,6 +217,21 @@ impl Shared {
         self.libs.push(LibState { lib, tree: Tree::new(Vec::new()), scanning: None, error: None, version: 0 });
         self.libs.sort_by_key(|l| l.lib.name.to_lowercase());
         self.start_scan(id);
+        Ok(id)
+    }
+
+    pub fn rename_library(&mut self, id: i64, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("A library needs a name");
+        }
+        self.db.rename_library(id, name)?;
+        if let Some(l) = self.lib_mut(id) {
+            l.lib.name = name.to_owned();
+            l.version += 1;
+        }
+        self.libs.sort_by_key(|l| l.lib.name.to_lowercase());
+        self.search = None; // results show library names
         Ok(())
     }
 

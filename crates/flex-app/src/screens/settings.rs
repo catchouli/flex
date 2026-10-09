@@ -3,7 +3,7 @@
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
 
-use super::{Nav, Screen, picker::FolderPicker};
+use super::{Nav, Screen, picker::FolderPicker, rename::RenameLibrary};
 use crate::input::{Action, Press};
 use crate::shared::{Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
@@ -76,16 +76,17 @@ impl Screen for LibraryOptions {
         }
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let kind = state.lib.kind;
-        let input = self.list.handle(press, 3);
+        let input = self.list.handle(press, 4);
         // Moving off "Remove" cancels a pending confirmation.
-        self.confirm_remove &= self.list.selected == 2;
+        self.confirm_remove &= self.list.selected == 3;
         match input {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
                 sh.start_scan(self.library_id);
                 Nav::None
             }
-            ListInput::Activate(1) => {
+            ListInput::Activate(1) => Nav::push(RenameLibrary::new(sh, self.library_id, "Rename library")),
+            ListInput::Activate(2) => {
                 let i = LibraryKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
                 let next = LibraryKind::ALL[(i + 1) % LibraryKind::ALL.len()];
                 if let Err(e) = sh.set_kind(self.library_id, next) {
@@ -120,6 +121,7 @@ impl Screen for LibraryOptions {
         };
         let rows = [
             Row::new(Icon::Refresh, "Rescan now"),
+            Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"),
             Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"),
             Row::new(Icon::Remove, remove),
         ];

@@ -5,6 +5,7 @@ pub mod home;
 pub mod library;
 pub mod options;
 pub mod picker;
+pub mod rename;
 pub mod resume;
 pub mod search;
 pub mod settings;

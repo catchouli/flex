@@ -299,7 +299,7 @@ impl eframe::App for FlexApp {
         }
         self.global_keys(&ctx);
 
-        let text_focused = topbar::text_focused(&ctx);
+        let text_focused = ctx.text_edit_focused();
         let presses = input::collect(&ctx, &mut self.input_log, text_focused);
         if self.top().shows_top_bar() && !text_focused && topbar::typed_text(&ctx) {
             // Start searching as soon as someone types; the box picks up this frame's text.
@@ -352,7 +352,7 @@ impl eframe::App for FlexApp {
             ctx.content_rect()
         };
 
-        let focused = self.top_bar.focus.is_none() && !topbar::text_focused(&ctx);
+        let focused = self.top_bar.focus.is_none() && !ctx.text_edit_focused();
         let sh = &mut self.sh;
         let nav = self.stack.last_mut().expect("never empty").ui(ui, sh, content, focused);
         self.apply(&ctx, nav);

@@ -43,11 +43,6 @@ fn search_id() -> egui::Id {
     egui::Id::new("flex-search")
 }
 
-/// True while the search box is accepting typed text.
-pub fn text_focused(ctx: &egui::Context) -> bool {
-    ctx.memory(|m| m.has_focus(search_id()))
-}
-
 pub fn focus_text(ctx: &egui::Context) {
     ctx.memory_mut(|m| m.request_focus(search_id()));
 }
