@@ -28,7 +28,7 @@ Everyday use only needs the remote; typing (search) needs a keyboard.
 | Quit | Hold Back for 1.5 seconds |
 | Search | Just start typing, or Up to the top bar and OK on the search box. Down moves into results, Enter opens the best match, Esc clears |
 | Input log | F1, which shows exactly what each key or remote button sends |
-| Fullscreen | F11 |
+| Fullscreen | Fullscreen button in the top bar, double-click, or F11 (Windows; macOS reserves F11). Remembered between runs; `--windowed` ignores it |
 
 In the player: **OK/Play** pause · **Left/Right** seek 10s (hold for 30s steps) ·
 **Up** cycle subtitles · **Down** cycle audio · **Back** hide the OSD, then stop · **Stop** stop.

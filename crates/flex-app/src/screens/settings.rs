@@ -22,7 +22,7 @@ impl Screen for Settings {
         match self.list.handle(press, libs + 2) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
-            ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new()),
+            ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
             ListInput::Activate(_) => {
                 sh.scan_all();
                 sh.toast("Rescanning all libraries…");

@@ -15,6 +15,7 @@ const TOAST_SECS: f64 = 4.0;
 /// Holding Back this long quits; the prompt appears after `QUIT_PROMPT_SECS`.
 const QUIT_HOLD_SECS: f64 = 1.5;
 const QUIT_PROMPT_SECS: f64 = 0.4;
+const FULLSCREEN_SETTING: &str = "fullscreen";
 
 pub struct FlexApp {
     sh: Shared,
@@ -27,15 +28,22 @@ pub struct FlexApp {
     back_hold_since: Option<f64>,
     toasts: VecDeque<(String, f64)>,
     last_pointer_move: f64,
+    /// Restore saved fullscreen once the window exists (fullscreen at creation misbehaves
+    /// on Windows: the window ends up borderless in a corner).
+    restore_fullscreen: bool,
+    frames: u64,
 }
 
 impl FlexApp {
     /// `start` may be a video to play immediately (handy for testing playback).
-    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>) -> anyhow::Result<Self> {
+    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool) -> anyhow::Result<Self> {
         theme::install(&cc.egui_ctx);
         input::media::set_context(&cc.egui_ctx);
         let sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
+        let restore_fullscreen = !windowed && sh.setting_bool(FULLSCREEN_SETTING);
         let mut app = Self {
+            restore_fullscreen,
+            frames: 0,
             sh,
             stack: vec![Box::new(Home::default())],
             top_bar: TopBar::default(),
@@ -106,6 +114,12 @@ impl FlexApp {
         }
     }
 
+    fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
+        let fullscreen = !ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(fullscreen));
+        self.sh.set_setting_bool(FULLSCREEN_SETTING, fullscreen);
+    }
+
     fn open_settings(&mut self) {
         self.top_bar.focus = None;
         self.stack.push(Box::new(Settings::default()));
@@ -129,13 +143,23 @@ impl FlexApp {
     }
 
     fn global_keys(&mut self, ctx: &egui::Context) {
-        let (f1, f11, fullscreen) =
-            ctx.input(|i| (i.key_pressed(Key::F1), i.key_pressed(Key::F11), i.viewport().fullscreen));
+        let (f1, f11) = ctx.input(|i| (i.key_pressed(Key::F1), i.key_pressed(Key::F11)));
         if f1 {
             self.show_input_log = !self.show_input_log;
         }
         if f11 {
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!fullscreen.unwrap_or(false)));
+            self.toggle_fullscreen(ctx);
+        }
+    }
+
+    /// Double-clicking the window toggles fullscreen, except on the top bar
+    /// (where double-click selects text in the search box).
+    fn double_click_fullscreen(&mut self, ctx: &egui::Context, top_bar: Option<Rect>) {
+        let (double, pos) =
+            ctx.input(|i| (i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.interact_pos()));
+        let on_top_bar = top_bar.zip(pos).is_some_and(|(bar, p)| bar.contains(p));
+        if double && !on_top_bar {
+            self.toggle_fullscreen(ctx);
         }
     }
 
@@ -166,6 +190,8 @@ impl FlexApp {
     fn draw_toasts(&mut self, ui: &egui::Ui, now: f64) {
         for msg in self.sh.take_toasts() {
             log::info!("{msg}");
+            // A repeat of a message already showing just refreshes it instead of stacking.
+            self.toasts.retain(|(m, _)| *m != msg);
             self.toasts.push_back((msg, now + TOAST_SECS));
         }
         self.toasts.retain(|(_, until)| *until > now);
@@ -223,6 +249,11 @@ impl eframe::App for FlexApp {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         theme::update_scale(&ctx);
+        self.frames += 1;
+        if self.restore_fullscreen && self.frames > 2 {
+            self.restore_fullscreen = false;
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+        }
         self.global_keys(&ctx);
 
         let text_focused = topbar::text_focused(&ctx);
@@ -234,12 +265,11 @@ impl eframe::App for FlexApp {
         for press in presses {
             let nav = if self.top_bar.focus.is_some() && self.top().shows_top_bar() {
                 match self.top_bar.handle(&ctx, press) {
-                    topbar::Event::OpenSettings => {
-                        self.open_settings();
-                        Nav::None
-                    }
-                    _ => Nav::None,
+                    topbar::Event::OpenSettings => self.open_settings(),
+                    topbar::Event::ToggleFullscreen => self.toggle_fullscreen(&ctx),
+                    _ => {}
                 }
+                Nav::None
             } else {
                 let sh = &mut self.sh;
                 self.stack.last_mut().expect("never empty").handle(sh, press)
@@ -249,8 +279,9 @@ impl eframe::App for FlexApp {
 
         ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
         let safe = theme::safe_rect(&ctx);
-        let content = if self.top().shows_top_bar() {
-            let bar = Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT));
+        let bar = self.top().shows_top_bar().then(|| Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT)));
+        self.double_click_fullscreen(&ctx, bar);
+        let content = if let Some(bar) = bar {
             match self.top_bar.ui(ui, bar, &mut self.sh) {
                 topbar::Event::Submit => {
                     self.sync_search();
@@ -263,6 +294,7 @@ impl eframe::App for FlexApp {
                 }
                 topbar::Event::Cancel => self.sh.search_query.clear(),
                 topbar::Event::OpenSettings => self.open_settings(),
+                topbar::Event::ToggleFullscreen => self.toggle_fullscreen(&ctx),
                 topbar::Event::FocusContent | topbar::Event::None => {}
             }
             self.sync_search();

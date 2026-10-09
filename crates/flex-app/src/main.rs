@@ -31,8 +31,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flex")
-            .with_inner_size([1280.0, 720.0])
-            .with_fullscreen(!windowed),
+            .with_inner_size([1280.0, 720.0]),
         renderer: eframe::Renderer::Glow,
         event_loop_builder: Some(Box::new(|_builder| {
             #[cfg(windows)]
@@ -47,7 +46,7 @@ fn main() -> eframe::Result {
         "Flex",
         options,
         Box::new(|cc| {
-            Ok(match app::FlexApp::new(cc, start) {
+            Ok(match app::FlexApp::new(cc, start, windowed) {
                 Ok(app) => Box::new(app) as Box<dyn eframe::App>,
                 Err(e) => {
                     log::error!("{e:#}");

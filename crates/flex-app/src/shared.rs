@@ -1,7 +1,10 @@
 //! State shared by all screens: the database, libraries with their folder trees,
 //! background scans and the search index.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use anyhow::Result;
@@ -70,6 +73,8 @@ pub struct Shared {
     search: Option<SearchIndex>,
     scan_tx: Sender<ScanMsg>,
     scan_rx: Receiver<ScanMsg>,
+    /// Cancel flags for running scans, by library id.
+    scan_cancel: HashMap<i64, Arc<AtomicBool>>,
     toasts: Vec<String>,
 }
 
@@ -89,6 +94,7 @@ impl Shared {
             search: None,
             scan_tx,
             scan_rx,
+            scan_cancel: HashMap::new(),
             toasts: Vec::new(),
         };
         for lib in shared.db.libraries()? {
@@ -101,6 +107,16 @@ impl Shared {
             }
         }
         Ok(shared)
+    }
+
+    pub fn setting_bool(&self, key: &str) -> bool {
+        self.db.setting(key).ok().flatten().is_some_and(|v| v == "true")
+    }
+
+    pub fn set_setting_bool(&mut self, key: &str, value: bool) {
+        if let Err(e) = self.db.set_setting(key, if value { "true" } else { "false" }) {
+            log::warn!("saving setting {key}: {e:#}");
+        }
     }
 
     pub fn toast(&mut self, msg: impl Into<String>) {
@@ -132,6 +148,9 @@ impl Shared {
     }
 
     pub fn remove_library(&mut self, id: i64) -> Result<()> {
+        if let Some(cancel) = self.scan_cancel.remove(&id) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.db.remove_library(id)?;
         self.libs.retain(|l| l.lib.id != id);
         self.search = None;
@@ -155,10 +174,12 @@ impl Shared {
         state.scanning = Some(0);
         state.error = None;
         let root = state.lib.root.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.scan_cancel.insert(id, cancel.clone());
         let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
         std::thread::spawn(move || {
             let result = (|| -> Result<String> {
-                let scan = flex_core::scan::scan(&root, |n| {
+                let scan = flex_core::scan::scan(&root, &cancel, |n| {
                     let _ = tx.send(ScanMsg::Progress(id, n));
                     ctx.request_repaint();
                 })?;
@@ -200,6 +221,7 @@ impl Shared {
                     }
                 }
                 ScanMsg::Done(id, result) => {
+                    self.scan_cancel.remove(&id);
                     let outcome = result.and_then(|summary| {
                         self.db.files(id).map(|files| (summary, files)).map_err(|e| format!("{e:#}"))
                     });

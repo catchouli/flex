@@ -32,6 +32,12 @@ CREATE TABLE media_files (
 );
 ";
 
+/// Schema changes after version 1, applied in order.
+const MIGRATIONS: &[&str] = &[
+    // 2: app settings
+    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+];
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScanSummary {
     pub added: usize,
@@ -60,16 +66,33 @@ impl Db {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
-        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        match version {
-            0 => {
-                conn.execute_batch(SCHEMA)?;
-                conn.pragma_update(None, "user_version", 1)?;
-            }
-            1 => {}
-            v => bail!("database is from a newer version of Flex (schema {v})"),
+        let mut version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let latest = 1 + MIGRATIONS.len() as i64;
+        if version > latest {
+            bail!("database is from a newer version of Flex (schema {version})");
         }
+        if version == 0 {
+            conn.execute_batch(SCHEMA)?;
+            version = 1;
+        }
+        for (i, sql) in MIGRATIONS.iter().enumerate().skip(version as usize - 1) {
+            conn.execute_batch(sql)?;
+            version = i as i64 + 2;
+        }
+        conn.pragma_update(None, "user_version", version)?;
         Ok(Self { conn })
+    }
+
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     pub fn libraries(&self) -> Result<Vec<Library>> {
@@ -173,6 +196,15 @@ mod tests {
 
     fn file(p: &str) -> ScannedFile {
         ScannedFile { rel_path: p.into(), size: 1, mtime: 0 }
+    }
+
+    #[test]
+    fn settings_roundtrip() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(db.setting("fullscreen").unwrap(), None);
+        db.set_setting("fullscreen", "true").unwrap();
+        db.set_setting("fullscreen", "false").unwrap();
+        assert_eq!(db.setting("fullscreen").unwrap().as_deref(), Some("false"));
     }
 
     #[test]

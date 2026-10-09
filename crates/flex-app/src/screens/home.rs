@@ -30,7 +30,7 @@ impl Screen for Home {
             _ if press.is_activate() => {
                 return match sh.libs.get(self.selected) {
                     Some(l) => Nav::push(LibraryView::new(l.lib.id, String::new())),
-                    None => Nav::push(FolderPicker::new()),
+                    None => Nav::push(FolderPicker::new(sh)),
                 };
             }
             _ => {}

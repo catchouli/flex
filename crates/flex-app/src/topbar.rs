@@ -1,4 +1,4 @@
-//! The bar across the top: app name, search box and Settings.
+//! The bar across the top: app name, search box, fullscreen toggle and Settings.
 //!
 //! With the remote: Up from the top of a screen focuses it, Left/Right moves between items,
 //! OK on the search box starts typing (needs a keyboard), Down returns to the screen.
@@ -15,8 +15,11 @@ pub const HEIGHT: f32 = 72.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     Search,
+    Fullscreen,
     Settings,
 }
+
+const ITEMS: [Item; 3] = [Item::Search, Item::Fullscreen, Item::Settings];
 
 pub enum Event {
     None,
@@ -27,6 +30,7 @@ pub enum Event {
     /// Escape in the search box.
     Cancel,
     OpenSettings,
+    ToggleFullscreen,
 }
 
 #[derive(Default)]
@@ -58,15 +62,17 @@ pub fn typed_text(ctx: &egui::Context) -> bool {
 
 impl TopBar {
     pub fn handle(&mut self, ctx: &egui::Context, press: Press) -> Event {
+        let i = ITEMS.iter().position(|it| Some(*it) == self.focus).unwrap_or(0);
         match press.action {
-            Action::Left => self.focus = Some(Item::Search),
-            Action::Right => self.focus = Some(Item::Settings),
+            Action::Left => self.focus = Some(ITEMS[i.saturating_sub(1)]),
+            Action::Right => self.focus = Some(ITEMS[(i + 1).min(ITEMS.len() - 1)]),
             Action::Down | Action::Back => {
                 self.focus = None;
                 return Event::FocusContent;
             }
             _ if press.is_activate() => match self.focus {
                 Some(Item::Settings) => return Event::OpenSettings,
+                Some(Item::Fullscreen) => return Event::ToggleFullscreen,
                 _ => focus_text(ctx),
             },
             _ => {}
@@ -112,6 +118,13 @@ impl TopBar {
         widgets::button(&painter, settings_rect, "Settings", self.focus == Some(Item::Settings), ui.style());
         if ui.interact(settings_rect, egui::Id::new("flex-settings"), Sense::click()).clicked() {
             event = Event::OpenSettings;
+        }
+        let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen).unwrap_or(false);
+        let fs_rect = settings_rect.translate(vec2(-settings_rect.width() - 20.0, 0.0));
+        let fs_label = if fullscreen { "Windowed" } else { "Fullscreen" };
+        widgets::button(&painter, fs_rect, fs_label, self.focus == Some(Item::Fullscreen), ui.style());
+        if ui.interact(fs_rect, egui::Id::new("flex-fullscreen"), Sense::click()).clicked() {
+            event = Event::ToggleFullscreen;
         }
         event
     }

@@ -1,6 +1,7 @@
 //! Walks a library folder and collects its video files.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Result, bail};
@@ -33,16 +34,20 @@ fn is_ignored(entry: &DirEntry) -> bool {
 }
 
 /// Scans `root` recursively. `progress` is called periodically with the number of videos found.
+/// Setting `cancel` stops the scan with an error.
 ///
 /// Fails if `root` isn't an accessible folder, so an unmounted share is never mistaken for
 /// an empty library.
-pub fn scan(root: &Path, mut progress: impl FnMut(usize)) -> Result<ScanResult> {
+pub fn scan(root: &Path, cancel: &AtomicBool, mut progress: impl FnMut(usize)) -> Result<ScanResult> {
     if !root.is_dir() {
         bail!("{} isn't available. Is the drive or share connected?", root.display());
     }
     let mut result = ScanResult::default();
     let walker = WalkDir::new(root).follow_links(true).into_iter().filter_entry(|e| e.depth() == 0 || !is_ignored(e));
     for entry in walker {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("scan cancelled");
+        }
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
@@ -89,14 +94,20 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, b"x").unwrap();
         }
-        let mut found: Vec<_> = scan(&dir, |_| {}).unwrap().files.into_iter().map(|f| f.rel_path).collect();
+        let mut found: Vec<_> = scan(&dir, &AtomicBool::new(false), |_| {}).unwrap().files.into_iter().map(|f| f.rel_path).collect();
         found.sort();
         assert_eq!(found, ["Show/Season 1/ep1.mkv", "movie.MP4"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
+    fn cancel_stops_the_scan() {
+        let dir = std::env::temp_dir();
+        assert!(scan(&dir, &AtomicBool::new(true), |_| {}).is_err());
+    }
+
+    #[test]
     fn missing_root_is_an_error() {
-        assert!(scan(Path::new("/definitely/not/here"), |_| {}).is_err());
+        assert!(scan(Path::new("/definitely/not/here"), &AtomicBool::new(false), |_| {}).is_err());
     }
 }

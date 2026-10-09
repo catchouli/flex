@@ -11,7 +11,10 @@ use crate::input::{Action, Press};
 use crate::shared::Shared;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
-fn list_subdirs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+/// A folder (or drive) choice, with an optional note like "Network drive".
+type Entry = (PathBuf, String);
+
+fn list_subdirs(dir: &Path) -> std::io::Result<Vec<Entry>> {
     let mut dirs = Vec::new();
     for item in std::fs::read_dir(dir)? {
         let item = item?;
@@ -23,26 +26,46 @@ fn list_subdirs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
         let file_type = item.file_type()?;
         let is_dir = if file_type.is_symlink() { item.path().is_dir() } else { file_type.is_dir() };
         if is_dir {
-            dirs.push(item.path());
+            dirs.push((item.path(), String::new()));
         }
     }
-    dirs.sort_by(|a, b| flex_core::natural::natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
+    dirs.sort_by(|a, b| flex_core::natural::natural_cmp(&a.0.to_string_lossy(), &b.0.to_string_lossy()));
     Ok(dirs)
 }
 
+/// Drive letters, straight from Windows. Deliberately never touches the drives themselves:
+/// probing a disconnected network drive can block for a long time.
 #[cfg(windows)]
-fn roots() -> Vec<PathBuf> {
-    (b'A'..=b'Z').map(|l| PathBuf::from(format!("{}:\\", l as char))).filter(|p| p.exists()).collect()
+fn roots() -> Vec<Entry> {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|i| mask & (1 << i) != 0)
+        .map(|i| {
+            let root = format!("{}:\\", (b'A' + i) as char);
+            let wide: Vec<u16> = root.encode_utf16().chain([0]).collect();
+            // DRIVE_* values from winbase.h.
+            let kind = match unsafe { GetDriveTypeW(wide.as_ptr()) } {
+                2 => "Removable drive",
+                3 => "Local disk",
+                4 => "Network drive",
+                5 => "CD/DVD drive",
+                _ => "",
+            };
+            (PathBuf::from(root), kind.to_owned())
+        })
+        .collect()
 }
 
 #[cfg(not(windows))]
-fn roots() -> Vec<PathBuf> {
-    let mut roots = vec![PathBuf::from("/")];
+fn roots() -> Vec<Entry> {
+    let mut roots = Vec::new();
     if let Some(home) = std::env::var_os("HOME") {
-        roots.insert(0, PathBuf::from(home));
+        roots.push((PathBuf::from(home), "Home".to_owned()));
     }
+    roots.push((PathBuf::from("/"), String::new()));
     if Path::new("/Volumes").is_dir() {
-        roots.push(PathBuf::from("/Volumes"));
+        roots.push((PathBuf::from("/Volumes"), "Drives and shares".to_owned()));
     }
     roots
 }
@@ -58,35 +81,33 @@ pub struct FolderPicker {
     dir: Option<PathBuf>,
     /// History of (folder, selected row) to restore when going back up.
     trail: Vec<(Option<PathBuf>, usize)>,
-    dirs: Vec<PathBuf>,
-    pending: Option<Receiver<std::io::Result<Vec<PathBuf>>>>,
+    dirs: Vec<Entry>,
+    pending: Option<Receiver<std::io::Result<Vec<Entry>>>>,
     error: Option<String>,
     list: ListState,
 }
 
 impl FolderPicker {
-    pub fn new() -> Self {
-        Self { dir: None, trail: Vec::new(), dirs: roots(), pending: None, error: None, list: ListState::default() }
+    pub fn new(sh: &Shared) -> Self {
+        let mut picker =
+            Self { dir: None, trail: Vec::new(), dirs: Vec::new(), pending: None, error: None, list: ListState::default() };
+        picker.open(sh, None, 0);
+        picker
     }
 
+    /// Lists `dir` (or the drives) on a background thread: drives and shares can be slow.
     fn open(&mut self, sh: &Shared, dir: Option<PathBuf>, select: usize) {
         self.dir = dir.clone();
         self.error = None;
         self.dirs.clear();
         self.list.select(select);
-        match dir {
-            None => self.dirs = roots(),
-            Some(dir) => {
-                // Listing a share can be slow; don't block the UI on it.
-                let (tx, rx) = std::sync::mpsc::channel();
-                let ctx = sh.ctx.clone();
-                std::thread::spawn(move || {
-                    let _ = tx.send(list_subdirs(&dir));
-                    ctx.request_repaint();
-                });
-                self.pending = Some(rx);
-            }
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = sh.ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(dir.map_or_else(|| Ok(roots()), |d| list_subdirs(&d)));
+            ctx.request_repaint();
+        });
+        self.pending = Some(rx);
     }
 
     fn poll(&mut self) {
@@ -124,7 +145,7 @@ impl Screen for FolderPicker {
                 Nav::replace(KindPicker::new(self.dir.clone().unwrap_or_default()))
             }
             ListInput::Activate(i) => {
-                let target = self.dirs[i - self.offset()].clone();
+                let target = self.dirs[i - self.offset()].0.clone();
                 self.trail.push((self.dir.clone(), i));
                 self.open(sh, Some(target), 0);
                 Nav::None
@@ -146,9 +167,9 @@ impl Screen for FolderPicker {
         if let Some(dir) = &self.dir {
             rows.push(Row::new(Icon::Add, format!("Use “{}” as a library", name_of(dir))));
         }
-        rows.extend(self.dirs.iter().map(|d| {
+        rows.extend(self.dirs.iter().map(|(d, note)| {
             let name = if self.dir.is_none() { d.display().to_string() } else { name_of(d) };
-            Row::new(Icon::Folder, name)
+            Row::new(Icon::Folder, name).detail(note.as_str())
         }));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
