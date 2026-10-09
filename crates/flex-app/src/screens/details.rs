@@ -613,3 +613,41 @@ pub fn open_file(sh: &Shared, library_id: i64, file_id: i64) -> Nav {
         None => Nav::play(sh.play_request(library_id, file_id)),
     }
 }
+
+/// The page of the show or film a file belongs to, for when that isn't known yet (shows
+/// are still being sorted just after starting). Becomes the page once it's known, or goes
+/// away if the file isn't part of one.
+pub struct TitleOf {
+    library_id: i64,
+    file_id: i64,
+}
+
+impl TitleOf {
+    pub fn new(library_id: i64, file_id: i64) -> Self {
+        Self { library_id, file_id }
+    }
+
+    /// The page to show, `Some(None)` if there isn't one, or `None` while still sorting.
+    fn resolve(&self, sh: &Shared) -> Option<Option<TitlePage>> {
+        let state = sh.lib(self.library_id)?;
+        let catalog = state.catalog()?;
+        Some(catalog.show_of_file(self.file_id).map(|s| TitlePage::new(self.library_id, s.show.id)))
+    }
+}
+
+impl Screen for TitleOf {
+    fn handle(&mut self, _sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) { Nav::Pop } else { Nav::None }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, _focused: bool) -> Nav {
+        match self.resolve(sh) {
+            Some(Some(page)) => Nav::replace(page),
+            Some(None) => Nav::Pop,
+            None => {
+                widgets::message(ui.painter(), rect, "Sorting shows…", ui.style());
+                Nav::None
+            }
+        }
+    }
+}

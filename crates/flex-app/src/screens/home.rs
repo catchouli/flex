@@ -7,7 +7,7 @@ use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
 use super::browse::{ShowsView, Source};
-use super::details::TitlePage;
+use super::details::{TitleOf, TitlePage};
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -107,8 +107,13 @@ impl Home {
         let key: Vec<(i64, u64)> = sh.libs.iter().map(|l| (l.lib.id, l.version)).collect();
         if self.items_key.as_ref() != Some(&key) {
             let was_empty = self.items.is_empty();
+            let selected = self.items.get(self.cont).map(|i| i.file_id);
             self.items = sh.continue_watching(MAX_CONTINUE);
             self.items_key = Some(key);
+            // Keep the same item selected when the row reorders (e.g. once shows are sorted).
+            if let Some(i) = selected.and_then(|id| self.items.iter().position(|i| i.file_id == id)) {
+                self.cont = i;
+            }
             // Something new to continue: that's most likely what you want next.
             if was_empty && !self.items.is_empty() {
                 self.section = Section::Continue;
@@ -137,12 +142,13 @@ impl Home {
             _ if press.is_activate() => {
                 let Some(i) = item else { return Nav::None };
                 let Some(req) = sh.play_request(i.library_id, i.file_id) else { return Nav::None };
-                // Back from the player returns to the show rather than Home.
-                let show = sh.lib(i.library_id).and_then(|l| l.catalog()?.show_of_file(i.file_id));
-                return match show {
-                    Some(s) => Nav::PlayOver { screen: Box::new(TitlePage::new(i.library_id, s.show.id)), req },
-                    None => Nav::Play { req, replace: false },
+                // Back from the player returns to the show or film's page rather than Home.
+                let screen: Box<dyn Screen> = match sh.lib(i.library_id).and_then(|l| l.catalog()?.show_of_file(i.file_id)) {
+                    Some(s) => Box::new(TitlePage::new(i.library_id, s.show.id)),
+                    // Shows are still being sorted: the page appears once they are.
+                    None => Box::new(TitleOf::new(i.library_id, i.file_id)),
                 };
+                return Nav::PlayOver { screen, req };
             }
             _ => {}
         }
