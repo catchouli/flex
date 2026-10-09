@@ -10,7 +10,8 @@ fn main() -> anyhow::Result<()> {
     println!("S1: {} episodes, e.g. {:?}", eps.len(), eps.iter().take(2).map(|e| &e.title).collect::<Vec<_>>());
     let m = tmdb.details("movie:5825")?;
     println!("{} {:?} {:?} min, cast[0] {:?}", m.title, m.release_date, m.runtime, m.cast.first().map(|c| (&c.name, &c.role)));
-    let va = flex_core::metadata::anilist_voice_cast("Dorohedoro")?;
-    println!("VAs: {:?}", va.iter().take(3).map(|c| format!("{} as {}", c.name, c.role)).collect::<Vec<_>>());
+    let info = flex_core::metadata::anilist_info("Attack on Titan")?;
+    println!("titles: {:?}", info.titles);
+    println!("VAs: {:?}", info.cast.iter().take(3).map(|c| format!("{} as {}", c.name, c.role)).collect::<Vec<_>>());
     Ok(())
 }

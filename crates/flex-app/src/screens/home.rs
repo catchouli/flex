@@ -6,7 +6,7 @@ use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
-use super::browse::ShowsView;
+use super::browse::{ShowsView, Source};
 use super::details::TitlePage;
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::input::{Action, Press};
@@ -119,7 +119,7 @@ impl Home {
             self.section = Section::Libraries;
         }
         self.cont = self.cont.min(self.items.len().saturating_sub(1));
-        self.lib = self.lib.min(sh.libs.len().saturating_sub(1));
+        self.lib = self.lib.min(sh.libs.len().max(1));
     }
 
     fn handle_continue(&mut self, sh: &Shared, press: Press) -> Nav {
@@ -150,7 +150,8 @@ impl Home {
     }
 
     fn handle_libraries(&mut self, sh: &Shared, press: Press) -> Nav {
-        let count = sh.libs.len().max(1); // an "Add library" card when empty
+        // The Watchlist card, then each library (or an "Add library" card when there are none).
+        let count = 1 + sh.libs.len().max(1);
         let cols = self.lib_columns.max(1);
         match press.action {
             Action::Left => self.lib = self.lib.saturating_sub(1),
@@ -166,8 +167,11 @@ impl Home {
             }
             Action::Up => self.lib -= cols,
             Action::Down if self.lib + cols < count => self.lib += cols,
+            _ if press.is_activate() && self.lib == 0 => {
+                return Nav::push(ShowsView::with_source(sh, Source::Watchlist));
+            }
             _ if press.is_activate() => {
-                return match sh.libs.get(self.lib) {
+                return match sh.libs.get(self.lib - 1) {
                     Some(l) => match sh.library_view(l.lib.id) {
                         crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(sh, l.lib.id)),
                         crate::shared::LibraryView::Folders => Nav::push(LibraryView::new(l.lib.id, String::new())),
@@ -203,7 +207,7 @@ impl Screen for Home {
         // selection is visible, then draw clipped to `rect`.
         let lib_columns = (((rect.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
         let cont_h = if self.items.is_empty() { 0.0 } else { HEADER_H + CONTINUE_CARD[1] + SECTION_GAP };
-        let lib_rows = sh.libs.len().max(1).div_ceil(lib_columns);
+        let lib_rows = (1 + sh.libs.len().max(1)).div_ceil(lib_columns);
         let content_h = cont_h + HEADER_H + lib_rows as f32 * (LIBRARY_CARD[1] + GAP);
         if std::mem::take(&mut self.reveal_selection) {
             let (sel_top, sel_bottom) = match self.section {
@@ -259,13 +263,20 @@ impl Screen for Home {
             Rect::from_min_size(min, LIBRARY_CARD.into())
         };
         let libs_focused = focused && self.section == Section::Libraries;
+        let listed = sh.watchlist_shows().len();
+        let count = match listed {
+            0 => "Nothing added yet".to_owned(),
+            1 => "1 title".to_owned(),
+            n => format!("{n} titles"),
+        };
+        widgets::card(painter, card_rect(0), "Watchlist", &["Shows and films to watch", &count], libs_focused && self.lib == 0, &style);
         if sh.libs.is_empty() {
-            widgets::card(painter, card_rect(0), "Add library", &["Pick a folder to get started"], libs_focused, &style);
+            widgets::card(painter, card_rect(1), "Add library", &["Pick a folder to get started"], libs_focused && self.lib == 1, &style);
         }
         for (i, l) in sh.libs.iter().enumerate() {
             let status = l.status();
             let lines = [l.lib.kind.label(), status.as_str()];
-            widgets::card(painter, card_rect(i), &l.lib.name, &lines, libs_focused && i == self.lib, &style);
+            widgets::card(painter, card_rect(i + 1), &l.lib.name, &lines, libs_focused && i + 1 == self.lib, &style);
         }
         Nav::None
     }

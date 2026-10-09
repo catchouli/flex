@@ -30,6 +30,8 @@ const SECTION_GAP: f32 = 44.0;
 enum Button {
     Play { label: String, req: PlayRequest },
     MarkWatched(bool),
+    /// Add to (true) or remove from the watchlist.
+    Watchlist(bool),
     Folders,
     MatchOnline,
 }
@@ -40,6 +42,8 @@ impl Button {
             Button::Play { label, .. } => label.clone(),
             Button::MarkWatched(true) => "Mark watched".into(),
             Button::MarkWatched(false) => "Mark unwatched".into(),
+            Button::Watchlist(true) => "+ Watchlist".into(),
+            Button::Watchlist(false) => "On watchlist ✓".into(),
             Button::Folders => "Folders & seasons…".into(),
             Button::MatchOnline => "Match online…".into(),
         }
@@ -227,6 +231,7 @@ impl TitlePage {
         };
         let all_watched = entry.episodes.iter().all(|e| state.tree.file(e.file_id).is_some_and(|f| f.progress.watched));
         buttons.push(Button::MarkWatched(!all_watched));
+        buttons.push(Button::Watchlist(!sh.on_watchlist(self.library_id, self.show_id)));
         buttons.push(Button::MatchOnline);
         buttons.push(Button::Folders);
         buttons
@@ -305,6 +310,10 @@ impl Screen for TitlePage {
                         .and_then(|l| l.catalog()?.show(self.show_id))
                         .map_or_else(Vec::new, |e| e.episodes.iter().map(|e| e.file_id).collect());
                     sh.set_watched(self.library_id, &ids, w);
+                    Nav::None
+                }
+                Some(Button::Watchlist(on)) => {
+                    sh.set_watchlist(self.library_id, self.show_id, on);
                     Nav::None
                 }
                 Some(Button::MatchOnline) => Nav::push(MatchOnline::new(sh, self.library_id, self.show_id)),

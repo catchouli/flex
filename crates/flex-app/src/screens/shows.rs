@@ -118,12 +118,17 @@ impl Screen for ShowOptions {
             return Nav::Pop;
         };
         let ids: Vec<i64> = entry.episodes.iter().map(|e| e.file_id).collect();
-        match self.list.handle(press, 4) {
-            ListInput::Activate(i @ (0 | 1)) => {
-                sh.set_watched(self.library_id, &ids, i == 0);
+        match self.list.handle(press, 5) {
+            ListInput::Activate(0) => {
+                let on = !sh.on_watchlist(self.library_id, self.show_id);
+                sh.set_watchlist(self.library_id, self.show_id, on);
                 Nav::Pop
             }
-            ListInput::Activate(2) => Nav::replace(MatchOnline::new(sh, self.library_id, self.show_id)),
+            ListInput::Activate(i @ (1 | 2)) => {
+                sh.set_watched(self.library_id, &ids, i == 1);
+                Nav::Pop
+            }
+            ListInput::Activate(3) => Nav::replace(MatchOnline::new(sh, self.library_id, self.show_id)),
             ListInput::Activate(_) => Nav::replace(MatchInspector::new(self.library_id, self.show_id)),
             _ => Nav::None,
         }
@@ -134,7 +139,13 @@ impl Screen for ShowOptions {
             return Nav::Pop;
         };
         let body = widgets::header(ui.painter(), rect, &title_with_year(entry), "Options", ui.style());
+        let watchlist = if sh.on_watchlist(self.library_id, self.show_id) {
+            Row::new(Icon::Remove, "Remove from watchlist")
+        } else {
+            Row::new(Icon::Add, "Add to watchlist")
+        };
         let rows = [
+            watchlist,
             Row::new(Icon::Add, "Mark all as watched"),
             Row::new(Icon::Remove, "Mark all as unwatched"),
             Row::new(Icon::Refresh, "Match online…").detail("Pick the right title on TMDB"),

@@ -171,6 +171,12 @@ pub struct Shared {
     pub libs: Vec<LibState>,
     pub search_query: String,
     pub images: crate::images::Images,
+    /// Other titles (romaji etc.) by provider id, searched alongside the main title.
+    alt_titles: HashMap<String, Vec<String>>,
+    /// (key, library id, added at), most recent first.
+    watchlist: Vec<(String, i64, i64)>,
+    /// Bumped whenever the watchlist changes, so screens showing it refresh.
+    pub watchlist_version: u64,
     /// Episode titles etc. for matched series, by provider id ("tv:123").
     pub series: HashMap<String, flex_core::db::SeriesMeta>,
     /// The window's monitor refresh rate, for smooth video timing.
@@ -197,6 +203,9 @@ impl Shared {
             libs: Vec::new(),
             search_query: String::new(),
             series: HashMap::new(),
+            alt_titles: HashMap::new(),
+            watchlist: Vec::new(),
+            watchlist_version: 0,
             images: crate::images::Images::new(ctx, flex_core::data_dir().join("images")),
             display_fps: None,
             search: None,
@@ -206,6 +215,8 @@ impl Shared {
             toasts: Vec::new(),
         };
         shared.series = shared.db.series_meta()?;
+        shared.alt_titles = shared.db.alt_titles()?;
+        shared.watchlist = shared.db.watchlist()?;
         if shared.db.setting(MATCHER_VERSION_SETTING)?.as_deref() != Some(MATCHER_VERSION) {
             for lib in shared.db.libraries()? {
                 shared.db.reset_matching(lib.id)?;
@@ -552,8 +563,8 @@ impl Shared {
                 ctx.request_repaint();
                 for (i, (show_id, provider_id, title)) in voice_todo.iter().enumerate() {
                     progress(todo.len() + i + 1);
-                    match flex_core::metadata::anilist_voice_cast(title) {
-                        Ok(cast) => db.save_voice_cast(*show_id, provider_id, &cast)?,
+                    match flex_core::metadata::anilist_info(title) {
+                        Ok(info) => db.save_anilist(*show_id, provider_id, &info)?,
                         // Network trouble: try again next time.
                         Err(e) => log::warn!("voice cast for {title:?}: {e:#}"),
                     }
@@ -571,8 +582,49 @@ impl Shared {
             Ok(series) => self.series = series,
             Err(e) => log::warn!("loading episode titles: {e:#}"),
         }
+        match self.db.alt_titles() {
+            Ok(alt) => self.alt_titles = alt,
+            Err(e) => log::warn!("loading other titles: {e:#}"),
+        }
         self.rebuild_catalog(id);
         self.search = None;
+    }
+
+    /// The watchlist key for a show: its TMDB entry, or its local id if unmatched.
+    fn watchlist_key(&self, library_id: i64, show_id: i64) -> Option<String> {
+        let entry = self.lib(library_id)?.catalog()?.show(show_id)?;
+        Some(entry.show.provider_id.clone().unwrap_or_else(|| format!("local:{show_id}")))
+    }
+
+    pub fn on_watchlist(&self, library_id: i64, show_id: i64) -> bool {
+        self.watchlist_key(library_id, show_id).is_some_and(|k| self.watchlist.iter().any(|(w, _, _)| *w == k))
+    }
+
+    pub fn set_watchlist(&mut self, library_id: i64, show_id: i64, on: bool) {
+        let Some(key) = self.watchlist_key(library_id, show_id) else { return };
+        match self.db.set_watchlist(&key, library_id, on).and_then(|()| self.db.watchlist()) {
+            Ok(list) => {
+                self.watchlist = list;
+                self.watchlist_version += 1;
+                self.toast(if on { "Added to watchlist" } else { "Removed from watchlist" });
+            }
+            Err(e) => self.toast(format!("Couldn't update the watchlist: {e:#}")),
+        }
+    }
+
+    /// Watchlist shows that are still in a library: (library id, show id, added at).
+    pub fn watchlist_shows(&self) -> Vec<(i64, i64, i64)> {
+        self.watchlist
+            .iter()
+            .filter_map(|(key, library_id, added)| {
+                let catalog = self.lib(*library_id)?.catalog()?;
+                let show = match key.strip_prefix("local:") {
+                    Some(id) => catalog.show(id.parse().ok()?)?,
+                    None => catalog.shows.iter().find(|s| s.show.provider_id.as_deref() == Some(key))?,
+                };
+                Some((*library_id, show.show.id, *added))
+            })
+            .collect()
     }
 
     /// Display names for a file: show and episode titles from online metadata where
@@ -897,7 +949,10 @@ impl Shared {
         for l in &self.libs {
             if let Some(catalog) = l.catalog() {
                 for entry in &catalog.shows {
-                    let also: Vec<String> = entry.groups.iter().map(|g| g.title.clone()).collect();
+                    let mut also: Vec<String> = entry.groups.iter().map(|g| g.title.clone()).collect();
+                    if let Some(alt) = entry.show.provider_id.as_ref().and_then(|p| self.alt_titles.get(p)) {
+                        also.extend(alt.iter().cloned());
+                    }
                     let context = match entry.show.year {
                         Some(y) => format!("{} · {y}", l.lib.name),
                         None => l.lib.name.clone(),

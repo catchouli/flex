@@ -317,16 +317,39 @@ pub fn map_episode(season: i32, episode: i32, seasons: &[SeasonInfo]) -> Option<
     None
 }
 
-/// Main characters and their Japanese voice actors, from AniList (for anime).
-pub fn anilist_voice_cast(title: &str) -> Result<Vec<CastMember>> {
+/// What AniList knows about an anime: its other titles and the Japanese voice cast.
+#[derive(Clone, Debug, Default)]
+pub struct AniListInfo {
+    /// Romaji, English, native titles and synonyms.
+    pub titles: Vec<String>,
+    pub cast: Vec<CastMember>,
+}
+
+/// Looks an anime up on AniList (one request).
+pub fn anilist_info(title: &str) -> Result<AniListInfo> {
     let body = serde_json::json!({
-        "query": "query($s:String){Media(search:$s,type:ANIME){characters(sort:[ROLE,RELEVANCE],perPage:16){edges{node{name{full}}voiceActors(language:JAPANESE){name{full}image{medium}}}}}}",
+        "query": "query($s:String){Media(search:$s,type:ANIME){title{romaji english native} synonyms characters(sort:[ROLE,RELEVANCE],perPage:16){edges{node{name{full}}voiceActors(language:JAPANESE){name{full}image{medium}}}}}}",
         "variables": { "s": title },
     });
     anilist_wait();
-    let value: serde_json::Value = agent().post(ANILIST_API).send_json(&body).context("AniList characters")?.body_mut().read_json()?;
+    let value: serde_json::Value = match agent().post(ANILIST_API).send_json(&body) {
+        Ok(mut response) => response.body_mut().read_json()?,
+        // AniList answers 404 when nothing matches: that's an answer, not an error.
+        Err(ureq::Error::StatusCode(404)) => return Ok(AniListInfo::default()),
+        Err(e) => return Err(e).context("AniList lookup"),
+    };
+    let media = &value["data"]["Media"];
+    let mut titles: Vec<String> = Vec::new();
+    let names = ["romaji", "english", "native"].iter().map(|k| &media["title"][*k]);
+    for t in names.chain(media["synonyms"].as_array().into_iter().flatten()) {
+        if let Some(t) = t.as_str().filter(|t| !t.is_empty())
+            && !titles.iter().any(|x| x == t)
+        {
+            titles.push(t.to_owned());
+        }
+    }
     let mut cast = Vec::new();
-    for edge in value["data"]["Media"]["characters"]["edges"].as_array().into_iter().flatten() {
+    for edge in media["characters"]["edges"].as_array().into_iter().flatten() {
         let character = str_of(&edge["node"]["name"]["full"]);
         if let Some(va) = edge["voiceActors"].as_array().and_then(|v| v.first()) {
             cast.push(CastMember {
@@ -336,7 +359,7 @@ pub fn anilist_voice_cast(title: &str) -> Result<Vec<CastMember>> {
             });
         }
     }
-    Ok(cast)
+    Ok(AniListInfo { titles, cast })
 }
 
 /// Alternative titles for an anime from AniList (English, romaji, native), to retry TMDB with.

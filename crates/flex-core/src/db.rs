@@ -109,6 +109,20 @@ const MIGRATIONS: &[&str] = &[
     );",
     // 6: when Japanese voice actors were last looked up (anime)
     "ALTER TABLE shows ADD COLUMN voice_at INTEGER;",
+    // 7: other titles (romaji etc., searched too) and the watchlist. The AniList pass is
+    // redone once to collect titles.
+    "CREATE TABLE alt_titles (
+        provider_id TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        PRIMARY KEY (provider_id, title)
+    );
+    UPDATE shows SET voice_at = NULL;
+    -- keyed by provider id ('tv:1'), or 'local:<show id>' for unmatched shows
+    CREATE TABLE watchlist (
+        key        TEXT PRIMARY KEY,
+        library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        added_at   INTEGER NOT NULL
+    );",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -466,12 +480,46 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Stores a show's voice cast (if any was found) and notes that it was looked up.
-    pub fn save_voice_cast(&self, show_id: i64, provider_id: &str, cast: &[crate::metadata::CastMember]) -> Result<()> {
-        if !cast.is_empty() {
-            Self::replace_credits(&self.conn, provider_id, "voice", cast)?;
+    /// Stores what AniList had for a show (voice cast, other titles) and notes that it was
+    /// looked up.
+    pub fn save_anilist(&self, show_id: i64, provider_id: &str, info: &crate::metadata::AniListInfo) -> Result<()> {
+        if !info.cast.is_empty() {
+            Self::replace_credits(&self.conn, provider_id, "voice", &info.cast)?;
+        }
+        for t in &info.titles {
+            self.conn.execute("INSERT OR IGNORE INTO alt_titles (provider_id, title) VALUES (?1, ?2)", params![provider_id, t])?;
         }
         self.conn.execute("UPDATE shows SET voice_at = strftime('%s', 'now') WHERE id = ?1", [show_id])?;
+        Ok(())
+    }
+
+    /// Other titles by provider id.
+    pub fn alt_titles(&self) -> Result<HashMap<String, Vec<String>>> {
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        let mut stmt = self.conn.prepare("SELECT provider_id, title FROM alt_titles")?;
+        for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (pid, title) = row?;
+            out.entry(pid).or_default().push(title);
+        }
+        Ok(out)
+    }
+
+    /// Watchlist entries: (key, library id, added at), most recent first.
+    pub fn watchlist(&self) -> Result<Vec<(String, i64, i64)>> {
+        let mut stmt = self.conn.prepare("SELECT key, library_id, added_at FROM watchlist ORDER BY added_at DESC")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_watchlist(&self, key: &str, library_id: i64, on: bool) -> Result<()> {
+        if on {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO watchlist (key, library_id, added_at) VALUES (?1, ?2, strftime('%s', 'now'))",
+                params![key, library_id],
+            )?;
+        } else {
+            self.conn.execute("DELETE FROM watchlist WHERE key = ?1", [key])?;
+        }
         Ok(())
     }
 
