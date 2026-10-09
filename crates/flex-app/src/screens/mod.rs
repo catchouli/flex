@@ -2,6 +2,7 @@
 //! end screen always return to the view playback was started from.
 
 pub mod browse;
+pub mod details;
 pub mod history;
 pub mod home;
 pub mod inspector;

@@ -155,6 +155,53 @@ pub fn continue_watching_shows<'a>(
     candidates.into_iter().take(limit).map(|(_, c)| c).collect()
 }
 
+/// What a show or film page's main button should play.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NextUp {
+    /// An episode (or the film) partway through.
+    Resume(i64),
+    /// The next unwatched episode.
+    Next(i64),
+    /// Everything or nothing watched: the first episode, from the start.
+    Start(i64),
+}
+
+impl NextUp {
+    pub fn file_id(self) -> i64 {
+        match self {
+            NextUp::Resume(id) | NextUp::Next(id) | NextUp::Start(id) => id,
+        }
+    }
+}
+
+/// Picks what to play next for a show or film: the most recently played episode in
+/// progress, else the first unwatched episode after the last one played (or the first
+/// unwatched overall), else the first episode. Specials are skipped unless that's all
+/// there is.
+pub fn next_up(show: &crate::catalog::ShowEntry, tree: &Tree) -> Option<NextUp> {
+    let progress = |id: i64| tree.file(id).map(|f| f.progress).unwrap_or_default();
+    let regular: Vec<_> = show.episodes.iter().filter(|e| e.season != 0).collect();
+    let list: Vec<_> = if regular.is_empty() { show.episodes.iter().collect() } else { regular };
+    if let Some(e) = list
+        .iter()
+        .filter(|e| progress(e.file_id).position.is_some())
+        .max_by_key(|e| progress(e.file_id).last_played)
+    {
+        return Some(NextUp::Resume(e.file_id));
+    }
+    let unwatched = |e: &&&crate::catalog::Episode| !progress(e.file_id).watched;
+    if let Some(latest) = list.iter().enumerate().filter(|(_, e)| progress(e.file_id).last_played.is_some()).max_by_key(|(_, e)| progress(e.file_id).last_played)
+        && let Some(next) = list[latest.0 + 1..].iter().find(unwatched)
+    {
+        return Some(NextUp::Next(next.file_id));
+    }
+    let any_watched = list.iter().any(|e| progress(e.file_id).watched);
+    match list.iter().find(unwatched) {
+        Some(next) if any_watched => Some(NextUp::Next(next.file_id)),
+        _ => list.first().map(|e| NextUp::Start(e.file_id)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +250,33 @@ mod tests {
         // Up next / next-episode stops at the end of a season.
         assert_eq!(cat.neighbour_in_season(1, 1), Some(2));
         assert_eq!(cat.neighbour_in_season(2, 1), None);
+    }
+
+    #[test]
+    fn next_up_rules() {
+        use crate::catalog::{self, Catalog};
+        use crate::db::{GroupMatch, Show};
+        let build = |progress: [Progress; 3]| {
+            let tree = Tree::new(vec![
+                file(1, 1, "S/S - 01.mkv", progress[0]),
+                file(2, 1, "S/S - 02.mkv", progress[1]),
+                file(3, 1, "S/S - 03.mkv", progress[2]),
+            ]);
+            let parsed = crate::parse::parse_episodes(tree.files());
+            let groups = catalog::derive_groups(LibraryKind::Anime, &tree, &parsed);
+            let show = Show { id: 1, library_id: 1, title: "S".into(), ..Default::default() };
+            let m = GroupMatch { group_key: "S".into(), show_id: 1, season: None, manual: false };
+            let cat = Catalog::build(&tree, &parsed, &groups, vec![show], &[m]);
+            next_up(&cat.shows[0], &tree)
+        };
+        let none = Progress::default();
+        let done = |t| played(t, None, true);
+        assert_eq!(build([none, none, none]), Some(NextUp::Start(1)));
+        assert_eq!(build([done(1), none, none]), Some(NextUp::Next(2)));
+        assert_eq!(build([done(1), played(2, Some(30.0), false), none]), Some(NextUp::Resume(2)));
+        assert_eq!(build([done(1), done(2), done(3)]), Some(NextUp::Start(1)));
+        // Rewatched episode 3 last: the gap at 2 is offered next.
+        assert_eq!(build([done(1), none, done(5)]), Some(NextUp::Next(2)));
     }
 
     #[test]

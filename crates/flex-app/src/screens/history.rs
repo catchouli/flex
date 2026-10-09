@@ -58,7 +58,7 @@ impl Screen for HistoryView {
         }
         match self.list.handle(press, self.entries.len()) {
             ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::Activate(i) => Nav::play(sh.play_request(library_id, self.entries[i].file_id)),
+            ListInput::Activate(i) => super::details::open_file(sh, library_id, self.entries[i].file_id),
             ListInput::None => Nav::None,
         }
     }

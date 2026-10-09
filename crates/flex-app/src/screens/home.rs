@@ -7,7 +7,7 @@ use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
 use super::browse::ShowsView;
-use super::shows::ShowView;
+use super::details::TitlePage;
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -140,10 +140,8 @@ impl Home {
                 // Back from the player returns to the show rather than Home.
                 let show = sh.lib(i.library_id).and_then(|l| l.catalog()?.show_of_file(i.file_id));
                 return match show {
-                    Some(s) if s.is_series() => {
-                        Nav::PlayOver { screen: Box::new(ShowView::new(i.library_id, s.show.id)), req }
-                    }
-                    _ => Nav::Play { req, replace: false },
+                    Some(s) => Nav::PlayOver { screen: Box::new(TitlePage::new(i.library_id, s.show.id)), req },
+                    None => Nav::Play { req, replace: false },
                 };
             }
             _ => {}

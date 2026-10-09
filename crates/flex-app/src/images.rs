@@ -15,7 +15,7 @@ use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 pub enum Size {
     /// Show/film posters.
     Poster,
-    /// Episode stills.
+    /// Episode stills on an episode's page.
     Still,
     /// Actor photos.
     Profile,
@@ -28,7 +28,7 @@ impl Size {
     fn spec(self) -> (&'static str, u32) {
         match self {
             Size::Poster => ("w342", 513),
-            Size::Still => ("w300", 300),
+            Size::Still => ("w780", 780),
             Size::Profile => ("w185", 278),
             Size::Backdrop => ("w1280", 1280),
         }
