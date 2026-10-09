@@ -59,11 +59,21 @@ impl Default for Home {
 }
 
 fn describe(sh: &Shared, item: &ContinueItem) -> Option<CardText> {
-    let file = sh.lib(item.library_id)?.tree.file(item.file_id)?;
+    let state = sh.lib(item.library_id)?;
+    let file = state.tree.file(item.file_id)?;
     let episode = display_name(file.file_name(), true);
-    let show = match file.rel_path.split_once('/') {
-        Some((top, _)) => display_name(top, false),
-        None => episode.clone(), // a movie at the library root
+    // The show's (matched) title once organised; the top folder name until then.
+    let entry = state.catalog().and_then(|c| c.show_of_file(item.file_id));
+    let show = match (entry, file.rel_path.split_once('/')) {
+        (Some(e), _) => e.show.title.clone(),
+        (None, Some((top, _))) => display_name(top, false),
+        (None, None) => episode.clone(), // a movie at the library root
+    };
+    let episode = match entry.and_then(|e| e.episodes.iter().find(|ep| ep.file_id == item.file_id)) {
+        Some(ep) if ep.season > 0 && ep.number.is_some() => {
+            format!("S{}E{} · {episode}", ep.season, ep.number.unwrap_or_default())
+        }
+        _ => episode,
     };
     let episode = if show == episode { String::new() } else { episode };
     let (status, fraction) = match item.kind {
