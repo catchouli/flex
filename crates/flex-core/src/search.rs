@@ -119,7 +119,7 @@ mod tests {
             paths
                 .iter()
                 .enumerate()
-                .map(|(i, p)| MediaFile { id: i as i64, library_id: 1, rel_path: (*p).into(), size: 0, mtime: 0 })
+                .map(|(i, p)| MediaFile { id: i as i64, library_id: 1, rel_path: (*p).into(), ..Default::default() })
                 .collect(),
         );
         let mut index = SearchIndex::build([(&lib, &tree)]);

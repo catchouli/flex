@@ -5,9 +5,11 @@ use eframe::egui::{Rect, Ui};
 use flex_core::library::display_name;
 use flex_core::tree::Node;
 
+use super::options::{OptionsMenu, Target};
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
 use crate::shared::{Shared, thousands};
+use crate::theme;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 pub struct LibraryView {
@@ -42,11 +44,30 @@ pub fn open_folder(sh: &Shared, library_id: i64, rel: &str) -> Nav {
     }
 }
 
+/// A video row: dimmed with "Watched" once watched, time left and a bar if partway.
+pub fn file_row(f: &flex_core::MediaFile) -> Row {
+    let p = f.progress;
+    let row = Row::new(Icon::Video, display_name(f.file_name(), true));
+    match p.remaining_secs() {
+        Some(left) => row.detail(theme::format_remaining(left)).progress(p.fraction()),
+        None if p.watched => row.detail("Watched").dim(true),
+        None => row,
+    }
+}
+
 impl Screen for LibraryView {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
         self.refresh(sh);
         if press.is(Action::Back) {
             return Nav::Pop;
+        }
+        if press.is(Action::Menu) {
+            let library_id = self.library_id;
+            return match self.nodes.get(self.list.selected) {
+                Some(Node::Dir { rel, .. }) => Nav::push(OptionsMenu::new(Target::Folder { library_id, rel: rel.clone() })),
+                Some(Node::File(f)) => Nav::push(OptionsMenu::new(Target::File { library_id, file_id: f.id })),
+                None => Nav::None,
+            };
         }
         match self.list.handle(press, self.nodes.len()) {
             ListInput::AtTop => Nav::FocusTopBar,
@@ -82,11 +103,19 @@ impl Screen for LibraryView {
             .nodes
             .iter()
             .map(|n| match n {
-                Node::Dir { name, videos, .. } => Row::new(Icon::Folder, name.as_str()).detail(match videos {
-                    1 => "1 video".to_owned(),
-                    n => format!("{} videos", thousands(*n)),
-                }),
-                Node::File(f) => Row::new(Icon::Video, display_name(f.file_name(), true)),
+                Node::Dir { name, videos, unwatched, .. } => {
+                    let count = match videos {
+                        1 => "1 video".to_owned(),
+                        n => format!("{} videos", thousands(*n)),
+                    };
+                    let detail = match unwatched {
+                        0 => "All watched".to_owned(),
+                        u if u == videos => count,
+                        u => format!("{count} · {} unwatched", thousands(*u)),
+                    };
+                    Row::new(Icon::Folder, name.as_str()).detail(detail).dim(*unwatched == 0)
+                }
+                Node::File(f) => file_row(f),
             })
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);

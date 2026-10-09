@@ -45,7 +45,7 @@ pub struct Library {
     pub kind: LibraryKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MediaFile {
     pub id: i64,
     pub library_id: i64,
@@ -53,6 +53,7 @@ pub struct MediaFile {
     pub rel_path: String,
     pub size: u64,
     pub mtime: i64,
+    pub progress: crate::progress::Progress,
 }
 
 impl MediaFile {

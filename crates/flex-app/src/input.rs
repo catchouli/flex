@@ -33,6 +33,8 @@ pub enum Action {
     Search,
     /// Remote zoom-in (HID zoom-in / Ctrl + "=" / Ctrl+wheel up): toggles fullscreen.
     ZoomIn,
+    /// Holding OK, or right-click: options for the selected item (mark watched, ...).
+    Menu,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,7 +61,6 @@ fn map_key(key: Key) -> Option<Action> {
         Key::ArrowDown => Action::Down,
         Key::ArrowLeft => Action::Left,
         Key::ArrowRight => Action::Right,
-        Key::Enter => Action::Ok,
         Key::Space => Action::PlayPause,
         Key::PageDown => Action::PageDown,
         Key::PageUp => Action::PageUp,
@@ -86,6 +87,8 @@ pub fn back_held(ctx: &egui::Context) -> bool {
 }
 
 const LOG_LEN: usize = 12;
+/// Holding OK this long opens the options menu instead of activating.
+pub const LONG_PRESS_SECS: f64 = 0.5;
 /// Ctrl+wheel sends a burst of events per flick; treat it as one press at most this often.
 /// (Buttons are single events and aren't limited.)
 const WHEEL_ZOOM_DEBOUNCE_SECS: f64 = 0.8;
@@ -94,6 +97,8 @@ const WHEEL_ZOOM_DEBOUNCE_SECS: f64 = 0.8;
 pub struct InputLog {
     entries: VecDeque<String>,
     last_wheel_zoom: Option<f64>,
+    /// When OK (Enter) went down, and whether that press already became a Menu.
+    ok_down: Option<(f64, bool)>,
 }
 
 impl InputLog {
@@ -122,12 +127,44 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
         presses.push(Press { action, repeat: false });
     }
     if text_focused {
+        log.ok_down = None;
         return presses;
     }
+    // OK fires on release so that holding it can open the menu instead.
+    let (now, enter_down) = ctx.input(|i| (i.time, i.key_down(Key::Enter)));
+    let mut open_menu = false;
+    if let Some((since, fired)) = &mut log.ok_down
+        && !*fired
+        && enter_down
+    {
+        let held = now - *since;
+        if held >= LONG_PRESS_SECS {
+            *fired = true;
+            open_menu = true;
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(LONG_PRESS_SECS - held));
+        }
+    }
+    if open_menu {
+        log.push("Key Enter (held)  ->  Menu".to_owned());
+        presses.push(Press { action: Action::Menu, repeat: false });
+    }
     ctx.input(|i| {
-        let now = i.time;
         for event in &i.events {
             let (raw, action, repeat) = match event {
+                Event::Key { key: Key::Enter, pressed, repeat, modifiers, .. } if modifiers.is_none() => {
+                    match (*pressed, *repeat) {
+                        (true, false) => {
+                            log.ok_down = Some((now, false));
+                            continue;
+                        }
+                        (false, _) => match log.ok_down.take() {
+                            Some((_, false)) => ("Key Enter".to_owned(), Some(Action::Ok), false),
+                            _ => continue, // already opened the menu, or the press began elsewhere
+                        },
+                        (true, true) => continue,
+                    }
+                }
                 Event::Key { key, physical_key, pressed: true, repeat, modifiers } => {
                     let physical = physical_key.filter(|p| p != key).map(|p| format!(" (physical {p:?})"));
                     let mods = (!modifiers.is_none()).then(|| format!(" +{modifiers:?}"));
@@ -143,7 +180,11 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
                     (raw, action, *repeat)
                 }
                 Event::PointerButton { button, pressed: true, .. } => {
-                    let action = (*button == PointerButton::Extra1).then_some(Action::Back);
+                    let action = match button {
+                        PointerButton::Extra1 => Some(Action::Back),
+                        PointerButton::Secondary => Some(Action::Menu),
+                        _ => None,
+                    };
                     (format!("Mouse {button:?}"), action, false)
                 }
                 // Some air mice send Ctrl + scroll wheel for their zoom buttons. Only

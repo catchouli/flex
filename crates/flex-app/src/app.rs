@@ -5,7 +5,7 @@ use eframe::egui::{self, Align2, CornerRadius, Key, Rect, TextStyle, ViewportCom
 
 use crate::input::{self, Action, InputLog, Press};
 use crate::player::Player;
-use crate::screens::{Nav, Screen, home::Home, search::SearchView, settings::Settings};
+use crate::screens::{Nav, Screen, home::Home, resume::ResumePrompt, search::SearchView, settings::Settings};
 use crate::shared::{PlayRequest, Shared};
 use crate::theme;
 use crate::topbar::{self, TopBar};
@@ -60,7 +60,7 @@ impl FlexApp {
         };
         if let Some(path) = start.filter(|p| p.is_file() && flex_core::library::is_video(p)) {
             let title = flex_core::library::display_name(&path.file_name().unwrap_or_default().to_string_lossy(), true);
-            let req = PlayRequest { path, title, library_id: -1, file_id: -1 };
+            let req = PlayRequest { path, title, library_id: -1, file_id: -1, start: Some(0.0) };
             app.apply(&cc.egui_ctx, Nav::Play { req, replace: false });
         }
         Ok(app)
@@ -70,6 +70,21 @@ impl FlexApp {
         self.stack.last_mut().expect("screen stack is never empty").as_mut()
     }
 
+    /// Pops the top screen (never Home), letting it clean up first.
+    fn pop(&mut self) {
+        if self.stack.len() > 1
+            && let Some(mut screen) = self.stack.pop()
+        {
+            screen.on_leave(&mut self.sh);
+        }
+    }
+
+    fn truncate(&mut self, len: usize) {
+        while self.stack.len() > len.max(1) {
+            self.pop();
+        }
+    }
+
     fn apply(&mut self, ctx: &egui::Context, nav: Nav) {
         match nav {
             Nav::None => {}
@@ -77,15 +92,9 @@ impl FlexApp {
                 self.top_bar.focus = None;
                 self.stack.push(screen);
             }
-            Nav::Pop => {
-                if self.stack.len() > 1 {
-                    self.stack.pop();
-                }
-            }
+            Nav::Pop => self.pop(),
             Nav::Replace(screen) => {
-                if self.stack.len() > 1 {
-                    self.stack.pop();
-                }
+                self.pop();
                 self.stack.push(screen);
             }
             Nav::Play { req, replace } => self.play(ctx, req, replace),
@@ -94,14 +103,25 @@ impl FlexApp {
     }
 
     fn play(&mut self, ctx: &egui::Context, req: PlayRequest, replace: bool) {
+        // Ask before resuming, unless the caller already chose where to start.
+        if req.start.is_none()
+            && let Some(position) = self.sh.progress(req.library_id, req.file_id).and_then(|p| p.position)
+        {
+            if replace {
+                self.pop();
+            }
+            self.top_bar.focus = None;
+            self.stack.push(Box::new(ResumePrompt::new(req, position)));
+            return;
+        }
         let Some(proc_address) = self.sh.proc_address.clone() else {
             self.sh.toast("Video needs the OpenGL renderer, which isn't available");
             return;
         };
         match Player::open(ctx, proc_address, req) {
             Ok(player) => {
-                if replace && self.stack.len() > 1 {
-                    self.stack.pop();
+                if replace {
+                    self.pop();
                 }
                 self.top_bar.focus = None;
                 self.stack.push(Box::new(player));
@@ -159,8 +179,8 @@ impl FlexApp {
         self.last_query = query.clone();
         let search_at = self.stack.iter().position(|s| s.is_search());
         match (query.is_empty(), search_at) {
-            (true, Some(i)) => self.stack.truncate(i.max(1)),
-            (false, Some(i)) => self.stack.truncate(i + 1),
+            (true, Some(i)) => self.truncate(i),
+            (false, Some(i)) => self.truncate(i + 1),
             (false, None) => self.stack.push(Box::new(SearchView::default())),
             (true, None) => {}
         }
@@ -351,8 +371,10 @@ impl eframe::App for FlexApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // Free any mpv render context while the GL context is still alive.
-        self.stack.clear();
+        // Save playback progress, and free any mpv render context while GL is still alive.
+        while let Some(mut screen) = self.stack.pop() {
+            screen.on_leave(&mut self.sh);
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 use eframe::egui::{Rect, Ui};
 use flex_core::search::{Item, Target};
 
+use super::options::{self, OptionsMenu};
 use super::{Nav, Screen, library::open_folder};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -41,6 +42,16 @@ impl Screen for SearchView {
         if press.is(Action::Back) {
             sh.search_query.clear();
             return Nav::Pop;
+        }
+        if press.is(Action::Menu) {
+            let Some(item) = self.results.get(self.list.selected) else { return Nav::None };
+            let target = match &item.target {
+                Target::Folder { library_id, rel } => options::Target::Folder { library_id: *library_id, rel: rel.clone() },
+                Target::File { library_id, file_id } => {
+                    options::Target::File { library_id: *library_id, file_id: *file_id }
+                }
+            };
+            return Nav::push(OptionsMenu::new(target));
         }
         match self.list.handle(press, self.results.len()) {
             ListInput::AtTop => Nav::FocusTopBar,

@@ -98,6 +98,15 @@ impl Mpv {
         self.check(code, &format!("command {args:?}"))
     }
 
+    pub fn set_string(&self, name: &str, value: &str) -> Result<()> {
+        let value = cstr(value);
+        let mut ptr = value.as_ptr();
+        let code = unsafe {
+            (self.api.mpv_set_property)(self.handle, cstr(name).as_ptr(), ffi::FORMAT_STRING, (&raw mut ptr).cast())
+        };
+        self.check(code, &format!("set {name}"))
+    }
+
     pub fn set_flag(&self, name: &str, value: bool) -> Result<()> {
         let mut v: c_int = value.into();
         let code = unsafe {

@@ -23,17 +23,40 @@ pub struct Row {
     pub title: String,
     /// Right-aligned secondary text.
     pub detail: String,
+    /// Partly-watched fraction, drawn as a thin bar along the bottom.
+    pub progress: Option<f32>,
+    /// De-emphasised (e.g. already watched).
+    pub dim: bool,
 }
 
 impl Row {
     pub fn new(icon: Icon, title: impl Into<String>) -> Self {
-        Self { icon, title: title.into(), detail: String::new() }
+        Self { icon, title: title.into(), detail: String::new(), progress: None, dim: false }
     }
 
     pub fn detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = detail.into();
         self
     }
+
+    pub fn progress(mut self, fraction: Option<f64>) -> Self {
+        self.progress = fraction.map(|f| f as f32);
+        self
+    }
+
+    pub fn dim(mut self, dim: bool) -> Self {
+        self.dim = dim;
+        self
+    }
+}
+
+/// A thin progress bar along the bottom of `rect`.
+pub fn paint_progress(painter: &Painter, rect: Rect, fraction: f32, color: Color32) {
+    let bar = Rect::from_min_size(egui::pos2(rect.left() + 12.0, rect.bottom() - 9.0), vec2(rect.width() - 24.0, 5.0));
+    painter.rect_filled(bar, 2, Color32::from_white_alpha(40));
+    let mut done = bar;
+    done.set_width(bar.width() * fraction.clamp(0.0, 1.0));
+    painter.rect_filled(done, 2, color);
 }
 
 const ROW_HEIGHT: f32 = 64.0;
@@ -132,6 +155,11 @@ pub fn list(ui: &mut Ui, rect: Rect, rows: &[Row], state: &mut ListState, focuse
                 let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
                 let selected = i == state.selected;
                 let color = paint_focusable(ui.painter(), r, focused && selected, selected);
+                let color = if row.dim && !(focused && selected) { theme::DIM } else { color };
+                if let Some(fraction) = row.progress {
+                    let bar_color = if focused && selected { Color32::BLACK } else { theme::FOCUS };
+                    paint_progress(ui.painter(), r, fraction, bar_color);
+                }
                 let text_x = if row.icon == Icon::None { 24.0 } else { 68.0 };
                 paint_icon(ui.painter(), r.left_center() + vec2(36.0, 0.0), row.icon, color);
 

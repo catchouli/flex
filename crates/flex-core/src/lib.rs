@@ -3,6 +3,7 @@
 pub mod db;
 pub mod library;
 pub mod natural;
+pub mod progress;
 pub mod scan;
 pub mod search;
 pub mod tree;

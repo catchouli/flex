@@ -9,6 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use anyhow::Result;
 use eframe::egui;
+use flex_core::progress::{self, ContinueItem, Progress};
 use flex_core::search::{Item, SearchIndex};
 use flex_core::{Db, Library, LibraryKind, Tree};
 
@@ -56,6 +57,16 @@ pub struct PlayRequest {
     pub title: String,
     pub library_id: i64,
     pub file_id: i64,
+    /// Where to start, in seconds. `None` = ask to resume if there's a saved position.
+    pub start: Option<f64>,
+}
+
+const WATCHED_THRESHOLD_SETTING: &str = "watched_threshold";
+/// Choices offered in Settings for "mark watched at".
+pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 enum ScanMsg {
@@ -117,6 +128,67 @@ impl Shared {
         if let Err(e) = self.db.set_setting(key, if value { "true" } else { "false" }) {
             log::warn!("saving setting {key}: {e:#}");
         }
+    }
+
+    pub fn watched_threshold(&self) -> f64 {
+        self.db
+            .setting(WATCHED_THRESHOLD_SETTING)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(progress::DEFAULT_WATCHED_THRESHOLD)
+    }
+
+    pub fn set_watched_threshold(&mut self, threshold: f64) {
+        if let Err(e) = self.db.set_setting(WATCHED_THRESHOLD_SETTING, &threshold.to_string()) {
+            log::warn!("saving watched threshold: {e:#}");
+        }
+    }
+
+    pub fn progress(&self, library_id: i64, file_id: i64) -> Option<Progress> {
+        Some(self.lib(library_id)?.tree.file(file_id)?.progress)
+    }
+
+    /// Records having played `req` up to `position` (seconds) of `duration`.
+    pub fn record_progress(&mut self, req: &PlayRequest, position: f64, duration: f64) {
+        let threshold = self.watched_threshold();
+        let Some(old) = self.progress(req.library_id, req.file_id) else { return };
+        let Some(new) = old.after_playing(position, duration, threshold, now_unix()) else { return };
+        if new == old {
+            return;
+        }
+        if let Err(e) = self.db.set_progress(req.file_id, &new) {
+            log::warn!("saving progress: {e:#}");
+            return;
+        }
+        if let Some(state) = self.lib_mut(req.library_id)
+            && let Some(file) = state.tree.file_mut(req.file_id)
+        {
+            file.progress = new;
+            state.version += 1;
+        }
+    }
+
+    /// Marks files (e.g. a whole folder) watched or unwatched.
+    pub fn set_watched(&mut self, library_id: i64, ids: &[i64], watched: bool) {
+        if let Err(e) = self.db.set_watched(ids, watched) {
+            self.toast(format!("Couldn't update: {e:#}"));
+            return;
+        }
+        if let Some(state) = self.lib_mut(library_id) {
+            for id in ids {
+                if let Some(file) = state.tree.file_mut(*id) {
+                    file.progress.watched = watched;
+                    file.progress.position = None;
+                }
+            }
+            state.version += 1;
+        }
+    }
+
+    /// Continue Watching entries, most recent first.
+    pub fn continue_watching(&self, limit: usize) -> Vec<ContinueItem> {
+        progress::continue_watching(self.libs.iter().map(|l| (&l.lib, &l.tree)), limit)
     }
 
     pub fn toast(&mut self, msg: impl Into<String>) {
@@ -260,6 +332,7 @@ impl Shared {
             title: flex_core::library::display_name(file.file_name(), true),
             library_id,
             file_id,
+            start: None,
         })
     }
 

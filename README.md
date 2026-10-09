@@ -3,13 +3,16 @@
 A simple TV-friendly media player for a folder-based library. Rust + egui, with video
 via libmpv rendered inside the app. Everything is driven by arrows, OK and Back.
 
-## Status: Phases 1–3
+## Status: Phases 1–4
 
 - Libraries: add/remove in Settings (folder picker with drive letters on Windows), each typed
   Movies / TV / Anime. Scans run in the background; the index lives in SQLite.
 - Folder view per library, fuzzy search across everything, playback with an "Up next"
   screen at the end of an episode.
-- Next: resume position and watched state, incremental rescans, series matching.
+- Watch progress: position saved every 10s and on leaving the player, resume prompt,
+  watched after a configurable threshold (default 90%), progress shown in lists, and a
+  Continue Watching row on Home.
+- Next: incremental rescans, series matching.
 
 Data is stored in `%APPDATA%\Flex\data\flex.db` (Windows) or
 `~/Library/Application Support/Flex/flex.db` (macOS).
@@ -21,7 +24,8 @@ Everyday use only needs the remote; typing (search) needs a keyboard.
 | Action | Keys |
 |---|---|
 | Move | Arrow keys; Page Up/Down (or Left/Right) jump a page in lists |
-| OK | Enter |
+| OK | Enter (fires on release) |
+| Options (mark watched/unwatched, play from beginning) | Hold OK, or right-click |
 | Play/Pause | Space, remote play/pause (Windows). Acts as OK outside the player |
 | Back | Esc, Backspace, Browser Back (remote), mouse back button |
 | Stop | Remote stop button (Windows) |

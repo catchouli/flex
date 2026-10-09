@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::library::{Library, LibraryKind, MediaFile};
+use crate::progress::Progress;
 use crate::scan::ScannedFile;
 
 const SCHEMA: &str = "
@@ -136,7 +137,8 @@ impl Db {
     /// Files currently present in a library (not marked missing).
     pub fn files(&self, library_id: i64) -> Result<Vec<MediaFile>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, library_id, rel_path, size, mtime FROM media_files WHERE library_id = ?1 AND missing = 0",
+            "SELECT id, library_id, rel_path, size, mtime, position, duration, watched, last_played
+             FROM media_files WHERE library_id = ?1 AND missing = 0",
         )?;
         let rows = stmt.query_map([library_id], |r| {
             Ok(MediaFile {
@@ -145,9 +147,36 @@ impl Db {
                 rel_path: r.get(2)?,
                 size: r.get::<_, i64>(3)? as u64,
                 mtime: r.get(4)?,
+                progress: Progress {
+                    position: r.get(5)?,
+                    duration: r.get(6)?,
+                    watched: r.get(7)?,
+                    last_played: r.get(8)?,
+                },
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_progress(&self, file_id: i64, p: &Progress) -> Result<()> {
+        self.conn.execute(
+            "UPDATE media_files SET position = ?2, duration = ?3, watched = ?4, last_played = ?5 WHERE id = ?1",
+            params![file_id, p.position, p.duration, p.watched, p.last_played],
+        )?;
+        Ok(())
+    }
+
+    /// Marks files watched or unwatched, clearing any resume position.
+    pub fn set_watched(&mut self, file_ids: &[i64], watched: bool) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare("UPDATE media_files SET watched = ?2, position = NULL WHERE id = ?1")?;
+            for id in file_ids {
+                stmt.execute(params![id, watched])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Records a scan: inserts new files, updates changed ones and marks vanished ones missing.
@@ -225,6 +254,15 @@ mod tests {
         // A file coming back keeps its row (and so its watch history).
         let s = db.apply_scan(lib, &[file("a/1.mkv"), file("a/2.mkv"), file("a/3.mkv")]).unwrap();
         assert_eq!((s.added, s.removed), (1, 0));
+
+        let id = db.files(lib).unwrap()[0].id;
+        let p = Progress { position: Some(42.0), duration: Some(100.0), watched: false, last_played: Some(7) };
+        db.set_progress(id, &p).unwrap();
+        let stored = db.files(lib).unwrap().into_iter().find(|f| f.id == id).unwrap().progress;
+        assert_eq!(stored, p);
+        db.set_watched(&[id], true).unwrap();
+        let stored = db.files(lib).unwrap().into_iter().find(|f| f.id == id).unwrap().progress;
+        assert_eq!((stored.watched, stored.position), (true, None));
 
         db.remove_library(lib).unwrap();
         assert!(db.files(lib).unwrap().is_empty());

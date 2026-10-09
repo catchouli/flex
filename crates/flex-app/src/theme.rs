@@ -77,6 +77,12 @@ pub fn safe_rect(ctx: &egui::Context) -> egui::Rect {
     r.shrink2(r.size() * SAFE_MARGIN)
 }
 
+/// "12 min left", "1 h 5 min left".
+pub fn format_remaining(secs: f64) -> String {
+    let mins = (secs / 60.0).ceil().max(1.0) as u64;
+    if mins >= 60 { format!("{} h {} min left", mins / 60, mins % 60) } else { format!("{mins} min left") }
+}
+
 pub fn format_time(secs: f64) -> String {
     let s = secs.max(0.0) as u64;
     let (h, m, s) = (s / 3600, s / 60 % 60, s % 60);

@@ -3,7 +3,9 @@
 
 pub mod home;
 pub mod library;
+pub mod options;
 pub mod picker;
+pub mod resume;
 pub mod search;
 pub mod settings;
 pub mod up_next;
@@ -56,6 +58,9 @@ pub trait Screen {
     fn is_player(&self) -> bool {
         false
     }
+
+    /// Called when the screen leaves the stack: popped, replaced, or the app closing.
+    fn on_leave(&mut self, _sh: &mut Shared) {}
 
     /// For the search screen: open the best result (Enter in the search box).
     fn activate_first(&mut self, _sh: &mut Shared) -> Nav {

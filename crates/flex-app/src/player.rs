@@ -17,6 +17,8 @@ use crate::shared::{PlayRequest, Shared};
 use crate::theme;
 
 const OSD_SECS: f64 = 3.0;
+/// How often the playback position is saved while playing.
+const SAVE_EVERY_SECS: f64 = 10.0;
 const MESSAGE_SECS: f64 = 2.5;
 /// Extra mpv options for testing, e.g. `FLEX_MPV_OPTS="hwdec=no,profile=fast"`.
 const OPTS_ENV: &str = "FLEX_MPV_OPTS";
@@ -32,6 +34,11 @@ pub struct Player {
     mpv: Arc<Mpv>,
     renderer: Arc<Renderer>,
     loaded: bool,
+    /// Set once the file played to the end (progress already recorded as watched).
+    finished: bool,
+    last_save: f64,
+    /// Last known duration; mpv forgets it once the file ends.
+    duration: Option<f64>,
     osd_until: f64,
     /// Track whose current selection is being shown, and until when.
     message: Option<(Track, f64)>,
@@ -43,10 +50,32 @@ impl Player {
         let options: Vec<(&str, &str)> = extra.split(',').filter_map(|kv| kv.split_once('=')).collect();
         let mpv = Arc::new(Mpv::new(ctx, &options)?);
         let renderer = Arc::new(Renderer::new(mpv.clone(), proc_address, ctx)?);
+        if let Some(start) = req.start.filter(|s| *s > 0.0) {
+            mpv.set_string("start", &format!("{start:.1}"))?;
+        }
         log::info!("playing {}", req.path.display());
         mpv.command(&["loadfile", &req.path.to_string_lossy()])?;
         let now = ctx.input(|i| i.time);
-        Ok(Self { req, mpv, renderer, loaded: false, osd_until: now + OSD_SECS, message: None })
+        Ok(Self {
+            req,
+            mpv,
+            renderer,
+            loaded: false,
+            finished: false,
+            last_save: now,
+            duration: None,
+            osd_until: now + OSD_SECS,
+            message: None,
+        })
+    }
+
+    fn save_progress(&mut self, sh: &mut Shared) {
+        if self.finished || !self.loaded {
+            return;
+        }
+        if let (Some(position), Some(duration)) = (self.mpv.get_f64("time-pos"), self.duration) {
+            sh.record_progress(&self.req, position, duration);
+        }
     }
 
     fn paused(&self) -> bool {
@@ -127,6 +156,10 @@ impl Player {
                     return Nav::Pop;
                 }
                 mpv::Event::EndFile { eof: true, .. } => {
+                    if let Some(duration) = self.duration {
+                        sh.record_progress(&self.req, duration, duration);
+                    }
+                    self.finished = true;
                     return match sh.next_after(&self.req) {
                         Some(next) => Nav::replace(UpNext::new(self.req.title.clone(), next)),
                         None => Nav::Pop,
@@ -135,6 +168,15 @@ impl Player {
                 mpv::Event::Shutdown => return Nav::Pop,
                 mpv::Event::EndFile { .. } => {}
             }
+        }
+
+        if self.loaded {
+            self.duration = self.mpv.get_f64("duration").or(self.duration);
+            if now - self.last_save >= SAVE_EVERY_SECS {
+                self.last_save = now;
+                self.save_progress(sh);
+            }
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(SAVE_EVERY_SECS));
         }
 
         let screen = ctx.content_rect();
@@ -189,14 +231,16 @@ impl Player {
         painter.rect_filled(panel, CornerRadius::same(14), theme::OSD_BG);
         let inner = panel.shrink2(vec2(32.0, 24.0));
 
-        let status = if paused { "❚❚  " } else { "" };
-        painter.text(
-            inner.left_top(),
-            Align2::LEFT_TOP,
-            format!("{status}{}", self.req.title),
-            TextStyle::Body.resolve(ui.style()),
-            theme::TEXT,
-        );
+        let mut title_pos = inner.left_top();
+        if paused {
+            // Pause symbol drawn as two bars: fonts don't reliably have a glyph for it.
+            for x in [0.0, 14.0] {
+                let bar = Rect::from_min_size(title_pos + vec2(x, 6.0), vec2(8.0, 26.0));
+                painter.rect_filled(bar, CornerRadius::same(2), theme::TEXT);
+            }
+            title_pos.x += 44.0;
+        }
+        painter.text(title_pos, Align2::LEFT_TOP, &self.req.title, TextStyle::Body.resolve(ui.style()), theme::TEXT);
         let time = format!("{} / {}", theme::format_time(pos), theme::format_time(duration));
         painter.text(inner.right_bottom(), Align2::RIGHT_BOTTOM, &time, TextStyle::Body.resolve(ui.style()), theme::TEXT);
 
@@ -242,5 +286,9 @@ impl Screen for Player {
 
     fn is_player(&self) -> bool {
         true
+    }
+
+    fn on_leave(&mut self, sh: &mut Shared) {
+        self.save_progress(sh);
     }
 }

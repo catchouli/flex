@@ -5,7 +5,7 @@ use flex_core::LibraryKind;
 
 use super::{Nav, Screen, picker::FolderPicker};
 use crate::input::{Action, Press};
-use crate::shared::Shared;
+use crate::shared::{Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 #[derive(Default)]
@@ -19,10 +19,16 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        match self.list.handle(press, libs + 2) {
+        match self.list.handle(press, libs + 3) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
+            ListInput::Activate(i) if i == libs + 1 => {
+                let current = sh.watched_threshold();
+                let i = WATCHED_THRESHOLDS.iter().position(|t| (t - current).abs() < 0.001).unwrap_or(2);
+                sh.set_watched_threshold(WATCHED_THRESHOLDS[(i + 1) % WATCHED_THRESHOLDS.len()]);
+                Nav::None
+            }
             ListInput::Activate(_) => {
                 sh.scan_all();
                 sh.toast("Rescanning all libraries…");
@@ -43,6 +49,8 @@ impl Screen for Settings {
             })
             .collect();
         rows.push(Row::new(Icon::Add, "Add library…"));
+        let threshold = (sh.watched_threshold() * 100.0).round();
+        rows.push(Row::new(Icon::None, format!("Mark as watched after {threshold}%")).detail("OK to change"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
