@@ -1,9 +1,8 @@
 //! Full-screen video playback with a minimal d-pad OSD.
 //!
-//! OK: pause/play · Left/Right: seek (hold to go faster) · Up: subtitles · Down: audio
-//! Back: hide the OSD, or stop playback if it's already hidden.
+//! OK / Play-Pause: pause/play · Left/Right: seek (hold to go faster) · Up: subtitles ·
+//! Down: audio · Back: hide the OSD, or stop if it's already hidden · Stop: stop.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -13,6 +12,8 @@ use eframe::glow::{self, HasContext};
 
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
+use crate::screens::{Nav, Screen, up_next::UpNext};
+use crate::shared::{PlayRequest, Shared};
 use crate::theme;
 
 const OSD_SECS: f64 = 3.0;
@@ -26,16 +27,10 @@ enum Track {
     Audio,
 }
 
-pub enum Outcome {
-    Continue,
-    /// Playback ended or was stopped; carries an error message if it failed.
-    Exit(Option<String>),
-}
-
 pub struct Player {
+    req: PlayRequest,
     mpv: Arc<Mpv>,
     renderer: Arc<Renderer>,
-    title: String,
     loaded: bool,
     osd_until: f64,
     /// Track whose current selection is being shown, and until when.
@@ -43,15 +38,14 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, path: &Path) -> Result<Self> {
+    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest) -> Result<Self> {
         let extra = std::env::var(OPTS_ENV).unwrap_or_default();
         let options: Vec<(&str, &str)> = extra.split(',').filter_map(|kv| kv.split_once('=')).collect();
         let mpv = Arc::new(Mpv::new(ctx, &options)?);
         let renderer = Arc::new(Renderer::new(mpv.clone(), proc_address, ctx)?);
-        mpv.command(&["loadfile", &path.to_string_lossy()])?;
-        let title = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        mpv.command(&["loadfile", &req.path.to_string_lossy()])?;
         let now = ctx.input(|i| i.time);
-        Ok(Self { mpv, renderer, title, loaded: false, osd_until: now + OSD_SECS, message: None })
+        Ok(Self { req, mpv, renderer, loaded: false, osd_until: now + OSD_SECS, message: None })
     }
 
     fn paused(&self) -> bool {
@@ -64,12 +58,13 @@ impl Player {
         }
     }
 
-    pub fn handle(&mut self, now: f64, press: Press) -> Outcome {
+    fn handle_press(&mut self, now: f64, press: Press) -> Nav {
         let osd_visible = now < self.osd_until;
         match press.action {
-            Action::Ok if !press.repeat => {
+            Action::Ok | Action::PlayPause if !press.repeat => {
                 let _ = self.mpv.set_flag("pause", !self.paused());
             }
+            Action::Stop if !press.repeat => return Nav::Pop,
             Action::Left | Action::Right => {
                 let step = if press.repeat { 30 } else { 10 };
                 let step = if press.action == Action::Left { -step } else { step };
@@ -86,16 +81,16 @@ impl Player {
             Action::Back if !press.repeat => {
                 if osd_visible && !self.paused() {
                     self.osd_until = 0.0;
-                    return Outcome::Continue;
+                    return Nav::None;
                 }
-                return Outcome::Exit(None);
+                return Nav::Pop;
             }
-            _ => return Outcome::Continue,
+            _ => return Nav::None,
         }
         if !matches!(press.action, Action::Up | Action::Down) {
             self.osd_until = now + OSD_SECS;
         }
-        Outcome::Continue
+        Nav::None
     }
 
     fn track_label(&self, track: Track) -> String {
@@ -120,16 +115,23 @@ impl Player {
         label
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Outcome {
+    fn draw(&mut self, ui: &mut egui::Ui, sh: &mut Shared) -> Nav {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         for event in self.mpv.poll_events() {
             match event {
                 mpv::Event::FileLoaded => self.loaded = true,
                 mpv::Event::EndFile { error: Some(e), .. } => {
-                    return Outcome::Exit(Some(format!("Couldn't play {}: {e}", self.title)));
+                    sh.toast(format!("Couldn't play {}: {e}", self.req.title));
+                    return Nav::Pop;
                 }
-                mpv::Event::EndFile { eof: true, .. } | mpv::Event::Shutdown => return Outcome::Exit(None),
+                mpv::Event::EndFile { eof: true, .. } => {
+                    return match sh.next_after(&self.req) {
+                        Some(next) => Nav::replace(UpNext::new(self.req.title.clone(), next)),
+                        None => Nav::Pop,
+                    };
+                }
+                mpv::Event::Shutdown => return Nav::Pop,
                 mpv::Event::EndFile { .. } => {}
             }
         }
@@ -174,7 +176,7 @@ impl Player {
                 self.message = None;
             }
         }
-        Outcome::Continue
+        Nav::None
     }
 
     fn draw_osd(&self, ui: &egui::Ui, safe: Rect, paused: bool) {
@@ -190,7 +192,7 @@ impl Player {
         painter.text(
             inner.left_top(),
             Align2::LEFT_TOP,
-            format!("{status}{}", self.title),
+            format!("{status}{}", self.req.title),
             TextStyle::Body.resolve(ui.style()),
             theme::TEXT,
         );
@@ -204,5 +206,20 @@ impl Player {
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
             painter.rect_filled(done, CornerRadius::same(5), theme::FOCUS);
         }
+    }
+}
+
+impl Screen for Player {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        let now = sh.ctx.input(|i| i.time);
+        self.handle_press(now, press)
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, sh: &mut Shared, _rect: Rect, _focused: bool) -> Nav {
+        self.draw(ui, sh)
+    }
+
+    fn shows_top_bar(&self) -> bool {
+        false
     }
 }

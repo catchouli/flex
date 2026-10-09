@@ -1,74 +1,130 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use eframe::egui::{self, Align2, CornerRadius, Key, Rect, TextStyle, ViewportCommand, pos2, vec2};
 
-use crate::browser::{self, Browser};
 use crate::input::{self, InputLog};
-use crate::mpv::GetProcAddress;
-use crate::player::{self, Player};
+use crate::player::Player;
+use crate::screens::{Nav, Screen, home::Home, search::SearchView, settings::Settings};
+use crate::shared::{PlayRequest, Shared};
 use crate::theme;
+use crate::topbar::{self, TopBar};
 
 const CURSOR_HIDE_SECS: f64 = 2.0;
+const TOAST_SECS: f64 = 4.0;
+/// Holding Back this long quits; the prompt appears after `QUIT_PROMPT_SECS`.
+const QUIT_HOLD_SECS: f64 = 1.5;
+const QUIT_PROMPT_SECS: f64 = 0.4;
 
 pub struct FlexApp {
-    browser: Browser,
-    player: Option<Player>,
+    sh: Shared,
+    /// Never empty: Home is always at the bottom.
+    stack: Vec<Box<dyn Screen>>,
+    top_bar: TopBar,
+    last_query: String,
     input_log: InputLog,
     show_input_log: bool,
-    proc_address: Option<GetProcAddress>,
+    back_hold_since: Option<f64>,
+    toasts: VecDeque<(String, f64)>,
     last_pointer_move: f64,
 }
 
 impl FlexApp {
-    /// `start` may be a folder to browse or a video to play immediately.
-    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>) -> Self {
+    /// `start` may be a video to play immediately (handy for testing playback).
+    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>) -> anyhow::Result<Self> {
         theme::install(&cc.egui_ctx);
-        let ctx = &cc.egui_ctx;
-        let play = start.as_ref().filter(|p| p.is_file() && browser::is_video(p)).cloned();
-        let browse_dir = match &play {
-            Some(file) => file.parent().map(PathBuf::from),
-            None => start.or_else(default_start_dir),
-        };
+        input::media::set_context(&cc.egui_ctx);
+        let sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
         let mut app = Self {
-            browser: Browser::new(ctx, browse_dir),
-            player: None,
+            sh,
+            stack: vec![Box::new(Home::default())],
+            top_bar: TopBar::default(),
+            last_query: String::new(),
             input_log: InputLog::default(),
             show_input_log: false,
-            proc_address: cc.get_proc_address.clone(),
+            back_hold_since: None,
+            toasts: VecDeque::new(),
             last_pointer_move: 0.0,
         };
-        if let Some(file) = play {
-            app.play(ctx, &file);
+        if let Some(path) = start.filter(|p| p.is_file() && flex_core::library::is_video(p)) {
+            let title = flex_core::library::display_name(&path.file_name().unwrap_or_default().to_string_lossy(), true);
+            let req = PlayRequest { path, title, library_id: -1, file_id: -1 };
+            app.apply(&cc.egui_ctx, Nav::Play { req, replace: false });
         }
-        app
+        Ok(app)
     }
 
-    fn play(&mut self, ctx: &egui::Context, path: &std::path::Path) {
-        let Some(proc_address) = self.proc_address.clone() else {
-            self.browser.set_error("Video needs the OpenGL renderer, which isn't available");
+    fn top(&mut self) -> &mut dyn Screen {
+        self.stack.last_mut().expect("screen stack is never empty").as_mut()
+    }
+
+    fn apply(&mut self, ctx: &egui::Context, nav: Nav) {
+        match nav {
+            Nav::None => {}
+            Nav::Push(screen) => {
+                self.top_bar.focus = None;
+                self.stack.push(screen);
+            }
+            Nav::Pop => {
+                if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+            }
+            Nav::Replace(screen) => {
+                if self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+                self.stack.push(screen);
+            }
+            Nav::Play { req, replace } => self.play(ctx, req, replace),
+            Nav::FocusTopBar => self.top_bar.focus = Some(topbar::Item::Search),
+        }
+    }
+
+    fn play(&mut self, ctx: &egui::Context, req: PlayRequest, replace: bool) {
+        let Some(proc_address) = self.sh.proc_address.clone() else {
+            self.sh.toast("Video needs the OpenGL renderer, which isn't available");
             return;
         };
-        match Player::open(ctx, proc_address, path) {
-            Ok(p) => self.player = Some(p),
+        match Player::open(ctx, proc_address, req) {
+            Ok(player) => {
+                if replace && self.stack.len() > 1 {
+                    self.stack.pop();
+                }
+                self.top_bar.focus = None;
+                self.stack.push(Box::new(player));
+            }
             Err(e) => {
-                let hint = if crate::mpv::ffi::api().is_err() {
-                    if cfg!(windows) {
-                        "Put libmpv-2.dll next to flex.exe (see README).\n"
-                    } else {
-                        "Install libmpv or set FLEX_LIBMPV to its path (see README).\n"
-                    }
-                } else {
-                    ""
+                let hint = match crate::mpv::ffi::api() {
+                    Ok(_) => "",
+                    Err(_) if cfg!(windows) => "Put libmpv-2.dll next to flex.exe (see README). ",
+                    Err(_) => "Install libmpv or set FLEX_LIBMPV to its path (see README). ",
                 };
-                self.browser.set_error(format!("{hint}{e:#}"));
+                log::error!("{e:#}");
+                self.sh.toast(format!("{hint}{e:#}"));
             }
         }
     }
 
-    fn stop(&mut self, error: Option<String>) {
-        self.player = None;
-        if let Some(e) = error {
-            self.browser.set_error(e);
+    fn open_settings(&mut self) {
+        self.top_bar.focus = None;
+        self.stack.push(Box::new(Settings::default()));
+    }
+
+    /// Keeps the search screen in step with the search box: typing shows results
+    /// (returning to them if you'd navigated deeper), clearing the box closes them.
+    fn sync_search(&mut self) {
+        let query = self.sh.search_query.trim().to_owned();
+        if query == self.last_query {
+            return;
+        }
+        self.last_query = query.clone();
+        let search_at = self.stack.iter().position(|s| s.is_search());
+        match (query.is_empty(), search_at) {
+            (true, Some(i)) => self.stack.truncate(i.max(1)),
+            (false, Some(i)) => self.stack.truncate(i + 1),
+            (false, None) => self.stack.push(Box::new(SearchView::default())),
+            (true, None) => {}
         }
     }
 
@@ -83,13 +139,59 @@ impl FlexApp {
         }
     }
 
-    fn update_cursor(&mut self, ctx: &egui::Context) {
-        let (now, moved) = ctx.input(|i| (i.time, i.pointer.delta() != egui::Vec2::ZERO));
-        if moved {
+    /// Quits when Back is held for `QUIT_HOLD_SECS`, showing a prompt while held.
+    fn hold_to_quit(&mut self, ui: &egui::Ui, now: f64, text_focused: bool) {
+        let ctx = ui.ctx();
+        if text_focused || !input::back_held(ctx) {
+            self.back_hold_since = None;
+            return;
+        }
+        let held = now - *self.back_hold_since.get_or_insert(now);
+        if held >= QUIT_HOLD_SECS {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        } else if held >= QUIT_PROMPT_SECS {
+            let screen = ctx.content_rect();
+            let rect = Rect::from_center_size(screen.center(), vec2(560.0, 150.0));
+            let painter = ui.painter();
+            painter.rect_filled(rect, CornerRadius::same(14), theme::OSD_BG);
+            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, "Keep holding to quit", TextStyle::Body.resolve(ui.style()), theme::TEXT);
+            let bar = Rect::from_min_size(pos2(rect.left() + 40.0, rect.bottom() - 46.0), vec2(rect.width() - 80.0, 10.0));
+            painter.rect_filled(bar, CornerRadius::same(5), egui::Color32::from_white_alpha(50));
+            let t = ((held - QUIT_PROMPT_SECS) / (QUIT_HOLD_SECS - QUIT_PROMPT_SECS)) as f32;
+            painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * t, bar.height())), CornerRadius::same(5), theme::FOCUS);
+        }
+        ctx.request_repaint();
+    }
+
+    fn draw_toasts(&mut self, ui: &egui::Ui, now: f64) {
+        for msg in self.sh.take_toasts() {
+            log::info!("{msg}");
+            self.toasts.push_back((msg, now + TOAST_SECS));
+        }
+        self.toasts.retain(|(_, until)| *until > now);
+        let Some(next_expiry) = self.toasts.iter().map(|(_, t)| *t).reduce(f64::min) else { return };
+        let safe = theme::safe_rect(ui.ctx());
+        let font = TextStyle::Body.resolve(ui.style());
+        let mut bottom = safe.bottom();
+        for (msg, _) in self.toasts.iter().rev() {
+            let galley = ui.painter().layout(msg.clone(), font.clone(), theme::TEXT, safe.width() * 0.7);
+            let rect = Rect::from_center_size(
+                pos2(safe.center().x, bottom - galley.size().y / 2.0 - 16.0),
+                galley.size() + vec2(48.0, 32.0),
+            );
+            ui.painter().rect_filled(rect, CornerRadius::same(12), theme::OSD_BG);
+            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT);
+            bottom = rect.top() - 12.0;
+        }
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(next_expiry - now));
+    }
+
+    fn update_cursor(&mut self, ctx: &egui::Context, now: f64, playing: bool) {
+        if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
             self.last_pointer_move = now;
         }
         let idle = now - self.last_pointer_move;
-        if idle > CURSOR_HIDE_SECS {
+        if playing || idle > CURSOR_HIDE_SECS {
             ctx.set_cursor_icon(egui::CursorIcon::None);
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CURSOR_HIDE_SECS - idle + 0.05));
@@ -98,69 +200,86 @@ impl FlexApp {
 
     fn input_log_overlay(&self, ui: &egui::Ui) {
         let safe = theme::safe_rect(ui.ctx());
-        let rect = Rect::from_min_size(pos2(safe.right() - 760.0, safe.top()), vec2(760.0, 560.0));
+        let rect = Rect::from_min_size(pos2(safe.right() - 760.0, safe.top() + 90.0), vec2(760.0, 560.0));
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(12), theme::OSD_BG);
-        let mut y = rect.top() + 20.0;
         let mono = TextStyle::Monospace.resolve(ui.style());
+        let mut y = rect.top() + 20.0;
         painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, "Input log (F1 to hide)", mono.clone(), theme::FOCUS);
-        y += 44.0;
         for entry in self.input_log.entries() {
+            y += 40.0;
             painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, entry, mono.clone(), theme::TEXT);
-            y += 38.0;
         }
     }
-}
-
-fn default_start_dir() -> Option<PathBuf> {
-    if cfg!(windows) {
-        return None; // drive list
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let media = home.join("media");
-    Some(if media.is_dir() { media } else { home })
 }
 
 impl eframe::App for FlexApp {
+    /// Runs even while the window is hidden, so scans finish without anyone watching.
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.sh.poll_scans();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
         theme::update_scale(&ctx);
         self.global_keys(&ctx);
-        let presses = input::collect(&ctx, &mut self.input_log);
-        let now = ctx.input(|i| i.time);
 
-        if let Some(player) = &mut self.player {
-            let mut outcome = player::Outcome::Continue;
-            for press in presses {
-                if let player::Outcome::Exit(e) = player.handle(now, press) {
-                    outcome = player::Outcome::Exit(e);
-                    break;
+        let text_focused = topbar::text_focused(&ctx);
+        let presses = input::collect(&ctx, &mut self.input_log, text_focused);
+        if self.top().shows_top_bar() && !text_focused && topbar::typed_text(&ctx) {
+            // Start searching as soon as someone types; the box picks up this frame's text.
+            topbar::focus_text(&ctx);
+        }
+        for press in presses {
+            let nav = if self.top_bar.focus.is_some() && self.top().shows_top_bar() {
+                match self.top_bar.handle(&ctx, press) {
+                    topbar::Event::OpenSettings => {
+                        self.open_settings();
+                        Nav::None
+                    }
+                    _ => Nav::None,
                 }
-            }
-            if let player::Outcome::Continue = outcome {
-                outcome = player.ui(ui);
-            }
-            if let player::Outcome::Exit(error) = outcome {
-                self.stop(error);
-                ctx.request_repaint();
-            }
-        } else {
-            for press in presses {
-                if let Some(path) = self.browser.handle(&ctx, press) {
-                    self.play(&ctx, &path);
-                    ctx.request_repaint();
-                    break;
-                }
-            }
-            let status = format!(
-                "Last input: {}    ·    F1: input log",
-                self.input_log.latest().unwrap_or("none yet")
-            );
-            ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
-            self.browser.ui(ui, Some(&status));
-            self.update_cursor(&ctx);
+            } else {
+                let sh = &mut self.sh;
+                self.stack.last_mut().expect("never empty").handle(sh, press)
+            };
+            self.apply(&ctx, nav);
         }
 
+        ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
+        let safe = theme::safe_rect(&ctx);
+        let content = if self.top().shows_top_bar() {
+            let bar = Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT));
+            match self.top_bar.ui(ui, bar, &mut self.sh) {
+                topbar::Event::Submit => {
+                    self.sync_search();
+                    let sh = &mut self.sh;
+                    let nav = match self.stack.last_mut() {
+                        Some(s) if s.is_search() => s.activate_first(sh),
+                        _ => Nav::None,
+                    };
+                    self.apply(&ctx, nav);
+                }
+                topbar::Event::Cancel => self.sh.search_query.clear(),
+                topbar::Event::OpenSettings => self.open_settings(),
+                topbar::Event::FocusContent | topbar::Event::None => {}
+            }
+            self.sync_search();
+            Rect::from_min_max(pos2(safe.left(), safe.top() + topbar::HEIGHT + 36.0), safe.max)
+        } else {
+            ctx.content_rect()
+        };
+
+        let focused = self.top_bar.focus.is_none() && !topbar::text_focused(&ctx);
+        let sh = &mut self.sh;
+        let nav = self.stack.last_mut().expect("never empty").ui(ui, sh, content, focused);
+        self.apply(&ctx, nav);
+
+        let playing = !self.top().shows_top_bar();
+        self.update_cursor(&ctx, now, playing);
+        self.draw_toasts(ui, now);
+        self.hold_to_quit(ui, now, text_focused);
         if self.show_input_log {
             self.input_log_overlay(ui);
         }
@@ -171,7 +290,20 @@ impl eframe::App for FlexApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // Free the mpv render context while the GL context is still alive.
-        self.player = None;
+        // Free any mpv render context while the GL context is still alive.
+        self.stack.clear();
+    }
+}
+
+/// Shown instead of the app if it can't start (e.g. the database can't be opened).
+pub struct StartupError(pub String);
+
+impl eframe::App for StartupError {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        theme::update_scale(ui.ctx());
+        let safe = theme::safe_rect(ui.ctx());
+        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(safe));
+        ui.heading("Flex couldn't start");
+        ui.label(&self.0);
     }
 }

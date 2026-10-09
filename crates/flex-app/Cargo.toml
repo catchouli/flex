@@ -7,5 +7,10 @@ edition = "2024"
 anyhow = "1.0.104"
 eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts"] }
 env_logger = "0.11.11"
+flex-core = { version = "0.1.0", path = "../flex-core" }
 libloading = "0.9"
 log = "0.4.34"
+winit = { version = "0.30", default-features = false }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation"] }
