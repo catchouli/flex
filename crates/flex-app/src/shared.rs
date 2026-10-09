@@ -28,6 +28,8 @@ pub struct LibState {
     /// Shows/seasons, once organised (in the background after loading or scanning).
     pub organised: Option<Organised>,
     pub organising: bool,
+    /// Looked up / to look up, while matching online.
+    pub matching: Option<(usize, usize)>,
 }
 
 /// A library sorted into shows. `parsed` and `groups` are kept so the catalog can be
@@ -47,7 +49,7 @@ pub enum LibraryView {
 
 impl LibState {
     fn new(lib: Library, tree: Tree) -> Self {
-        Self { lib, tree, scanning: None, error: None, version: 0, organised: None, organising: false }
+        Self { lib, tree, scanning: None, error: None, version: 0, organised: None, organising: false, matching: None }
     }
 
     pub fn catalog(&self) -> Option<&Catalog> {
@@ -58,6 +60,8 @@ impl LibState {
     pub fn status(&self) -> String {
         if let Some(n) = self.scanning {
             format!("Scanning… {} found", thousands(n))
+        } else if let Some((done, total)) = self.matching {
+            format!("Matching… {done}/{total}")
         } else if let Some(e) = &self.error {
             e.clone()
         } else {
@@ -101,7 +105,18 @@ enum ScanMsg {
     Progress(i64, usize),
     Done(i64, Result<String, String>),
     Organised(i64, Result<Organised, String>),
+    /// Online matching progress (done, total); the catalog is reloaded on these.
+    Matching(i64, usize, usize),
+    MatchDone(i64, Result<String, String>),
 }
+
+const TMDB_TOKEN_SETTING: &str = "tmdb_token";
+/// Bump when grouping/matching logic improves: automatic results are redone on the next
+/// start (manual choices are kept).
+const MATCHER_VERSION: &str = "4";
+const MATCHER_VERSION_SETTING: &str = "matcher_version";
+/// Pause between TMDB requests (TMDB allows ~50/s; no need to hurry).
+const MATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(60);
 
 pub struct Shared {
     pub ctx: egui::Context,
@@ -137,6 +152,12 @@ impl Shared {
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
         };
+        if shared.db.setting(MATCHER_VERSION_SETTING)?.as_deref() != Some(MATCHER_VERSION) {
+            for lib in shared.db.libraries()? {
+                shared.db.reset_matching(lib.id)?;
+            }
+            shared.db.set_setting(MATCHER_VERSION_SETTING, MATCHER_VERSION)?;
+        }
         for lib in shared.db.libraries()? {
             let tree = Tree::new(shared.db.files(lib.id)?);
             let never_scanned = tree.is_empty();
@@ -272,6 +293,103 @@ impl Shared {
         });
     }
 
+    /// The TMDB "API Read Access Token": from Settings, or a `tmdb_token` file in the data
+    /// folder (handy for setting it without typing).
+    pub fn tmdb_token(&self) -> Option<String> {
+        let from_db = self.db.setting(TMDB_TOKEN_SETTING).ok().flatten();
+        let from_file = || std::fs::read_to_string(flex_core::data_dir().join("tmdb_token")).ok();
+        from_db.or_else(from_file).map(|t| t.trim().to_owned()).filter(|t| !t.is_empty())
+    }
+
+    pub fn set_tmdb_token(&mut self, token: &str) {
+        if let Err(e) = self.db.set_setting(TMDB_TOKEN_SETTING, token.trim()) {
+            self.toast(format!("Couldn't save the token: {e:#}"));
+            return;
+        }
+        let ids: Vec<i64> = self.libs.iter().map(|l| l.lib.id).collect();
+        for id in ids {
+            self.start_matching(id);
+        }
+    }
+
+    /// Redoes a library's automatic grouping and online matching (manual choices stay).
+    pub fn rematch(&mut self, id: i64) {
+        if self.lib(id).is_some_and(|l| l.matching.is_some() || l.organising) {
+            self.toast("Still matching; try again when it's done");
+            return;
+        }
+        if let Err(e) = self.db.reset_matching(id) {
+            self.toast(format!("Couldn't reset: {e:#}"));
+            return;
+        }
+        if let Some(l) = self.lib_mut(id) {
+            l.organised = None;
+            l.version += 1;
+        }
+        self.organise(id);
+    }
+
+    /// Looks up shows that haven't been matched online yet, in the background.
+    pub fn start_matching(&mut self, id: i64) {
+        let Some(token) = self.tmdb_token() else { return };
+        let Some(state) = self.lib(id) else { return };
+        if state.matching.is_some() {
+            return;
+        }
+        let Some(catalog) = state.catalog() else { return };
+        let anime = state.lib.kind == LibraryKind::Anime;
+        let todo: Vec<flex_core::metadata::Lookup> = catalog
+            .shows
+            .iter()
+            .filter(|s| s.show.state == "local")
+            .map(|s| flex_core::metadata::Lookup {
+                show_id: s.show.id,
+                title: s.show.title.clone(),
+                year: s.show.year,
+                kind: if s.is_series() { flex_core::metadata::Kind::Tv } else { flex_core::metadata::Kind::Movie },
+                anime,
+            })
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        let total = todo.len();
+        if let Some(l) = self.lib_mut(id) {
+            l.matching = Some((0, total));
+        }
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        std::thread::spawn(move || {
+            let result = (|| -> Result<String> {
+                let tmdb = flex_core::metadata::Tmdb::new(&token);
+                tmdb.verify()?;
+                let mut db = Db::open(&db_path)?;
+                let (mut matched, mut unmatched) = (0, 0);
+                for (i, item) in todo.iter().enumerate() {
+                    match flex_core::metadata::lookup(&tmdb, item) {
+                        Ok(Some(c)) => {
+                            db.set_show_metadata(item.show_id, &c, "matched")?;
+                            matched += 1;
+                        }
+                        Ok(None) => {
+                            db.set_show_state(item.show_id, "unmatched")?;
+                            unmatched += 1;
+                        }
+                        // Network hiccup: leave it for next time.
+                        Err(e) => log::warn!("matching {:?}: {e:#}", item.title),
+                    }
+                    if (i + 1) % 25 == 0 || i + 1 == total {
+                        let _ = tx.send(ScanMsg::Matching(id, i + 1, total));
+                        ctx.request_repaint();
+                    }
+                    std::thread::sleep(MATCH_PAUSE);
+                }
+                Ok(format!("matched {matched} online, {unmatched} not found"))
+            })();
+            let _ = tx.send(ScanMsg::MatchDone(id, result.map_err(|e| format!("{e:#}"))));
+            ctx.request_repaint();
+        });
+    }
+
     /// Rebuilds a library's catalog from the database (after a manual fix), reusing the
     /// already-parsed names.
     fn rebuild_catalog(&mut self, id: i64) {
@@ -286,6 +404,18 @@ impl Shared {
         let Some(org) = &mut state.organised else { return };
         org.catalog = Arc::new(Catalog::build(&state.tree, &org.parsed, &org.groups, shows, &matches));
         state.version += 1;
+    }
+
+    /// Applies a TMDB entry chosen by hand to a show.
+    pub fn apply_match(&mut self, library_id: i64, show_id: i64, c: &flex_core::metadata::Candidate) {
+        match self.db.set_show_metadata(show_id, c, "manual") {
+            Ok(()) => {
+                self.rebuild_catalog(library_id);
+                self.search = None;
+                self.toast(format!("Matched to {}", c.title));
+            }
+            Err(e) => self.toast(format!("Couldn't save the match: {e:#}")),
+        }
     }
 
     /// Puts a folder (group) into `show_id`, optionally with a season. Kept on rescans.
@@ -420,6 +550,7 @@ impl Shared {
     /// Applies finished/progressing scans. Call once per frame.
     pub fn poll_scans(&mut self) {
         let mut reorganise = Vec::new();
+        let mut rematch = Vec::new();
         while let Ok(msg) = self.scan_rx.try_recv() {
             match msg {
                 ScanMsg::Progress(id, n) => {
@@ -449,6 +580,23 @@ impl Shared {
                     self.search = None;
                     self.toast(toast);
                 }
+                ScanMsg::Matching(id, done, total) => {
+                    if let Some(l) = self.lib_mut(id) {
+                        l.matching = Some((done, total));
+                    }
+                    self.rebuild_catalog(id);
+                }
+                ScanMsg::MatchDone(id, result) => {
+                    let Some(l) = self.lib_mut(id) else { continue };
+                    l.matching = None;
+                    let msg = match result {
+                        Ok(summary) => format!("{}: {summary}", l.lib.name),
+                        Err(e) => format!("{}: matching failed: {e}", l.lib.name),
+                    };
+                    self.rebuild_catalog(id);
+                    self.search = None;
+                    self.toast(msg);
+                }
                 ScanMsg::Organised(id, result) => {
                     let Some(l) = self.lib_mut(id) else { continue };
                     l.organising = false;
@@ -456,6 +604,7 @@ impl Shared {
                         Ok(org) => {
                             l.organised = Some(org);
                             l.version += 1;
+                            rematch.push(id);
                         }
                         Err(e) => {
                             let msg = format!("{}: couldn't organise shows: {e}", l.lib.name);
@@ -467,6 +616,9 @@ impl Shared {
         }
         for id in reorganise {
             self.organise(id);
+        }
+        for id in rematch {
+            self.start_matching(id);
         }
     }
 

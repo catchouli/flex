@@ -220,6 +220,17 @@ pub fn header(painter: &Painter, rect: Rect, title: &str, subtitle: &str, style:
     Rect::from_min_max(egui::pos2(rect.left(), top + 10.0), rect.max)
 }
 
+/// Wrapped dim text at the top of `rect`, at most `max_lines` lines; returns its height.
+pub fn paragraph(painter: &Painter, rect: Rect, text: &str, max_lines: usize, style: &egui::Style) -> f32 {
+    let font = TextStyle::Small.resolve(style);
+    let line_h = font.size * 1.35;
+    let galley = painter.layout(text.to_owned(), font, theme::DIM, rect.width().min(1400.0));
+    let height = galley.size().y.min(line_h * max_lines as f32);
+    let clip = Rect::from_min_size(rect.min, vec2(rect.width(), height));
+    painter.with_clip_rect(clip).galley(rect.min, galley, theme::DIM);
+    height
+}
+
 /// Dim centred message, for empty states.
 pub fn message(painter: &Painter, rect: Rect, text: &str, style: &egui::Style) {
     painter.text(rect.center_top() + vec2(0.0, 80.0), Align2::CENTER_TOP, text, TextStyle::Body.resolve(style), theme::DIM);

@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
 
-use super::{Nav, Screen, rename::RenameLibrary};
+use super::{Nav, Screen, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
@@ -205,7 +205,7 @@ impl Screen for KindPicker {
             ListInput::Activate(i) => match sh.add_library(&self.root, LibraryKind::ALL[i]) {
                 Ok(id) => {
                     sh.toast(format!("Added {}, scanning…", self.root.display()));
-                    Nav::replace(RenameLibrary::new(sh, id, "Name this library"))
+                    Nav::replace(TextEntry::rename_library(sh, id, "Name this library"))
                 }
                 Err(e) => {
                     sh.toast(format!("{e:#}"));

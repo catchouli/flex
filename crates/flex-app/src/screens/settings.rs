@@ -3,7 +3,7 @@
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
 
-use super::{Nav, Screen, picker::FolderPicker, rename::RenameLibrary};
+use super::{Nav, Screen, picker::FolderPicker, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
@@ -19,7 +19,7 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        match self.list.handle(press, libs + 3) {
+        match self.list.handle(press, libs + 4) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
@@ -29,6 +29,7 @@ impl Screen for Settings {
                 sh.set_watched_threshold(WATCHED_THRESHOLDS[(i + 1) % WATCHED_THRESHOLDS.len()]);
                 Nav::None
             }
+            ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
             ListInput::Activate(_) => {
                 sh.scan_all();
                 sh.toast("Rescanning all libraries…");
@@ -51,6 +52,8 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::Add, "Add library…"));
         let threshold = (sh.watched_threshold() * 100.0).round();
         rows.push(Row::new(Icon::None, format!("Mark as watched after {threshold}%")).detail("OK to change"));
+        let tmdb = if sh.tmdb_token().is_some() { "connected" } else { "not set up" };
+        rows.push(Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}")).detail("OK to enter a token"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
@@ -76,16 +79,16 @@ impl Screen for LibraryOptions {
         }
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let kind = state.lib.kind;
-        let input = self.list.handle(press, 5);
+        let input = self.list.handle(press, 6);
         // Moving off "Remove" cancels a pending confirmation.
-        self.confirm_remove &= self.list.selected == 4;
+        self.confirm_remove &= self.list.selected == 5;
         match input {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
                 sh.start_scan(self.library_id);
                 Nav::None
             }
-            ListInput::Activate(1) => Nav::push(RenameLibrary::new(sh, self.library_id, "Rename library")),
+            ListInput::Activate(1) => Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
             ListInput::Activate(2) => {
                 let i = LibraryKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
                 let next = LibraryKind::ALL[(i + 1) % LibraryKind::ALL.len()];
@@ -100,6 +103,11 @@ impl Screen for LibraryOptions {
                     LibraryView::Folders => LibraryView::Shows,
                 };
                 sh.set_library_view(self.library_id, view);
+                Nav::None
+            }
+            ListInput::Activate(4) => {
+                sh.rematch(self.library_id);
+                sh.toast("Re-matching… shows you fixed by hand are kept");
                 Nav::None
             }
             ListInput::Activate(_) if !self.confirm_remove => {
@@ -136,6 +144,7 @@ impl Screen for LibraryOptions {
                 LibraryView::Folders => "Opens in: Folders",
             })
             .detail("OK to change"),
+            Row::new(Icon::Refresh, "Re-match online").detail("Redo automatic matches; keeps your fixes"),
             Row::new(Icon::Remove, remove),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);

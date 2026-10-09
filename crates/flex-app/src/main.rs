@@ -28,6 +28,13 @@ fn main() -> eframe::Result {
         }
     }
 
+    // Two copies would both write to the same database (and fight over the screen).
+    let lock = flex_core::single_instance_lock();
+    let already_running = matches!(lock, Ok(None));
+    if let Err(e) = &lock {
+        log::warn!("couldn't take the single-instance lock: {e}");
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flex")
@@ -45,7 +52,10 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Flex",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
+            if already_running {
+                return Ok(Box::new(app::StartupError("Flex is already running.".into())) as Box<dyn eframe::App>);
+            }
             Ok(match app::FlexApp::new(cc, start, windowed) {
                 Ok(app) => Box::new(app) as Box<dyn eframe::App>,
                 Err(e) => {

@@ -49,7 +49,15 @@ fn mode<T: Copy + Ord + std::hash::Hash>(values: impl IntoIterator<Item = T>) ->
 fn title_from_dir(dir: &str) -> Option<(String, Option<i32>)> {
     let top = dir.split('/').next()?;
     let r = hunch::hunch(top);
-    let title = parse::clean_title(r.title()?);
+    let mut title = r.title()?.to_owned();
+    // "Mai-HiME" isn't the film "Mai" by release group "HiME": a scene-style "-GROUP"
+    // suffix with nothing else around it is part of a folder's title.
+    if let Some(group) = r.release_group()
+        && parse::normalize(top) == parse::normalize(&format!("{title} {group}"))
+    {
+        title = format!("{title}-{group}");
+    }
+    let title = parse::clean_title(&title);
     (!title.is_empty()).then_some((title, r.year()))
 }
 
@@ -325,6 +333,12 @@ mod tests {
         assert!(groups.iter().all(|g| g.norm == "dorohedoro"), "{groups:?}");
         let seasons = assign_seasons(&groups.iter().map(|g| (g, None)).collect::<Vec<_>>());
         assert_eq!(seasons, [1, 2]);
+    }
+
+    #[test]
+    fn hyphenated_folder_titles_survive() {
+        assert_eq!(title_from_dir("Mai-HiME").map(|t| t.0).as_deref(), Some("Mai-HiME"));
+        assert_eq!(title_from_dir("Rasen.1998.1080p.Bluray-GROUP").map(|t| t.0).as_deref(), Some("Rasen"));
     }
 
     #[test]

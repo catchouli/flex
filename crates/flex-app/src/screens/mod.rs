@@ -4,9 +4,10 @@
 pub mod home;
 pub mod inspector;
 pub mod library;
+pub mod match_online;
 pub mod options;
 pub mod picker;
-pub mod rename;
+pub mod text_entry;
 pub mod resume;
 pub mod search;
 pub mod settings;

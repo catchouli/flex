@@ -6,6 +6,7 @@ use flex_core::catalog::ShowEntry;
 use flex_core::library::LibraryKind;
 
 use super::inspector::MatchInspector;
+use super::match_online::MatchOnline;
 use super::library::{LibraryView, file_row};
 use super::options::{OptionsMenu, Target};
 use super::{Nav, Screen};
@@ -15,6 +16,11 @@ use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 fn season_name(season: i32) -> String {
     if season == 0 { "Specials".to_owned() } else { format!("Season {season}") }
+}
+
+/// Appended to details of shows not found online (they keep their file-name title).
+fn unmatched_note(entry: &ShowEntry) -> &'static str {
+    if entry.show.state == "unmatched" { " · not matched online" } else { "" }
 }
 
 fn title_with_year(entry: &ShowEntry) -> String {
@@ -106,11 +112,13 @@ impl Screen for ShowsView {
                 let file = entry.episodes.first().and_then(|e| state.tree.file(e.file_id));
                 let mut row = file.map_or_else(|| Row::new(Icon::Video, ""), file_row);
                 row.title = title_with_year(entry);
+                row.detail.push_str(unmatched_note(entry));
                 row
             } else {
                 let (summary, done) = episode_summary(state, entry.episodes.iter().map(|e| e.file_id));
                 let seasons = entry.seasons().iter().filter(|s| **s != 0).count();
-                let detail = if seasons > 1 { format!("{seasons} seasons · {summary}") } else { summary };
+                let mut detail = if seasons > 1 { format!("{seasons} seasons · {summary}") } else { summary };
+                detail.push_str(unmatched_note(entry));
                 Row::new(Icon::Folder, title_with_year(entry)).detail(detail).dim(done)
             };
             rows.push(row);
@@ -166,8 +174,11 @@ impl Screen for ShowView {
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)) else { return Nav::Pop };
-        let subtitle = entry.show.overview.clone().unwrap_or_else(|| state.lib.name.clone());
-        let body = widgets::header(ui.painter(), rect, &title_with_year(entry), &subtitle, ui.style());
+        let subtitle = format!("{}{}", state.lib.name, unmatched_note(entry));
+        let mut body = widgets::header(ui.painter(), rect, &title_with_year(entry), &subtitle, ui.style());
+        if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
+            body.min.y += widgets::paragraph(ui.painter(), body, overview, 3, ui.style()) + 16.0;
+        }
         let mut rows: Vec<Row> = entry
             .seasons()
             .into_iter()
@@ -262,11 +273,12 @@ impl Screen for ShowOptions {
             return Nav::Pop;
         };
         let ids: Vec<i64> = entry.episodes.iter().map(|e| e.file_id).collect();
-        match self.list.handle(press, 3) {
+        match self.list.handle(press, 4) {
             ListInput::Activate(i @ (0 | 1)) => {
                 sh.set_watched(self.library_id, &ids, i == 0);
                 Nav::Pop
             }
+            ListInput::Activate(2) => Nav::replace(MatchOnline::new(sh, self.library_id, self.show_id)),
             ListInput::Activate(_) => Nav::replace(MatchInspector::new(self.library_id, self.show_id)),
             _ => Nav::None,
         }
@@ -280,6 +292,7 @@ impl Screen for ShowOptions {
         let rows = [
             Row::new(Icon::Add, "Mark all as watched"),
             Row::new(Icon::Remove, "Mark all as unwatched"),
+            Row::new(Icon::Refresh, "Match online…").detail("Pick the right title on TMDB"),
             Row::new(Icon::Folder, "Folders & seasons…"),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);

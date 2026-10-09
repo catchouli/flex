@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod db;
 pub mod library;
+pub mod metadata;
 pub mod natural;
 pub mod parse;
 pub mod progress;
@@ -13,6 +14,19 @@ pub mod tree;
 pub use db::Db;
 pub use library::{Library, LibraryKind, MediaFile};
 pub use tree::Tree;
+
+/// Takes the single-instance lock. Returns the lock file (keep it open for the life of the
+/// app), or `None` if another Flex already holds it.
+pub fn single_instance_lock() -> std::io::Result<Option<std::fs::File>> {
+    let dir = data_dir();
+    std::fs::create_dir_all(&dir)?;
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("flex.lock"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
+}
 
 /// Where Flex keeps its database: `%APPDATA%\Flex\data` on Windows,
 /// `~/Library/Application Support/Flex` on macOS.

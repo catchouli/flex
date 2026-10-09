@@ -43,9 +43,15 @@ static NOISE: LazyLock<Regex> = LazyLock::new(|| {
     ")
     .unwrap()
 });
+/// Encoding/language leftovers at the end of a title ("1080p;H265", "JP", "tvdb4", "001").
+static TRAILING_TAGS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:[\s._;,-]+(?:(?:480|576|720|1080|2160)p?|[xh]\.?26[45]|hevc|avc|jp|jap|jpn|eng|dub|sub|raw|tvdb[\d-]*))+$|\s\d{1,3}$").unwrap()
+});
 static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
 static TRAILING_JUNK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)[\s._-]*(?:\(?\d{1,4}\s*-\s*\d{1,4}\)?|complete|batch|\bS\d{1,2}(?:\s*-\s*S?\d{1,2})?|season[\s._-]*\d+(?:\s*-\s*\d+)?)\s*$")
+    Regex::new(
+        r"(?i)[\s._-]*(?:\(?\d{1,4}\s*-\s*\d{1,4}\)?|(?:the\s+)?(?:complete|full)(?:\s+series)?|batch|collection|\bS\d{1,2}(?:\s*-\s*S?\d{1,2})?|season[\s._-]*\d+(?:\s*-\s*\d+)?|\b\d+(?:st|nd|rd|th)(?:\s+season)?)\s*$",
+    )
         .unwrap()
 });
 
@@ -110,6 +116,7 @@ pub fn clean_title(raw: &str) -> String {
     // Strip trailing "01-40", "Complete", "S1 - S3", "Season 1-2" (possibly repeatedly).
     loop {
         let stripped = TRAILING_JUNK.replace(&t, "").trim().to_owned();
+        let stripped = TRAILING_TAGS.replace(&stripped, "").trim().to_owned();
         if stripped == t || stripped.is_empty() {
             break;
         }
@@ -345,6 +352,18 @@ mod tests {
     fn titles() {
         assert_eq!(clean_title("Daisougen no Chiisana Tenshi Bush Baby 01-40"), "Daisougen no Chiisana Tenshi Bush Baby");
         assert_eq!(clean_title("Heion Sedai no Idaten-tachi (01-11)"), "Heion Sedai no Idaten-tachi");
+        assert_eq!(clean_title("Code Geass Full Series"), "Code Geass");
+        assert_eq!(clean_title("Dandadan 2nd"), "Dandadan");
+        assert_eq!(clean_title("Dandadan 2nd Season"), "Dandadan");
+        assert_eq!(clean_title("Inukami! 1080p;H265"), "Inukami!");
+        assert_eq!(clean_title("Seto no Hanayome 1080"), "Seto no Hanayome");
+        assert_eq!(clean_title("Golden Boy JP"), "Golden Boy");
+        assert_eq!(clean_title("Sergeant Keroro 001"), "Sergeant Keroro");
+        assert_eq!(clean_title("One Piece tvdb4"), "One Piece");
+        assert_eq!(clean_title("One Piece tvdb4-81797"), "One Piece");
+        assert_eq!(clean_title("Ghost in the Shell 2.0"), "Ghost in the Shell 2.0");
+        assert_eq!(clean_title("86"), "86", "never strips a title to nothing");
+        assert_eq!(clean_title("Mobile Suit Gundam 0083"), "Mobile Suit Gundam 0083");
         assert_eq!(normalize("The Lost Universe!"), "lost universe");
         assert_eq!(normalize("Attack On Titan"), normalize("attack on titan"));
     }

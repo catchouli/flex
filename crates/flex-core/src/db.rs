@@ -114,6 +114,8 @@ impl Db {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
+        // Scans, matching and the UI write from separate connections. Write transactions
+        // start IMMEDIATE so they wait for each other instead of failing to upgrade.
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         let mut version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let latest = 1 + MIGRATIONS.len() as i64;
@@ -179,7 +181,7 @@ impl Db {
     /// for vanished groups are dropped unless set by hand, and shows left with no groups
     /// are removed.
     pub fn sync_groups(&mut self, library_id: i64, groups: &[crate::catalog::Group]) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             // group key -> (show id, manual)
             let existing: HashMap<String, (i64, bool)> = {
@@ -253,6 +255,53 @@ impl Db {
             params![library_id, group_key, show_id, season],
         )?;
         Self::delete_empty_shows(&self.conn, library_id)
+    }
+
+    /// Stores what was found online for a show. `state` is "matched", or "manual" when
+    /// chosen by hand. If another show in the library already has this entry, this show's
+    /// folders join it instead (e.g. a romaji-named folder and an English-named one).
+    pub fn set_show_metadata(&mut self, show_id: i64, found: &crate::metadata::Candidate, state: &str) -> Result<()> {
+        let provider_id = found.provider_id();
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let library_id: i64 = tx.query_row("SELECT library_id FROM shows WHERE id = ?1", [show_id], |r| r.get(0))?;
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM shows WHERE library_id = ?1 AND provider = 'tmdb' AND provider_id = ?2 AND id != ?3",
+                params![library_id, provider_id, show_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match existing {
+            Some(into) => {
+                tx.execute("UPDATE group_matches SET show_id = ?1 WHERE show_id = ?2", params![into, show_id])?;
+                tx.execute("DELETE FROM shows WHERE id = ?1", [show_id])?;
+            }
+            None => {
+                tx.execute(
+                    "UPDATE shows SET provider = 'tmdb', provider_id = ?2, title = ?3, year = ?4, overview = ?5,
+                     poster = ?6, state = ?7 WHERE id = ?1",
+                    params![show_id, provider_id, found.title, found.year, found.overview, found.poster_path, state],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Forgets automatic grouping and online matches for a library (manual choices stay),
+    /// so the next organise + match starts afresh.
+    pub fn reset_matching(&mut self, library_id: i64) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM group_matches WHERE library_id = ?1 AND manual = 0", [library_id])?;
+        tx.execute("UPDATE shows SET state = 'local' WHERE library_id = ?1 AND state = 'unmatched'", [library_id])?;
+        Self::delete_empty_shows(&tx, library_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_show_state(&self, show_id: i64, state: &str) -> Result<()> {
+        self.conn.execute("UPDATE shows SET state = ?2 WHERE id = ?1", params![show_id, state])?;
+        Ok(())
     }
 
     /// A new show for a group split off by hand.
@@ -341,7 +390,7 @@ impl Db {
 
     /// Marks files watched or unwatched, clearing any resume position.
     pub fn set_watched(&mut self, file_ids: &[i64], watched: bool) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare("UPDATE media_files SET watched = ?2, position = NULL WHERE id = ?1")?;
             for id in file_ids {
@@ -354,7 +403,7 @@ impl Db {
 
     /// Records a scan: inserts new files, updates changed ones and marks vanished ones missing.
     pub fn apply_scan(&mut self, library_id: i64, files: &[ScannedFile]) -> Result<ScanSummary> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut existing: HashMap<String, (i64, bool)> = {
             let mut stmt = tx.prepare("SELECT id, rel_path, missing FROM media_files WHERE library_id = ?1")?;
             let rows = stmt.query_map([library_id], |r| Ok((r.get::<_, String>(1)?, (r.get(0)?, r.get(2)?))))?;
@@ -429,9 +478,33 @@ mod tests {
         assert_eq!((m.show_id, m.season, m.manual), (a, Some(3), true));
         assert_eq!(db.shows(lib).unwrap().len(), 1);
 
+        // Matching online: a second show that turns out to be the same entry merges in.
+        let found = crate::metadata::Candidate {
+            kind: crate::metadata::Kind::Tv,
+            id: 1,
+            title: "Show A (TMDB)".into(),
+            original_title: String::new(),
+            year: Some(2020),
+            overview: String::new(),
+            poster_path: None,
+            popularity: 0.0,
+            genre_ids: vec![],
+            original_language: String::new(),
+        };
+        let shows = db.shows(lib).unwrap();
+        let a = shows[0].id;
+        db.set_show_metadata(a, &found, "matched").unwrap();
+        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B"), group("C", "Other")])
+            .unwrap();
+        let other = db.shows(lib).unwrap().into_iter().find(|s| s.title == "Other").unwrap().id;
+        db.set_show_metadata(other, &found, "matched").unwrap();
+        assert!(db.shows(lib).unwrap().iter().all(|s| s.id != other));
+        let c = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "C").unwrap();
+        assert_eq!(c.show_id, a);
+
         // A vanished automatic group is dropped.
         db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
-        assert_eq!(db.group_matches(lib).unwrap().len(), 2);
+        assert_eq!(db.group_matches(lib).unwrap().len(), 2, "A2 and C dropped");
     }
 
     #[test]
