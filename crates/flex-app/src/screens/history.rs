@@ -4,12 +4,11 @@
 use chrono::{Local, TimeZone};
 use eframe::egui::{Rect, Ui};
 use flex_core::db::HistoryEntry;
-use flex_core::library::display_name;
 
 use super::options::{OptionsMenu, Target};
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
-use crate::shared::{LibState, Shared};
+use crate::shared::Shared;
 use crate::theme;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
@@ -36,21 +35,9 @@ impl HistoryView {
     }
 }
 
-/// "Dorohedoro · S1E5", a film's title, or the file name if not organised.
-fn label(state: &LibState, file_id: i64) -> String {
-    let file_name = || state.tree.file(file_id).map_or_else(String::new, |f| display_name(f.file_name(), true));
-    let Some(show) = state.catalog().and_then(|c| c.show_of_file(file_id)) else { return file_name() };
-    if !show.is_series() {
-        return show.show.title.clone();
-    }
-    match show.episodes.iter().find(|e| e.file_id == file_id) {
-        Some(e) if e.season == 0 => format!("{} · Special · {}", show.show.title, file_name()),
-        Some(e) => match e.number {
-            Some(n) => format!("{} · S{}E{n}", show.show.title, e.season),
-            None => format!("{} · {}", show.show.title, file_name()),
-        },
-        None => file_name(),
-    }
+/// "Dorohedoro · S1E5 · Title", a film's title, or the file name if not organised.
+fn label(sh: &Shared, library_id: i64, file_id: i64) -> String {
+    sh.titles(library_id, file_id).map_or_else(String::new, |t| t.full())
 }
 
 fn when(unix: i64) -> String {
@@ -94,7 +81,7 @@ impl Screen for HistoryView {
                     (false, Some(p), _) => format!("stopped at {}", theme::format_time(p)),
                     (false, None, _) => "started".to_owned(),
                 };
-                Row::new(Icon::Video, label(state, e.file_id)).detail(format!("{} · {how}", when(e.played_at)))
+                Row::new(Icon::Video, label(sh, self.library_id, e.file_id)).detail(format!("{} · {how}", when(e.played_at)))
             })
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);

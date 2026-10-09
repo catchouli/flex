@@ -76,9 +76,10 @@ impl PlexImport {
                 Ok(Ok(summary)) => {
                     sh.reload_files();
                     sh.toast(format!(
-                        "Imported from Plex: {} files updated, {} history entries added",
+                        "Imported from Plex: {} files updated, {} history entries and {} added dates",
                         thousands(summary.files_updated),
-                        thousands(summary.history_added)
+                        thousands(summary.history_added),
+                        thousands(summary.dates_added)
                     ));
                     return Nav::Pop;
                 }
@@ -137,13 +138,15 @@ impl Screen for PlexImport {
         };
         let plan = &preview.plan;
         let summary = format!(
-            "Plex account “{}”: watch state for {} files and {} history entries can be imported. \
+            "Plex account “{}”: watch state for {} files, {} history entries and when {} files were added \
+             can be imported. \
              Files already marked watched in Flex stay watched; resume points come from whichever \
              was played more recently. {} entries couldn't be matched to files (deleted, or in a \
              library Flex doesn't have).",
             preview.account,
             thousands(plan.progress.len()),
             thousands(plan.history.len()),
+            thousands(plan.added.len()),
             thousands(plan.unmatched_items + plan.unmatched_views),
         );
         let mut list_rect = body;

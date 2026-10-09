@@ -72,6 +72,43 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE (file_id, played_at)
     );
     CREATE INDEX play_history_by_time ON play_history(played_at);",
+    // 5: richer metadata (details, cast, episode titles) and when files were added
+    "ALTER TABLE media_files ADD COLUMN added_at INTEGER;
+    UPDATE media_files SET added_at = mtime;
+    ALTER TABLE shows ADD COLUMN release_date TEXT;
+    ALTER TABLE shows ADD COLUMN runtime INTEGER;
+    ALTER TABLE shows ADD COLUMN genres TEXT;
+    ALTER TABLE shows ADD COLUMN backdrop TEXT;
+    ALTER TABLE shows ADD COLUMN details_at INTEGER;
+    -- keyed by provider id so they survive shows being regrouped
+    CREATE TABLE credits (
+        provider_id TEXT NOT NULL,
+        kind        TEXT NOT NULL, -- 'cast' (TMDB) or 'voice' (AniList, Japanese)
+        ord         INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        role        TEXT,
+        image       TEXT,
+        PRIMARY KEY (provider_id, kind, ord)
+    );
+    CREATE TABLE tv_episodes (
+        provider_id TEXT NOT NULL,
+        season      INTEGER NOT NULL,
+        episode     INTEGER NOT NULL,
+        title       TEXT,
+        overview    TEXT,
+        still       TEXT,
+        air_date    TEXT,
+        runtime     INTEGER,
+        PRIMARY KEY (provider_id, season, episode)
+    );
+    CREATE TABLE tv_seasons (
+        provider_id   TEXT NOT NULL,
+        season        INTEGER NOT NULL,
+        episode_count INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, season)
+    );",
+    // 6: when Japanese voice actors were last looked up (anime)
+    "ALTER TABLE shows ADD COLUMN voice_at INTEGER;",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,9 +126,10 @@ pub struct HistoryEntry {
 pub struct ImportSummary {
     pub files_updated: usize,
     pub history_added: usize,
+    pub dates_added: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Show {
     pub id: i64,
     pub library_id: i64,
@@ -102,6 +140,39 @@ pub struct Show {
     pub overview: Option<String>,
     pub poster: Option<String>,
     pub state: String,
+    pub release_date: Option<String>,
+    /// Minutes (per episode for TV).
+    pub runtime: Option<i32>,
+    /// Comma separated.
+    pub genres: Option<String>,
+    pub backdrop: Option<String>,
+    /// When details were last fetched (Unix seconds).
+    pub details_at: Option<i64>,
+}
+
+/// TMDB's title etc. for one episode.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EpisodeMeta {
+    pub title: String,
+    pub overview: String,
+    pub still: Option<String>,
+    pub air_date: Option<String>,
+    pub runtime: Option<i32>,
+}
+
+/// Episode metadata for one series: per (season, episode), plus TMDB's season sizes.
+#[derive(Clone, Debug, Default)]
+pub struct SeriesMeta {
+    pub episodes: HashMap<(i32, i32), EpisodeMeta>,
+    pub seasons: Vec<crate::metadata::SeasonInfo>,
+}
+
+impl SeriesMeta {
+    /// Metadata for a locally numbered episode (see [`crate::metadata::map_episode`]).
+    pub fn episode(&self, season: i32, number: i32) -> Option<&EpisodeMeta> {
+        let key = crate::metadata::map_episode(season, number, &self.seasons)?;
+        self.episodes.get(&key)
+    }
 }
 
 /// Which show a group (folder) belongs to.
@@ -176,7 +247,8 @@ impl Db {
 
     pub fn shows(&self, library_id: i64) -> Result<Vec<Show>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, library_id, title, year, provider, provider_id, overview, poster, state
+            "SELECT id, library_id, title, year, provider, provider_id, overview, poster, state,
+                    release_date, runtime, genres, backdrop, details_at
              FROM shows WHERE library_id = ?1",
         )?;
         let rows = stmt.query_map([library_id], |r| {
@@ -190,6 +262,11 @@ impl Db {
                 overview: r.get(6)?,
                 poster: r.get(7)?,
                 state: r.get(8)?,
+                release_date: r.get(9)?,
+                runtime: r.get(10)?,
+                genres: r.get(11)?,
+                backdrop: r.get(12)?,
+                details_at: r.get(13)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -313,7 +390,7 @@ impl Db {
             None => {
                 tx.execute(
                     "UPDATE shows SET provider = 'tmdb', provider_id = ?2, title = ?3, year = ?4, overview = ?5,
-                     poster = ?6, state = ?7 WHERE id = ?1",
+                     poster = ?6, state = ?7, details_at = NULL WHERE id = ?1",
                     params![show_id, provider_id, found.title, found.year, found.overview, found.poster_path, state],
                 )?;
             }
@@ -331,6 +408,129 @@ impl Db {
         Self::delete_empty_shows(&tx, library_id)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Matched shows whose details are missing or older than `max_age` seconds:
+    /// (show id, provider id, title).
+    pub fn shows_needing_details(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, provider_id, title FROM shows
+             WHERE library_id = ?1 AND provider_id IS NOT NULL
+             AND (details_at IS NULL OR details_at < strftime('%s', 'now') - ?2)",
+        )?;
+        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Stores fetched details (and TMDB cast) for a show.
+    pub fn save_details(&mut self, show_id: i64, provider_id: &str, d: &crate::metadata::Details) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let genres = (!d.genres.is_empty()).then(|| d.genres.join(", "));
+        tx.execute(
+            "UPDATE shows SET overview = ?2, release_date = ?3, runtime = ?4, genres = ?5, backdrop = ?6,
+             poster = COALESCE(?7, poster), details_at = strftime('%s', 'now') WHERE id = ?1",
+            params![show_id, d.overview, d.release_date, d.runtime, genres, d.backdrop_path, d.poster_path],
+        )?;
+        Self::replace_credits(&tx, provider_id, "cast", &d.cast)?;
+        tx.execute("DELETE FROM tv_seasons WHERE provider_id = ?1", [provider_id])?;
+        for s in &d.seasons {
+            tx.execute(
+                "INSERT INTO tv_seasons (provider_id, season, episode_count) VALUES (?1, ?2, ?3)",
+                params![provider_id, s.number, s.episode_count],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn replace_credits(conn: &Connection, provider_id: &str, kind: &str, cast: &[crate::metadata::CastMember]) -> Result<()> {
+        conn.execute("DELETE FROM credits WHERE provider_id = ?1 AND kind = ?2", params![provider_id, kind])?;
+        for (i, c) in cast.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO credits (provider_id, kind, ord, name, role, image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![provider_id, kind, i as i64, c.name, c.role, c.image],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Matched shows whose voice cast hasn't been looked up (or not for `max_age` seconds):
+    /// (show id, provider id, title).
+    pub fn shows_needing_voice_cast(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, provider_id, title FROM shows
+             WHERE library_id = ?1 AND provider_id IS NOT NULL
+             AND (voice_at IS NULL OR voice_at < strftime('%s', 'now') - ?2)",
+        )?;
+        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Stores a show's voice cast (if any was found) and notes that it was looked up.
+    pub fn save_voice_cast(&self, show_id: i64, provider_id: &str, cast: &[crate::metadata::CastMember]) -> Result<()> {
+        if !cast.is_empty() {
+            Self::replace_credits(&self.conn, provider_id, "voice", cast)?;
+        }
+        self.conn.execute("UPDATE shows SET voice_at = strftime('%s', 'now') WHERE id = ?1", [show_id])?;
+        Ok(())
+    }
+
+    /// Credits of one kind ("cast" or "voice"), in billing order.
+    pub fn credits(&self, provider_id: &str, kind: &str) -> Result<Vec<crate::metadata::CastMember>> {
+        let mut stmt =
+            self.conn.prepare("SELECT name, role, image FROM credits WHERE provider_id = ?1 AND kind = ?2 ORDER BY ord")?;
+        let rows = stmt.query_map(params![provider_id, kind], |r| {
+            Ok(crate::metadata::CastMember {
+                name: r.get(0)?,
+                role: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                image: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn save_episodes(&mut self, provider_id: &str, episodes: &[crate::metadata::EpisodeInfo]) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for e in episodes {
+            tx.execute(
+                "INSERT OR REPLACE INTO tv_episodes (provider_id, season, episode, title, overview, still, air_date, runtime)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![provider_id, e.season, e.episode, e.title, e.overview, e.still_path, e.air_date, e.runtime],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// All series metadata, by provider id.
+    pub fn series_meta(&self) -> Result<HashMap<String, SeriesMeta>> {
+        let mut out: HashMap<String, SeriesMeta> = HashMap::new();
+        let mut stmt = self.conn.prepare("SELECT provider_id, season, episode_count FROM tv_seasons")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?)))?;
+        for row in rows {
+            let (pid, number, episode_count) = row?;
+            out.entry(pid).or_default().seasons.push(crate::metadata::SeasonInfo { number, episode_count });
+        }
+        let mut stmt =
+            self.conn.prepare("SELECT provider_id, season, episode, title, overview, still, air_date, runtime FROM tv_episodes")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get(1)?, r.get(2)?),
+                EpisodeMeta {
+                    title: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    overview: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    still: r.get(5)?,
+                    air_date: r.get(6)?,
+                    runtime: r.get(7)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (pid, key, meta) = row?;
+            out.entry(pid).or_default().episodes.insert(key, meta);
+        }
+        Ok(out)
     }
 
     pub fn set_show_state(&self, show_id: i64, state: &str) -> Result<()> {
@@ -393,7 +593,7 @@ impl Db {
     /// Files currently present in a library (not marked missing).
     pub fn files(&self, library_id: i64) -> Result<Vec<MediaFile>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, library_id, rel_path, size, mtime, position, duration, watched, last_played
+            "SELECT id, library_id, rel_path, size, mtime, position, duration, watched, last_played, added_at
              FROM media_files WHERE library_id = ?1 AND missing = 0",
         )?;
         let rows = stmt.query_map([library_id], |r| {
@@ -403,6 +603,7 @@ impl Db {
                 rel_path: r.get(2)?,
                 size: r.get::<_, i64>(3)? as u64,
                 mtime: r.get(4)?,
+                added_at: r.get::<_, Option<i64>>(9)?.unwrap_or_default(),
                 progress: Progress {
                     position: r.get(5)?,
                     duration: r.get(6)?,
@@ -470,6 +671,13 @@ impl Db {
             for (id, at) in &plan.history {
                 summary.history_added += add.execute(params![id, at])?;
             }
+            // Plex's "added" date is kept unless Flex already has an earlier one.
+            let mut added = tx.prepare(
+                "UPDATE media_files SET added_at = ?2 WHERE id = ?1 AND (added_at IS NULL OR added_at > ?2)",
+            )?;
+            for (id, at) in &plan.added {
+                summary.dates_added += added.execute(params![id, at])?;
+            }
         }
         tx.commit()?;
         Ok(summary)
@@ -499,7 +707,8 @@ impl Db {
         let mut summary = ScanSummary { total: files.len(), ..Default::default() };
         {
             let mut insert = tx.prepare(
-                "INSERT INTO media_files (library_id, rel_path, size, mtime) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO media_files (library_id, rel_path, size, mtime, added_at)
+                 VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))",
             )?;
             let mut update =
                 tx.prepare("UPDATE media_files SET size = ?2, mtime = ?3, missing = 0 WHERE id = ?1")?;
@@ -608,16 +817,56 @@ mod tests {
         db.apply_scan(lib, &[file("a/1.mkv")]).unwrap();
         let id = db.files(lib).unwrap()[0].id;
         let item = PlexItem { file: String::new(), watched: true, offset_secs: None, duration_secs: Some(1400.0), last_viewed: Some(500) };
-        let plan = ImportPlan { progress: vec![(id, item)], history: vec![(id, 400), (id, 500)], ..Default::default() };
+        let plan = ImportPlan {
+            progress: vec![(id, item)],
+            history: vec![(id, 400), (id, 500)],
+            added: vec![(id, 300)],
+            ..Default::default()
+        };
         let first = db.import_plex(&plan).unwrap();
-        assert_eq!((first.files_updated, first.history_added), (1, 2));
+        assert_eq!((first.files_updated, first.history_added, first.dates_added), (1, 2, 1));
         let again = db.import_plex(&plan).unwrap();
-        assert_eq!((again.files_updated, again.history_added), (0, 0));
+        assert_eq!((again.files_updated, again.history_added, again.dates_added), (0, 0, 0));
+        assert_eq!(db.files(lib).unwrap()[0].added_at, 300);
         assert!(db.files(lib).unwrap()[0].progress.watched);
         db.add_history(id, 600, Some(42.0), false).unwrap();
         let h = db.history(lib, 10).unwrap();
         assert_eq!(h.iter().map(|e| e.played_at).collect::<Vec<_>>(), [600, 500, 400]);
         assert_eq!(h[1].source, "plex");
+    }
+
+    #[test]
+    fn details_and_episodes_roundtrip() {
+        use crate::metadata::{CastMember, Details, EpisodeInfo, SeasonInfo};
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let show = db.create_show(lib, "Show", None).unwrap();
+        let details = Details {
+            overview: "About".into(),
+            runtime: Some(24),
+            genres: vec!["Animation".into(), "Comedy".into()],
+            cast: vec![CastMember { name: "A".into(), role: "B".into(), image: None }],
+            seasons: vec![SeasonInfo { number: 1, episode_count: 12 }, SeasonInfo { number: 2, episode_count: 12 }],
+            ..Default::default()
+        };
+        db.save_details(show, "tv:1", &details).unwrap();
+        let s = db.shows(lib).unwrap().into_iter().find(|s| s.id == show).unwrap();
+        assert_eq!((s.genres.as_deref(), s.runtime), (Some("Animation, Comedy"), Some(24)));
+        assert!(s.details_at.is_some());
+        assert_eq!(db.credits("tv:1", "cast").unwrap().len(), 1);
+        let ep = |season, episode, title: &str| EpisodeInfo {
+            season,
+            episode,
+            title: title.into(),
+            overview: String::new(),
+            still_path: None,
+            air_date: None,
+            runtime: None,
+        };
+        db.save_episodes("tv:1", &[ep(2, 1, "Second season start")]).unwrap();
+        let meta = db.series_meta().unwrap();
+        // Absolute episode 13 is season 2 episode 1.
+        assert_eq!(meta["tv:1"].episode(1, 13).unwrap().title, "Second season start");
     }
 
     #[test]

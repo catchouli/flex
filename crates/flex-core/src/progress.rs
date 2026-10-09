@@ -194,17 +194,7 @@ mod tests {
         ]);
         let parsed = crate::parse::parse_episodes(tree.files());
         let groups = catalog::derive_groups(LibraryKind::Anime, &tree, &parsed);
-        let show = |id, title: &str| Show {
-            id,
-            library_id: 1,
-            title: title.into(),
-            year: None,
-            provider: None,
-            provider_id: None,
-            overview: None,
-            poster: None,
-            state: "local".into(),
-        };
+        let show = |id, title: &str| Show { id, library_id: 1, title: title.into(), state: "local".into(), ..Default::default() };
         let m = |key: &str, show_id| GroupMatch { group_key: key.into(), show_id, season: None, manual: false };
         let matches = [m("Show S1", 1), m("Show S2", 1), m("Done", 2)];
         let cat = Catalog::build(&tree, &parsed, &groups, vec![show(1, "Show"), show(2, "Done")], &matches);

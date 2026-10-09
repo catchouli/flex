@@ -164,6 +164,181 @@ fn anilist_wait() {
     *last = Some(std::time::Instant::now());
 }
 
+/// One credited person: an actor and their character, or a voice actor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CastMember {
+    pub name: String,
+    /// Character played.
+    pub role: String,
+    /// TMDB profile image path, or a full image URL (AniList).
+    pub image: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeasonInfo {
+    pub number: i32,
+    pub episode_count: i32,
+}
+
+/// Everything shown on a show or film's page.
+#[derive(Clone, Debug, Default)]
+pub struct Details {
+    pub title: String,
+    pub overview: String,
+    pub release_date: Option<String>,
+    /// Minutes (per episode for TV).
+    pub runtime: Option<i32>,
+    pub genres: Vec<String>,
+    pub poster_path: Option<String>,
+    pub backdrop_path: Option<String>,
+    pub cast: Vec<CastMember>,
+    /// TV only.
+    pub seasons: Vec<SeasonInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EpisodeInfo {
+    pub season: i32,
+    pub episode: i32,
+    pub title: String,
+    pub overview: String,
+    pub still_path: Option<String>,
+    pub air_date: Option<String>,
+    pub runtime: Option<i32>,
+}
+
+/// How many cast members are kept.
+const MAX_CAST: usize = 20;
+
+fn str_of(v: &serde_json::Value) -> String {
+    v.as_str().unwrap_or_default().to_owned()
+}
+
+fn opt_str(v: &serde_json::Value) -> Option<String> {
+    v.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
+}
+
+impl Tmdb {
+    fn get_json(&self, path: &str, query: &[(&str, &str)]) -> Result<serde_json::Value> {
+        let mut req =
+            self.agent.get(format!("{TMDB_API}{path}")).header("Authorization", format!("Bearer {}", self.token));
+        for (k, v) in query {
+            req = req.query(*k, *v);
+        }
+        Ok(req.call().with_context(|| format!("TMDB {path}"))?.body_mut().read_json()?)
+    }
+
+    /// Details and cast for a matched entry ("tv:123" / "movie:456").
+    pub fn details(&self, provider_id: &str) -> Result<Details> {
+        let (kind, id) = provider_id.split_once(':').context("bad provider id")?;
+        let tv = kind == "tv";
+        let credits = if tv { "aggregate_credits" } else { "credits" };
+        let v = self.get_json(&format!("/{kind}/{id}"), &[("append_to_response", credits)])?;
+        let cast = v[credits]["cast"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(MAX_CAST)
+            .map(|c| CastMember {
+                name: str_of(&c["name"]),
+                // TV credits list roles; films a single character.
+                role: c["roles"][0]["character"].as_str().map_or_else(|| str_of(&c["character"]), str::to_owned),
+                image: opt_str(&c["profile_path"]),
+            })
+            .collect();
+        let runtime = if tv { v["episode_run_time"][0].as_i64() } else { v["runtime"].as_i64() };
+        Ok(Details {
+            title: str_of(if tv { &v["name"] } else { &v["title"] }),
+            overview: str_of(&v["overview"]),
+            release_date: opt_str(if tv { &v["first_air_date"] } else { &v["release_date"] }),
+            runtime: runtime.filter(|r| *r > 0).map(|r| r as i32),
+            genres: v["genres"].as_array().into_iter().flatten().map(|g| str_of(&g["name"])).collect(),
+            poster_path: opt_str(&v["poster_path"]),
+            backdrop_path: opt_str(&v["backdrop_path"]),
+            cast,
+            seasons: v["seasons"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| {
+                    Some(SeasonInfo {
+                        number: s["season_number"].as_i64()? as i32,
+                        episode_count: s["episode_count"].as_i64().unwrap_or(0) as i32,
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// Episode titles, descriptions and stills for one season of a series.
+    pub fn season(&self, tv_id: &str, season: i32) -> Result<Vec<EpisodeInfo>> {
+        let v = self.get_json(&format!("/tv/{tv_id}/season/{season}"), &[])?;
+        Ok(v["episodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| {
+                Some(EpisodeInfo {
+                    season,
+                    episode: e["episode_number"].as_i64()? as i32,
+                    title: str_of(&e["name"]),
+                    overview: str_of(&e["overview"]),
+                    still_path: opt_str(&e["still_path"]),
+                    air_date: opt_str(&e["air_date"]),
+                    runtime: e["runtime"].as_i64().map(|r| r as i32),
+                })
+            })
+            .collect())
+    }
+}
+
+/// Where a locally numbered episode sits in TMDB's seasons. Uses (season, episode) when
+/// TMDB has it; otherwise treats the number as absolute and counts through the seasons
+/// (anime numbered 1–150 straight through, which TMDB splits into seasons).
+pub fn map_episode(season: i32, episode: i32, seasons: &[SeasonInfo]) -> Option<(i32, i32)> {
+    let fits = |s: &SeasonInfo| s.number == season && episode >= 1 && episode <= s.episode_count;
+    if seasons.iter().any(fits) {
+        return Some((season, episode));
+    }
+    // Absolute numbering only makes sense counted from the first regular season.
+    let first_regular = seasons.iter().filter(|s| s.number > 0).map(|s| s.number).min()?;
+    if season > first_regular || season == 0 {
+        return None;
+    }
+    let mut regular: Vec<&SeasonInfo> = seasons.iter().filter(|s| s.number > 0).collect();
+    regular.sort_by_key(|s| s.number);
+    let mut remaining = episode;
+    for s in regular {
+        if remaining <= s.episode_count {
+            return Some((s.number, remaining));
+        }
+        remaining -= s.episode_count;
+    }
+    None
+}
+
+/// Main characters and their Japanese voice actors, from AniList (for anime).
+pub fn anilist_voice_cast(title: &str) -> Result<Vec<CastMember>> {
+    let body = serde_json::json!({
+        "query": "query($s:String){Media(search:$s,type:ANIME){characters(sort:[ROLE,RELEVANCE],perPage:16){edges{node{name{full}}voiceActors(language:JAPANESE){name{full}image{medium}}}}}}",
+        "variables": { "s": title },
+    });
+    anilist_wait();
+    let value: serde_json::Value = agent().post(ANILIST_API).send_json(&body).context("AniList characters")?.body_mut().read_json()?;
+    let mut cast = Vec::new();
+    for edge in value["data"]["Media"]["characters"]["edges"].as_array().into_iter().flatten() {
+        let character = str_of(&edge["node"]["name"]["full"]);
+        if let Some(va) = edge["voiceActors"].as_array().and_then(|v| v.first()) {
+            cast.push(CastMember {
+                name: str_of(&va["name"]["full"]),
+                role: character,
+                image: opt_str(&va["image"]["medium"]),
+            });
+        }
+    }
+    Ok(cast)
+}
+
 /// Alternative titles for an anime from AniList (English, romaji, native), to retry TMDB with.
 pub fn anilist_titles(query: &str) -> Result<Vec<String>> {
     let body = serde_json::json!({
@@ -363,6 +538,21 @@ mod tests {
         assert!(choose("Abd", None, &unrelated).is_none());
         let mai = [cand("Ganga Mai Ki Betiyan", "", Some(2025), 3.0), cand("Other", "", None, 1.0)];
         assert!(choose("Mai", None, &mai).is_none(), "single short word isn't enough");
+    }
+
+    #[test]
+    fn maps_absolute_episode_numbers_across_seasons() {
+        let seasons = [
+            SeasonInfo { number: 0, episode_count: 5 },
+            SeasonInfo { number: 1, episode_count: 12 },
+            SeasonInfo { number: 2, episode_count: 13 },
+        ];
+        assert_eq!(map_episode(1, 5, &seasons), Some((1, 5)));
+        assert_eq!(map_episode(2, 3, &seasons), Some((2, 3)));
+        assert_eq!(map_episode(1, 14, &seasons), Some((2, 2)), "absolute numbering");
+        assert_eq!(map_episode(1, 40, &seasons), None);
+        assert_eq!(map_episode(3, 1, &seasons), None);
+        assert_eq!(map_episode(0, 2, &seasons), Some((0, 2)));
     }
 
     #[test]

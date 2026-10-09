@@ -53,6 +53,8 @@ pub struct MediaFile {
     pub rel_path: String,
     pub size: u64,
     pub mtime: i64,
+    /// When Flex first saw the file (Unix seconds).
+    pub added_at: i64,
     pub progress: crate::progress::Progress,
 }
 

@@ -1,14 +1,19 @@
 //! A library organised into shows: Shows → Show (seasons) → Season (episodes).
 //! Movies libraries list movies, which play directly.
 
-use eframe::egui::{Rect, Ui};
+use eframe::egui::{self, Rect, Ui};
+
+use crate::images::Size;
+
+/// Width of the poster on a show's page.
+const POSTER_W: f32 = 340.0;
 use flex_core::catalog::ShowEntry;
 use flex_core::library::LibraryKind;
 
 use super::history::HistoryView;
 use super::inspector::MatchInspector;
 use super::match_online::MatchOnline;
-use super::library::{LibraryView, file_row};
+use super::library::{LibraryView, file_row, file_row_titled};
 use super::options::{OptionsMenu, Target};
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
@@ -184,6 +189,15 @@ impl Screen for ShowView {
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)) else { return Nav::Pop };
         let subtitle = format!("{}{}", state.lib.name, unmatched_note(entry));
+        // Poster in a column on the right; everything else to its left.
+        let poster_path = entry.show.poster.clone();
+        let (rect, poster_rect) = match &poster_path {
+            Some(_) => {
+                let poster = egui::Rect::from_min_size(egui::pos2(rect.right() - POSTER_W, rect.top()), egui::vec2(POSTER_W, POSTER_W * 1.5));
+                (egui::Rect::from_min_max(rect.min, egui::pos2(poster.left() - 40.0, rect.bottom())), Some(poster))
+            }
+            None => (rect, None),
+        };
         let mut body = widgets::header(ui.painter(), rect, &title_with_year(entry), &subtitle, ui.style());
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
             body.min.y += widgets::paragraph(ui.painter(), body, overview, 3, ui.style()) + 16.0;
@@ -198,6 +212,14 @@ impl Screen for ShowView {
             .collect();
         rows.push(Row::new(Icon::None, "Folders & seasons…").detail("Check or fix how folders are matched"));
         widgets::list(ui, body, &rows, &mut self.list, focused);
+        if let (Some(path), Some(poster_rect)) = (poster_path, poster_rect) {
+            match sh.images.get(&path, Size::Poster) {
+                Some(texture) => crate::images::paint_cover(ui.painter(), poster_rect, &texture),
+                None => {
+                    ui.painter().rect_filled(poster_rect, 8, crate::theme::ROW);
+                }
+            }
+        }
         Nav::None
     }
 }
@@ -245,11 +267,12 @@ impl Screen for SeasonView {
             .season_episodes(self.season)
             .filter_map(|e| {
                 let file = state.tree.file(e.file_id)?;
-                let mut row = file_row(file);
-                if let Some(n) = e.number {
-                    row.title = format!("{n:>2}. {}", row.title);
-                }
-                Some(row)
+                let name = sh.titles(self.library_id, e.file_id).map_or_else(String::new, |t| t.name);
+                let title = match e.number {
+                    Some(n) if self.season > 0 => format!("{n:>2}. {name}"),
+                    _ => name,
+                };
+                Some(file_row_titled(file, title))
             })
             .collect();
         if rows.is_empty() {

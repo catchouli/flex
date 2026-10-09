@@ -39,6 +39,8 @@ pub struct PlexData {
     pub views: Vec<PlexView>,
     /// History entries for media Plex no longer has (can't be tied to a file).
     pub orphan_views: usize,
+    /// When Plex added each file (Unix seconds), for every file it knows.
+    pub added: Vec<(String, i64)>,
 }
 
 /// Reads the account with the most history (the household's main account).
@@ -97,13 +99,24 @@ pub fn read(path: &Path) -> Result<PlexData> {
         let rows = stmt.query_map([account_id], |r| Ok(PlexView { file: r.get(0)?, viewed_at: r.get(1)? }))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
+    let added = {
+        let mut stmt = conn.prepare(
+            "SELECT p.file, CAST(strftime('%s', m.added_at) AS INTEGER)
+             FROM media_parts p
+             JOIN media_items mi ON mi.id = p.media_item_id
+             JOIN metadata_items m ON m.id = mi.metadata_item_id
+             WHERE m.added_at IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
     let orphan_views: usize = conn.query_row(
         "SELECT count(*) FROM metadata_item_views WHERE account_id = ?1
          AND guid NOT IN (SELECT guid FROM metadata_items WHERE guid IS NOT NULL)",
         [account_id],
         |r| r.get(0),
     )?;
-    Ok(PlexData { account, roots, items, views, orphan_views })
+    Ok(PlexData { account, roots, items, views, orphan_views, added })
 }
 
 /// Comparable form of a relative path: '/'-separated, Unicode NFC, lower case.
@@ -131,6 +144,8 @@ pub struct ImportPlan {
     pub progress: Vec<(i64, PlexItem)>,
     /// (file id, viewed at) history entries.
     pub history: Vec<(i64, i64)>,
+    /// (file id, added at) from Plex's library.
+    pub added: Vec<(i64, i64)>,
     pub unmatched_items: usize,
     pub unmatched_views: usize,
 }
@@ -213,6 +228,7 @@ pub fn plan(data: &PlexData, libraries: &[(i64, &Tree)]) -> ImportPlan {
         }
     }
     plan.unmatched_views += data.orphan_views;
+    plan.added = data.added.iter().filter_map(|(file, at)| Some((find(file)?, *at))).collect();
     plan.sections = roots
         .iter()
         .enumerate()

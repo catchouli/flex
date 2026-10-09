@@ -46,8 +46,13 @@ pub fn open_folder(sh: &Shared, library_id: i64, rel: &str) -> Nav {
 
 /// A video row: dimmed with "Watched" once watched, time left and a bar if partway.
 pub fn file_row(f: &flex_core::MediaFile) -> Row {
+    file_row_titled(f, display_name(f.file_name(), true))
+}
+
+/// [`file_row`] with a given title (e.g. the episode's name from TMDB).
+pub fn file_row_titled(f: &flex_core::MediaFile, title: String) -> Row {
     let p = f.progress;
-    let row = Row::new(Icon::Video, display_name(f.file_name(), true));
+    let row = Row::new(Icon::Video, title);
     match p.remaining_secs() {
         Some(left) => row.detail(theme::format_remaining(left)).progress(p.fraction()),
         None if p.watched => row.detail("Watched").dim(true),
@@ -115,7 +120,11 @@ impl Screen for LibraryView {
                     };
                     Row::new(Icon::Folder, name.as_str()).detail(detail).dim(*unwatched == 0)
                 }
-                Node::File(f) => file_row(f),
+                // Clean names in the folder view too, with the file name as a fallback.
+                Node::File(f) => {
+                    let title = sh.titles(self.library_id, f.id).map(|t| t.episode.unwrap_or(t.name));
+                    file_row_titled(f, title.unwrap_or_else(|| display_name(f.file_name(), true)))
+                }
             })
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);

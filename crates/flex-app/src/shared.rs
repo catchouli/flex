@@ -30,6 +30,30 @@ pub struct LibState {
     pub organising: bool,
     /// Looked up / to look up, while matching online.
     pub matching: Option<(usize, usize)>,
+    /// Done / to do, while fetching details (cast, episode titles) for matched shows.
+    pub fetching: Option<(usize, usize)>,
+}
+
+/// Display names for a file, from online metadata where available.
+#[derive(Clone, Debug)]
+pub struct Titles {
+    /// Show or film title (None if the file isn't organised yet).
+    pub show: Option<String>,
+    /// For episodes: "S1E5 · Title", "S1E5", or the file name.
+    pub episode: Option<String>,
+    /// The best single name for the file itself: episode title, film title, else file name.
+    pub name: String,
+}
+
+impl Titles {
+    /// "Show · S1E5 · Title" for episodes, the title for films.
+    pub fn full(&self) -> String {
+        match (&self.show, &self.episode) {
+            (Some(show), Some(ep)) => format!("{show} · {ep}"),
+            (Some(show), None) => show.clone(),
+            (None, _) => self.name.clone(),
+        }
+    }
 }
 
 /// A library sorted into shows. `parsed` and `groups` are kept so the catalog can be
@@ -49,7 +73,17 @@ pub enum LibraryView {
 
 impl LibState {
     fn new(lib: Library, tree: Tree) -> Self {
-        Self { lib, tree, scanning: None, error: None, version: 0, organised: None, organising: false, matching: None }
+        Self {
+            lib,
+            tree,
+            scanning: None,
+            error: None,
+            version: 0,
+            organised: None,
+            organising: false,
+            matching: None,
+            fetching: None,
+        }
     }
 
     pub fn catalog(&self) -> Option<&Catalog> {
@@ -62,6 +96,8 @@ impl LibState {
             format!("Scanning… {} found", thousands(n))
         } else if let Some((done, total)) = self.matching {
             format!("Matching… {done}/{total}")
+        } else if let Some((done, total)) = self.fetching {
+            format!("Fetching details… {done}/{total}")
         } else if let Some(e) = &self.error {
             e.clone()
         } else {
@@ -108,7 +144,16 @@ enum ScanMsg {
     /// Online matching progress (done, total); the catalog is reloaded on these.
     Matching(i64, usize, usize),
     MatchDone(i64, Result<String, String>),
+    /// Details fetching progress (done, total), and completion.
+    Fetching(i64, usize, usize),
+    /// TMDB details are in (the slower AniList voice-cast pass may still be running).
+    DetailsReady(i64),
+    FetchDone(i64, Result<usize, String>),
 }
+
+/// Re-fetch details this often, so new episodes of running series get their titles.
+const DETAILS_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
+const VOICE_MAX_AGE_SECS: i64 = 180 * 24 * 3600;
 
 const TMDB_TOKEN_SETTING: &str = "tmdb_token";
 /// Bump when grouping/matching logic improves: automatic results are redone on the next
@@ -125,6 +170,9 @@ pub struct Shared {
     db: Db,
     pub libs: Vec<LibState>,
     pub search_query: String,
+    pub images: crate::images::Images,
+    /// Episode titles etc. for matched series, by provider id ("tv:123").
+    pub series: HashMap<String, flex_core::db::SeriesMeta>,
     /// The window's monitor refresh rate, for smooth video timing.
     pub display_fps: Option<f64>,
     search: Option<SearchIndex>,
@@ -148,6 +196,8 @@ impl Shared {
             db,
             libs: Vec::new(),
             search_query: String::new(),
+            series: HashMap::new(),
+            images: crate::images::Images::new(ctx, flex_core::data_dir().join("images")),
             display_fps: None,
             search: None,
             scan_tx,
@@ -155,6 +205,7 @@ impl Shared {
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
         };
+        shared.series = shared.db.series_meta()?;
         if shared.db.setting(MATCHER_VERSION_SETTING)?.as_deref() != Some(MATCHER_VERSION) {
             for lib in shared.db.libraries()? {
                 shared.db.reset_matching(lib.id)?;
@@ -439,6 +490,138 @@ impl Shared {
         });
     }
 
+    /// Fetches details for matched shows in the background: TMDB overview, genres, cast and
+    /// every season's episode titles; then, for anime, Japanese voice actors from AniList
+    /// (slower: AniList allows ~30 requests a minute).
+    pub fn start_details(&mut self, id: i64) {
+        let Some(token) = self.tmdb_token() else { return };
+        let Some(state) = self.lib(id) else { return };
+        if state.fetching.is_some() {
+            return;
+        }
+        let anime = state.lib.kind == LibraryKind::Anime;
+        let todo = self.db.shows_needing_details(id, DETAILS_MAX_AGE_SECS).unwrap_or_else(|e| {
+            log::warn!("listing shows needing details: {e:#}");
+            Vec::new()
+        });
+        let voice_todo = if anime {
+            self.db.shows_needing_voice_cast(id, VOICE_MAX_AGE_SECS).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if todo.is_empty() && voice_todo.is_empty() {
+            return;
+        }
+        let total = todo.len() + voice_todo.len();
+        if let Some(l) = self.lib_mut(id) {
+            l.fetching = Some((0, total));
+        }
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        std::thread::spawn(move || {
+            let result = (|| -> Result<usize> {
+                let progress = |done: usize| {
+                    if done % 10 == 0 || done == total {
+                        let _ = tx.send(ScanMsg::Fetching(id, done, total));
+                        ctx.request_repaint();
+                    }
+                };
+                let tmdb = flex_core::metadata::Tmdb::new(&token);
+                let mut db = Db::open(&db_path)?;
+                let mut fetched = 0;
+                for (i, (show_id, provider_id, title)) in todo.iter().enumerate() {
+                    let outcome = (|| -> Result<()> {
+                        let details = tmdb.details(provider_id)?;
+                        db.save_details(*show_id, provider_id, &details)?;
+                        if let Some(tv_id) = provider_id.strip_prefix("tv:") {
+                            for season in &details.seasons {
+                                let episodes = tmdb.season(tv_id, season.number)?;
+                                db.save_episodes(provider_id, &episodes)?;
+                                std::thread::sleep(MATCH_PAUSE);
+                            }
+                        }
+                        Ok(())
+                    })();
+                    match outcome {
+                        Ok(()) => fetched += 1,
+                        Err(e) => log::warn!("details for {title:?} ({provider_id}): {e:#}"),
+                    }
+                    progress(i + 1);
+                    std::thread::sleep(MATCH_PAUSE);
+                }
+                let _ = tx.send(ScanMsg::DetailsReady(id));
+                ctx.request_repaint();
+                for (i, (show_id, provider_id, title)) in voice_todo.iter().enumerate() {
+                    progress(todo.len() + i + 1);
+                    match flex_core::metadata::anilist_voice_cast(title) {
+                        Ok(cast) => db.save_voice_cast(*show_id, provider_id, &cast)?,
+                        // Network trouble: try again next time.
+                        Err(e) => log::warn!("voice cast for {title:?}: {e:#}"),
+                    }
+                }
+                Ok(fetched)
+            })();
+            let _ = tx.send(ScanMsg::FetchDone(id, result.map_err(|e| format!("{e:#}"))));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Picks up newly fetched details: episode titles and the shows' overviews/posters.
+    fn reload_details(&mut self, id: i64) {
+        match self.db.series_meta() {
+            Ok(series) => self.series = series,
+            Err(e) => log::warn!("loading episode titles: {e:#}"),
+        }
+        self.rebuild_catalog(id);
+        self.search = None;
+    }
+
+    /// Display names for a file: show and episode titles from online metadata where
+    /// available, the file name otherwise.
+    pub fn titles(&self, library_id: i64, file_id: i64) -> Option<Titles> {
+        let state = self.lib(library_id)?;
+        let file = state.tree.file(file_id)?;
+        let file_name = flex_core::library::display_name(file.file_name(), true);
+        let Some(entry) = state.catalog().and_then(|c| c.show_of_file(file_id)) else {
+            return Some(Titles { show: None, episode: None, name: file_name });
+        };
+        let show = entry.show.title.clone();
+        if !entry.is_series() {
+            return Some(Titles { name: show.clone(), show: Some(show), episode: None });
+        }
+        let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
+        let meta = match (ep.season, ep.number, entry.show.provider_id.as_ref()) {
+            // Specials' numbering rarely lines up with TMDB's, so they keep file names.
+            (s, Some(n), Some(pid)) if s > 0 => self.series.get(pid).and_then(|m| m.episode(s, n)),
+            _ => None,
+        };
+        let title = meta.map(|m| m.title.clone()).filter(|t| !t.is_empty());
+        let code = match (ep.season, ep.number) {
+            (0, _) => None,
+            (s, Some(n)) => Some(format!("S{s}E{n}")),
+            _ => None,
+        };
+        let episode = match (code, &title) {
+            (Some(c), Some(t)) => format!("{c} · {t}"),
+            (Some(c), None) => c,
+            (None, Some(t)) => t.clone(),
+            (None, None) => file_name.clone(),
+        };
+        Some(Titles { show: Some(show), episode: Some(episode), name: title.unwrap_or(file_name) })
+    }
+
+    /// TMDB metadata (description, still) for an episode, if known.
+    pub fn episode_meta(&self, library_id: i64, file_id: i64) -> Option<&flex_core::db::EpisodeMeta> {
+        let entry = self.lib(library_id)?.catalog()?.show_of_file(file_id)?;
+        let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
+        let pid = entry.show.provider_id.as_ref()?;
+        (ep.season > 0).then_some(())?;
+        self.series.get(pid)?.episode(ep.season, ep.number?)
+    }
+
+    pub fn credits(&self, provider_id: &str, kind: &str) -> Vec<flex_core::metadata::CastMember> {
+        self.db.credits(provider_id, kind).unwrap_or_default()
+    }
+
     /// Rebuilds a library's catalog from the database (after a manual fix), reusing the
     /// already-parsed names.
     fn rebuild_catalog(&mut self, id: i64) {
@@ -598,8 +781,10 @@ impl Shared {
 
     /// Applies finished/progressing scans. Call once per frame.
     pub fn poll_scans(&mut self) {
+        self.images.poll();
         let mut reorganise = Vec::new();
         let mut rematch = Vec::new();
+        let mut fetch = Vec::new();
         while let Ok(msg) = self.scan_rx.try_recv() {
             match msg {
                 ScanMsg::Progress(id, n) => {
@@ -635,7 +820,23 @@ impl Shared {
                     }
                     self.rebuild_catalog(id);
                 }
+                ScanMsg::Fetching(id, done, total) => {
+                    if let Some(l) = self.lib_mut(id) {
+                        l.fetching = Some((done, total));
+                    }
+                }
+                ScanMsg::DetailsReady(id) => self.reload_details(id),
+                ScanMsg::FetchDone(id, result) => {
+                    let Some(l) = self.lib_mut(id) else { continue };
+                    l.fetching = None;
+                    if let Err(e) = result {
+                        let msg = format!("{}: couldn't fetch details: {e}", l.lib.name);
+                        self.toast(msg);
+                    }
+                    self.reload_details(id);
+                }
                 ScanMsg::MatchDone(id, result) => {
+                    fetch.push(id);
                     let Some(l) = self.lib_mut(id) else { continue };
                     l.matching = None;
                     let msg = match result {
@@ -668,6 +869,13 @@ impl Shared {
         }
         for id in rematch {
             self.start_matching(id);
+            // Nothing to match: go straight on to details.
+            if self.lib(id).is_some_and(|l| l.matching.is_none()) {
+                fetch.push(id);
+            }
+        }
+        for id in fetch {
+            self.start_details(id);
         }
     }
 
@@ -681,14 +889,18 @@ impl Shared {
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {
         let state = self.lib(library_id)?;
         let file = state.tree.file(file_id)?;
+        let titles = self.titles(library_id, file_id).filter(|t| t.show.is_some());
         // DVD/Blu-ray chunks play as the whole disc, titled after its folder.
         let (path, title) = match flex_core::parse::disc_folder(&file.rel_path) {
             Some(disc) => {
                 let named = disc.rsplit_once('/').map_or(disc, |(parent, _)| parent);
                 let title = named.rsplit('/').next().unwrap_or(named).to_owned();
-                (flex_core::library::join_rel(&state.lib.root, disc), title)
+                (flex_core::library::join_rel(&state.lib.root, disc), titles.map_or(title, |t| t.full()))
             }
-            None => (file.abs_path(&state.lib.root), flex_core::library::display_name(file.file_name(), true)),
+            None => {
+                let fallback = || flex_core::library::display_name(file.file_name(), true);
+                (file.abs_path(&state.lib.root), titles.map_or_else(fallback, |t| t.full()))
+            }
         };
         Some(PlayRequest { path, title, library_id, file_id, start: None })
     }

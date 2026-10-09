@@ -70,21 +70,14 @@ impl Default for Home {
 fn describe(sh: &Shared, item: &ContinueItem) -> Option<CardText> {
     let state = sh.lib(item.library_id)?;
     let file = state.tree.file(item.file_id)?;
-    let episode = display_name(file.file_name(), true);
+    let titles = sh.titles(item.library_id, item.file_id)?;
     // The show's (matched) title once organised; the top folder name until then.
-    let entry = state.catalog().and_then(|c| c.show_of_file(item.file_id));
-    let show = match (entry, file.rel_path.split_once('/')) {
-        (Some(e), _) => e.show.title.clone(),
+    let show = match (&titles.show, file.rel_path.split_once('/')) {
+        (Some(s), _) => s.clone(),
         (None, Some((top, _))) => display_name(top, false),
-        (None, None) => episode.clone(), // a movie at the library root
+        (None, None) => titles.name.clone(), // a movie at the library root
     };
-    let episode = match entry.and_then(|e| e.episodes.iter().find(|ep| ep.file_id == item.file_id)) {
-        Some(ep) if ep.season > 0 && ep.number.is_some() => {
-            format!("S{}E{} · {episode}", ep.season, ep.number.unwrap_or_default())
-        }
-        _ => episode,
-    };
-    let episode = if show == episode { String::new() } else { episode };
+    let episode = titles.episode.unwrap_or_else(|| if titles.show.is_none() { titles.name } else { String::new() });
     let (status, fraction) = match item.kind {
         ContinueKind::Resume => {
             let left = file.progress.remaining_secs().map_or_else(String::new, theme::format_remaining);
