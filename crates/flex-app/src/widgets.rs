@@ -129,7 +129,8 @@ pub fn paint_focusable(painter: &Painter, rect: Rect, focused: bool, selected: b
     let radius = CornerRadius::same(8);
     if focused {
         painter.rect_filled(rect, radius, theme::FOCUS);
-        painter.rect_stroke(rect, radius, Stroke::new(3.0, Color32::WHITE), StrokeKind::Outside);
+        // Inside the rect: an outside ring gets clipped at list and screen edges.
+        painter.rect_stroke(rect, radius, Stroke::new(3.0, Color32::WHITE), StrokeKind::Inside);
         Color32::BLACK
     } else {
         painter.rect_filled(rect, radius, theme::ROW);

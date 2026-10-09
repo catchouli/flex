@@ -352,7 +352,12 @@ impl eframe::App for FlexApp {
                     };
                     self.apply(&ctx, nav);
                 }
-                topbar::Event::Cancel => self.sh.search_query.clear(),
+                topbar::Event::Cancel => {
+                    let sh = &mut self.sh;
+                    let back = Press { action: Action::Back, repeat: false };
+                    let nav = self.stack.last_mut().expect("never empty").handle(sh, back);
+                    self.apply(&ctx, nav);
+                }
                 topbar::Event::OpenSettings => self.open_settings(),
                 topbar::Event::ToggleFullscreen => self.toggle_fullscreen(&ctx),
                 topbar::Event::FocusContent | topbar::Event::None => {}

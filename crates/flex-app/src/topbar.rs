@@ -27,7 +27,7 @@ pub enum Event {
     FocusContent,
     /// Enter in the search box.
     Submit,
-    /// Escape in the search box.
+    /// Escape in the search box: leave it, then act as Back.
     Cancel,
     OpenSettings,
     ToggleFullscreen,
@@ -37,6 +37,9 @@ pub enum Event {
 pub struct TopBar {
     /// Which item has d-pad focus; `None` = the screen has it.
     pub focus: Option<Item>,
+    /// Whether the search box had keyboard focus last frame (egui drops it on Esc before
+    /// we get to look, so this is how Esc in the box is recognised).
+    text_focused_last: bool,
 }
 
 fn search_id() -> egui::Id {
@@ -86,9 +89,17 @@ impl TopBar {
             .font(TextStyle::Body)
             .margin(vec2(18.0, 10.0))
             .desired_width(search_rect.width());
+        let had_focus = std::mem::replace(&mut self.text_focused_last, false);
+        let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         let response = ui.put(search_rect, edit);
+        self.text_focused_last = response.has_focus();
 
         let mut event = Event::None;
+        if had_focus && escape {
+            ui.memory_mut(|m| m.surrender_focus(search_id()));
+            self.focus = None;
+            return Event::Cancel;
+        }
         if response.has_focus() {
             self.focus = Some(Item::Search);
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
@@ -99,14 +110,9 @@ impl TopBar {
         } else if self.focus == Some(Item::Search) {
             painter.rect_stroke(search_rect, CornerRadius::same(6), Stroke::new(3.0, theme::FOCUS), StrokeKind::Outside);
         }
-        if response.lost_focus() {
-            let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-            if enter {
-                self.focus = None;
-                event = Event::Submit;
-            } else if escape {
-                event = Event::Cancel;
-            }
+        if response.lost_focus() && enter {
+            self.focus = None;
+            event = Event::Submit;
         }
 
         let settings_rect = Rect::from_min_size(pos2(rect.right() - 220.0, rect.center().y - 30.0), vec2(220.0, 60.0));

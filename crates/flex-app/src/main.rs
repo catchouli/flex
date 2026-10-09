@@ -16,8 +16,26 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+/// Initialises COM on the UI thread for the life of the app (never uninitialised).
+///
+/// winit creates a COM taskbar object the first time the window goes fullscreen and reuses
+/// it afterwards. If COM on this thread is torn down in between (libmpv initialises and
+/// uninitialises COM as players come and go), that object is freed and leaving fullscreen
+/// crashes with an access violation. Holding our own reference keeps COM, and the object,
+/// alive.
+#[cfg(windows)]
+fn keep_com_alive() {
+    use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx};
+    let hr = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
+    if hr < 0 {
+        log::warn!("couldn't initialise COM on the UI thread: {hr:#x}");
+    }
+}
+
 fn main() -> eframe::Result {
     logging::init();
+    #[cfg(windows)]
+    keep_com_alive();
 
     let mut windowed = false;
     let mut start = None;
