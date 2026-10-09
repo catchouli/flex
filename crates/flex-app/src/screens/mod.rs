@@ -1,12 +1,14 @@
 //! Screens live on a stack: Back pops to whatever you came from, so the player and
 //! end screen always return to the view playback was started from.
 
+pub mod history;
 pub mod home;
 pub mod inspector;
 pub mod library;
 pub mod match_online;
 pub mod options;
 pub mod picker;
+pub mod plex_import;
 pub mod text_entry;
 pub mod resume;
 pub mod search;

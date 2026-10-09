@@ -38,6 +38,10 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Flex")
+            .with_icon(std::sync::Arc::new(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon-256.png"))
+                    .expect("the bundled icon is a valid PNG"),
+            ))
             .with_inner_size([1280.0, 720.0]),
         renderer: eframe::Renderer::Glow,
         event_loop_builder: Some(Box::new(|_builder| {

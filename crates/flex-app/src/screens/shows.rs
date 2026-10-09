@@ -5,6 +5,7 @@ use eframe::egui::{Rect, Ui};
 use flex_core::catalog::ShowEntry;
 use flex_core::library::LibraryKind;
 
+use super::history::HistoryView;
 use super::inspector::MatchInspector;
 use super::match_online::MatchOnline;
 use super::library::{LibraryView, file_row};
@@ -57,6 +58,13 @@ fn open_show(sh: &Shared, library_id: i64, entry: &ShowEntry) -> Nav {
     }
 }
 
+/// Rows above the shows: "Browse folders" and "History".
+const FIXED_ROWS: usize = 2;
+
+fn fixed_rows() -> [Row; FIXED_ROWS] {
+    [Row::new(Icon::Folder, "Browse folders"), Row::new(Icon::Refresh, "History")]
+}
+
 pub struct ShowsView {
     library_id: i64,
     list: ListState,
@@ -74,20 +82,21 @@ impl Screen for ShowsView {
             return Nav::Pop;
         }
         let Some(catalog) = sh.lib(self.library_id).and_then(|l| l.catalog()) else {
-            return match self.list.handle(press, 1) {
+            return match self.list.handle(press, FIXED_ROWS) {
                 ListInput::AtTop => Nav::FocusTopBar,
-                ListInput::Activate(_) => Nav::push(LibraryView::new(self.library_id, String::new())),
+                ListInput::Activate(0) => Nav::push(LibraryView::new(self.library_id, String::new())),
+                ListInput::Activate(_) => Nav::push(HistoryView::new(self.library_id)),
                 ListInput::None => Nav::None,
             };
         };
-        // Row 0 is "Browse folders".
-        let entry = self.list.selected.checked_sub(1).and_then(|i| catalog.shows.get(i)).cloned();
+        let entry = self.list.selected.checked_sub(FIXED_ROWS).and_then(|i| catalog.shows.get(i)).cloned();
         if press.is(Action::Menu) {
             return entry.map_or(Nav::None, |e| Nav::push(ShowOptions::new(self.library_id, e.show.id)));
         }
-        match self.list.handle(press, catalog.shows.len() + 1) {
+        match self.list.handle(press, catalog.shows.len() + FIXED_ROWS) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => Nav::push(LibraryView::new(self.library_id, String::new())),
+            ListInput::Activate(1) => Nav::push(HistoryView::new(self.library_id)),
             ListInput::Activate(_) => entry.map_or(Nav::None, |e| open_show(sh, self.library_id, &e)),
             ListInput::None => Nav::None,
         }
@@ -99,14 +108,14 @@ impl Screen for ShowsView {
         let Some(catalog) = state.catalog() else {
             let subtitle = if state.organising || state.scanning.is_some() { "Organising…" } else { "" };
             let body = widgets::header(ui.painter(), rect, &state.lib.name, subtitle, ui.style());
-            let rows = [Row::new(Icon::Folder, "Browse folders")];
+            let rows = fixed_rows();
             widgets::list(ui, body, &rows, &mut self.list, focused);
             return Nav::None;
         };
         let what = if movies { "movies" } else { "shows" };
         let subtitle = format!("{} {what} · {}", thousands(catalog.shows.len()), state.status());
         let body = widgets::header(ui.painter(), rect, &state.lib.name, &subtitle, ui.style());
-        let mut rows = vec![Row::new(Icon::Folder, "Browse folders")];
+        let mut rows = Vec::from(fixed_rows());
         for entry in &catalog.shows {
             let row = if !entry.is_series() {
                 let file = entry.episodes.first().and_then(|e| state.tree.file(e.file_id));

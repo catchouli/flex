@@ -1,4 +1,5 @@
-//! Adding a library: pick a folder (drive letters on Windows), then pick its type.
+//! Picking a folder (drive letters on Windows) for a new library, then its type; or picking
+//! a Plex database file to import from.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -6,16 +7,35 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
 
-use super::{Nav, Screen, text_entry::TextEntry};
+use super::{Nav, Screen, plex_import::PlexImport, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
-/// A folder (or drive) choice, with an optional note like "Network drive".
-type Entry = (PathBuf, String);
+/// A folder, drive or (when importing) database file, with an optional note like
+/// "Network drive".
+struct Entry {
+    path: PathBuf,
+    note: String,
+    is_dir: bool,
+}
 
-fn list_subdirs(dir: &Path) -> std::io::Result<Vec<Entry>> {
+fn dir_entry(path: PathBuf, note: &str) -> Entry {
+    Entry { path, note: note.to_owned(), is_dir: true }
+}
+
+/// What the picker is choosing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// A folder to add as a library.
+    Library,
+    /// A Plex database file to import watch history from.
+    PlexDatabase,
+}
+
+fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
     let mut dirs = Vec::new();
+    let mut files = Vec::new();
     for item in std::fs::read_dir(dir)? {
         let item = item?;
         let name = item.file_name();
@@ -26,10 +46,17 @@ fn list_subdirs(dir: &Path) -> std::io::Result<Vec<Entry>> {
         let file_type = item.file_type()?;
         let is_dir = if file_type.is_symlink() { item.path().is_dir() } else { file_type.is_dir() };
         if is_dir {
-            dirs.push((item.path(), String::new()));
+            dirs.push(dir_entry(item.path(), ""));
+        } else if purpose == Purpose::PlexDatabase && name.ends_with(".db") {
+            let size = item.metadata().map_or(0, |m| m.len());
+            let note = format!("{} MB", size / 1_000_000);
+            files.push(Entry { path: item.path(), note, is_dir: false });
         }
     }
-    dirs.sort_by(|a, b| flex_core::natural::natural_cmp(&a.0.to_string_lossy(), &b.0.to_string_lossy()));
+    let by_name = |a: &Entry, b: &Entry| flex_core::natural::natural_cmp(&a.path.to_string_lossy(), &b.path.to_string_lossy());
+    dirs.sort_by(by_name);
+    files.sort_by(by_name);
+    dirs.extend(files);
     Ok(dirs)
 }
 
@@ -52,7 +79,7 @@ fn roots() -> Vec<Entry> {
                 5 => "CD/DVD drive",
                 _ => "",
             };
-            (PathBuf::from(root), kind.to_owned())
+            dir_entry(PathBuf::from(root), kind)
         })
         .collect()
 }
@@ -61,11 +88,11 @@ fn roots() -> Vec<Entry> {
 fn roots() -> Vec<Entry> {
     let mut roots = Vec::new();
     if let Some(home) = std::env::var_os("HOME") {
-        roots.push((PathBuf::from(home), "Home".to_owned()));
+        roots.push(dir_entry(PathBuf::from(home), "Home"));
     }
-    roots.push((PathBuf::from("/"), String::new()));
+    roots.push(dir_entry(PathBuf::from("/"), ""));
     if Path::new("/Volumes").is_dir() {
-        roots.push((PathBuf::from("/Volumes"), "Drives and shares".to_owned()));
+        roots.push(dir_entry(PathBuf::from("/Volumes"), "Drives and shares"));
     }
     roots
 }
@@ -77,6 +104,7 @@ fn name_of(path: &Path) -> String {
 /// Folder picker. Each level is browsed in place; Back goes up a level, and from the top
 /// level leaves the picker.
 pub struct FolderPicker {
+    purpose: Purpose,
     /// `None` = top level (drives on Windows).
     dir: Option<PathBuf>,
     /// History of (folder, selected row) to restore when going back up.
@@ -89,8 +117,19 @@ pub struct FolderPicker {
 
 impl FolderPicker {
     pub fn new(sh: &Shared) -> Self {
-        let mut picker =
-            Self { dir: None, trail: Vec::new(), dirs: Vec::new(), pending: None, error: None, list: ListState::default() };
+        Self::with_purpose(sh, Purpose::Library)
+    }
+
+    pub fn with_purpose(sh: &Shared, purpose: Purpose) -> Self {
+        let mut picker = Self {
+            purpose,
+            dir: None,
+            trail: Vec::new(),
+            dirs: Vec::new(),
+            pending: None,
+            error: None,
+            list: ListState::default(),
+        };
         picker.open(sh, None, 0);
         picker
     }
@@ -102,9 +141,9 @@ impl FolderPicker {
         self.dirs.clear();
         self.list.select(select);
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = sh.ctx.clone();
+        let (ctx, purpose) = (sh.ctx.clone(), self.purpose);
         std::thread::spawn(move || {
-            let _ = tx.send(dir.map_or_else(|| Ok(roots()), |d| list_subdirs(&d)));
+            let _ = tx.send(dir.map_or_else(|| Ok(roots()), |d| list_dir(&d, purpose)));
             ctx.request_repaint();
         });
         self.pending = Some(rx);
@@ -121,9 +160,9 @@ impl FolderPicker {
         self.pending = None;
     }
 
-    /// Row 0 is "Use this folder" when inside a folder.
+    /// Row 0 is "Use this folder" when choosing a library folder inside a folder.
     fn offset(&self) -> usize {
-        usize::from(self.dir.is_some())
+        usize::from(self.dir.is_some() && self.purpose == Purpose::Library)
     }
 }
 
@@ -141,11 +180,15 @@ impl Screen for FolderPicker {
         }
         match self.list.handle(press, self.dirs.len() + self.offset()) {
             ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::Activate(0) if self.dir.is_some() => {
+            ListInput::Activate(0) if self.offset() == 1 => {
                 Nav::replace(KindPicker::new(self.dir.clone().unwrap_or_default()))
             }
             ListInput::Activate(i) => {
-                let target = self.dirs[i - self.offset()].0.clone();
+                let entry = &self.dirs[i - self.offset()];
+                if !entry.is_dir {
+                    return Nav::replace(PlexImport::new(sh, entry.path.clone()));
+                }
+                let target = entry.path.clone();
                 self.trail.push((self.dir.clone(), i));
                 self.open(sh, Some(target), 0);
                 Nav::None
@@ -156,21 +199,29 @@ impl Screen for FolderPicker {
 
     fn ui(&mut self, ui: &mut Ui, _sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.poll();
-        let location = self.dir.as_ref().map_or("Choose a drive or folder".to_owned(), |d| d.display().to_string());
+        let (title, prompt) = match self.purpose {
+            Purpose::Library => ("Add library", "Choose a drive or folder"),
+            Purpose::PlexDatabase => ("Import from Plex", "Find com.plexapp.plugins.library.db"),
+        };
+        let location = self.dir.as_ref().map_or(prompt.to_owned(), |d| d.display().to_string());
         let subtitle = self.error.clone().unwrap_or(location);
-        let body = widgets::header(ui.painter(), rect, "Add library", &subtitle, ui.style());
+        let body = widgets::header(ui.painter(), rect, title, &subtitle, ui.style());
         if self.pending.is_some() {
             widgets::message(ui.painter(), body, "Loading…", ui.style());
             return Nav::None;
         }
         let mut rows = Vec::new();
-        if let Some(dir) = &self.dir {
+        if let Some(dir) = self.dir.as_ref().filter(|_| self.offset() == 1) {
             rows.push(Row::new(Icon::Add, format!("Use “{}” as a library", name_of(dir))));
         }
-        rows.extend(self.dirs.iter().map(|(d, note)| {
-            let name = if self.dir.is_none() { d.display().to_string() } else { name_of(d) };
-            Row::new(Icon::Folder, name).detail(note.as_str())
+        rows.extend(self.dirs.iter().map(|e| {
+            let name = if self.dir.is_none() { e.path.display().to_string() } else { name_of(&e.path) };
+            Row::new(if e.is_dir { Icon::Folder } else { Icon::Add }, name).detail(e.note.as_str())
         }));
+        if rows.is_empty() {
+            let what = if self.purpose == Purpose::PlexDatabase { "No folders or .db files here" } else { "No folders here" };
+            widgets::message(ui.painter(), body, what, ui.style());
+        }
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }
@@ -191,7 +242,7 @@ fn kind_hint(kind: LibraryKind) -> &'static str {
     match kind {
         LibraryKind::Movies => "One film per file or folder",
         LibraryKind::Tv => "Shows with seasons and episodes",
-        LibraryKind::Anime => "Anime series, matched with AniList",
+        LibraryKind::Anime => "Anime, matched on TMDB with help from AniList",
     }
 }
 

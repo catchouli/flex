@@ -97,7 +97,7 @@ const WATCHED_THRESHOLD_SETTING: &str = "watched_threshold";
 /// Choices offered in Settings for "mark watched at".
 pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
 
-fn now_unix() -> i64 {
+pub fn now_unix() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
@@ -201,17 +201,18 @@ impl Shared {
         Some(self.lib(library_id)?.tree.file(file_id)?.progress)
     }
 
-    /// Records having played `req` up to `position` (seconds) of `duration`.
-    pub fn record_progress(&mut self, req: &PlayRequest, position: f64, duration: f64) {
+    /// Records having played `req` up to `position` (seconds) of `duration`. Returns the
+    /// new progress, or `None` if nothing was recorded (too short, or not a library file).
+    pub fn record_progress(&mut self, req: &PlayRequest, position: f64, duration: f64) -> Option<Progress> {
         let threshold = self.watched_threshold();
-        let Some(old) = self.progress(req.library_id, req.file_id) else { return };
-        let Some(new) = old.after_playing(position, duration, threshold, now_unix()) else { return };
+        let old = self.progress(req.library_id, req.file_id)?;
+        let new = old.after_playing(position, duration, threshold, now_unix())?;
         if new == old {
-            return;
+            return Some(new);
         }
         if let Err(e) = self.db.set_progress(req.file_id, &new) {
             log::warn!("saving progress: {e:#}");
-            return;
+            return None;
         }
         if let Some(state) = self.lib_mut(req.library_id)
             && let Some(file) = state.tree.file_mut(req.file_id)
@@ -219,6 +220,41 @@ impl Shared {
             file.progress = new;
             state.version += 1;
         }
+        Some(new)
+    }
+
+    /// Adds a viewing session to the history.
+    pub fn add_history(&mut self, req: &PlayRequest, played_at: i64, position: Option<f64>, completed: bool) {
+        if let Err(e) = self.db.add_history(req.file_id, played_at, position, completed) {
+            log::warn!("saving history: {e:#}");
+        }
+    }
+
+    pub fn history(&self, library_id: i64, limit: usize) -> Vec<flex_core::db::HistoryEntry> {
+        self.db.history(library_id, limit).unwrap_or_else(|e| {
+            log::warn!("reading history: {e:#}");
+            Vec::new()
+        })
+    }
+
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
+
+    /// Reloads files (and their watch state) from the database, e.g. after an import.
+    pub fn reload_files(&mut self) {
+        for i in 0..self.libs.len() {
+            let id = self.libs[i].lib.id;
+            match self.db.files(id) {
+                Ok(files) => {
+                    let l = &mut self.libs[i];
+                    l.tree = Tree::new(files);
+                    l.version += 1;
+                }
+                Err(e) => log::warn!("reloading library {id}: {e:#}"),
+            }
+        }
+        self.search = None;
     }
 
     /// Marks files (e.g. a whole folder) watched or unwatched.

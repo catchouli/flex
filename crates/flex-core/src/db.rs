@@ -61,7 +61,35 @@ const MIGRATIONS: &[&str] = &[
         manual      INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (library_id, group_key)
     );",
+    // 4: viewing history (Flex sessions and imports)
+    "CREATE TABLE play_history (
+        id         INTEGER PRIMARY KEY,
+        file_id    INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+        played_at  INTEGER NOT NULL,
+        position   REAL,
+        completed  INTEGER NOT NULL DEFAULT 0,
+        source     TEXT NOT NULL DEFAULT 'flex',
+        UNIQUE (file_id, played_at)
+    );
+    CREATE INDEX play_history_by_time ON play_history(played_at);",
 ];
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryEntry {
+    pub file_id: i64,
+    /// Unix seconds.
+    pub played_at: i64,
+    pub position: Option<f64>,
+    pub completed: bool,
+    /// "flex" or "plex".
+    pub source: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ImportSummary {
+    pub files_updated: usize,
+    pub history_added: usize,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Show {
@@ -388,6 +416,59 @@ impl Db {
         Ok(())
     }
 
+    /// Records a viewing session. A session already recorded at that time is left alone.
+    pub fn add_history(&self, file_id: i64, played_at: i64, position: Option<f64>, completed: bool) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO play_history (file_id, played_at, position, completed) VALUES (?1, ?2, ?3, ?4)",
+            params![file_id, played_at, position, completed],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent first.
+    pub fn history(&self, library_id: i64, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT h.file_id, h.played_at, h.position, h.completed, h.source
+             FROM play_history h JOIN media_files f ON f.id = h.file_id
+             WHERE f.library_id = ?1 ORDER BY h.played_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![library_id, limit as i64], |r| {
+            Ok(HistoryEntry { file_id: r.get(0)?, played_at: r.get(1)?, position: r.get(2)?, completed: r.get(3)?, source: r.get(4)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Applies a Plex import: merges watch state into files and adds history (importing
+    /// twice doesn't duplicate anything).
+    pub fn import_plex(&mut self, plan: &crate::plex::ImportPlan) -> Result<ImportSummary> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut summary = ImportSummary::default();
+        {
+            let mut read = tx.prepare("SELECT position, duration, watched, last_played FROM media_files WHERE id = ?1")?;
+            let mut write = tx.prepare(
+                "UPDATE media_files SET position = ?2, duration = ?3, watched = ?4, last_played = ?5 WHERE id = ?1",
+            )?;
+            for (id, item) in &plan.progress {
+                let existing = read.query_row([id], |r| {
+                    Ok(Progress { position: r.get(0)?, duration: r.get(1)?, watched: r.get(2)?, last_played: r.get(3)? })
+                })?;
+                let merged = crate::plex::merge(existing, item);
+                if merged != existing {
+                    write.execute(params![id, merged.position, merged.duration, merged.watched, merged.last_played])?;
+                    summary.files_updated += 1;
+                }
+            }
+            let mut add = tx.prepare(
+                "INSERT OR IGNORE INTO play_history (file_id, played_at, completed, source) VALUES (?1, ?2, 1, 'plex')",
+            )?;
+            for (id, at) in &plan.history {
+                summary.history_added += add.execute(params![id, at])?;
+            }
+        }
+        tx.commit()?;
+        Ok(summary)
+    }
+
     /// Marks files watched or unwatched, clearing any resume position.
     pub fn set_watched(&mut self, file_ids: &[i64], watched: bool) -> Result<()> {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -505,6 +586,26 @@ mod tests {
         // A vanished automatic group is dropped.
         db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
         assert_eq!(db.group_matches(lib).unwrap().len(), 2, "A2 and C dropped");
+    }
+
+    #[test]
+    fn plex_import_is_idempotent() {
+        use crate::plex::{ImportPlan, PlexItem};
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        db.apply_scan(lib, &[file("a/1.mkv")]).unwrap();
+        let id = db.files(lib).unwrap()[0].id;
+        let item = PlexItem { file: String::new(), watched: true, offset_secs: None, duration_secs: Some(1400.0), last_viewed: Some(500) };
+        let plan = ImportPlan { progress: vec![(id, item)], history: vec![(id, 400), (id, 500)], ..Default::default() };
+        let first = db.import_plex(&plan).unwrap();
+        assert_eq!((first.files_updated, first.history_added), (1, 2));
+        let again = db.import_plex(&plan).unwrap();
+        assert_eq!((again.files_updated, again.history_added), (0, 0));
+        assert!(db.files(lib).unwrap()[0].progress.watched);
+        db.add_history(id, 600, Some(42.0), false).unwrap();
+        let h = db.history(lib, 10).unwrap();
+        assert_eq!(h.iter().map(|e| e.played_at).collect::<Vec<_>>(), [600, 500, 400]);
+        assert_eq!(h[1].source, "plex");
     }
 
     #[test]

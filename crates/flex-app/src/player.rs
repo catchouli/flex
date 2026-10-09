@@ -39,6 +39,12 @@ pub struct Player {
     last_save: f64,
     /// Last known duration; mpv forgets it once the file ends.
     duration: Option<f64>,
+    /// For the history: when this session started, the furthest position recorded, whether
+    /// it reached "watched", and whether the session has been logged.
+    session_start: i64,
+    recorded: Option<f64>,
+    became_watched: bool,
+    logged: bool,
     osd_until: f64,
     /// Track whose current selection is being shown, and until when.
     message: Option<(Track, f64)>,
@@ -64,6 +70,10 @@ impl Player {
             finished: false,
             last_save: now,
             duration: None,
+            session_start: crate::shared::now_unix(),
+            recorded: None,
+            became_watched: false,
+            logged: false,
             osd_until: now + OSD_SECS,
             message: None,
         })
@@ -90,8 +100,21 @@ impl Player {
         if self.finished || !self.loaded {
             return;
         }
-        if let (Some(position), Some(duration)) = (self.mpv.get_f64("time-pos"), self.duration) {
-            sh.record_progress(&self.req, position, duration);
+        if let (Some(position), Some(duration)) = (self.mpv.get_f64("time-pos"), self.duration)
+            && let Some(p) = sh.record_progress(&self.req, position, duration)
+        {
+            self.recorded = Some(position);
+            self.became_watched |= p.watched && p.position.is_none();
+        }
+    }
+
+    /// Logs this viewing session in the history (once), if anything was recorded.
+    fn log_session(&mut self, sh: &mut Shared) {
+        if let Some(position) = self.recorded
+            && !self.logged
+        {
+            sh.add_history(&self.req, self.session_start, Some(position), self.became_watched);
+            self.logged = true;
         }
     }
 
@@ -173,9 +196,13 @@ impl Player {
                     return Nav::Pop;
                 }
                 mpv::Event::EndFile { eof: true, .. } => {
-                    if let Some(duration) = self.duration {
-                        sh.record_progress(&self.req, duration, duration);
+                    if let Some(duration) = self.duration
+                        && sh.record_progress(&self.req, duration, duration).is_some()
+                    {
+                        self.recorded = Some(duration);
+                        self.became_watched = true;
                     }
+                    self.log_session(sh);
                     self.finished = true;
                     return match sh.next_after(&self.req) {
                         Some(next) => Nav::replace(UpNext::new(self.req.title.clone(), next)),
@@ -307,5 +334,6 @@ impl Screen for Player {
 
     fn on_leave(&mut self, sh: &mut Shared) {
         self.save_progress(sh);
+        self.log_session(sh);
     }
 }

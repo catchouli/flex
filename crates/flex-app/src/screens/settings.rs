@@ -3,7 +3,8 @@
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
 
-use super::{Nav, Screen, picker::FolderPicker, text_entry::TextEntry};
+use super::picker::{FolderPicker, Purpose};
+use super::{Nav, Screen, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
@@ -19,7 +20,7 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        match self.list.handle(press, libs + 4) {
+        match self.list.handle(press, libs + 5) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
@@ -30,6 +31,7 @@ impl Screen for Settings {
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
+            ListInput::Activate(i) if i == libs + 3 => Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase)),
             ListInput::Activate(_) => {
                 sh.scan_all();
                 sh.toast("Rescanning all libraries…");
@@ -54,6 +56,7 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::None, format!("Mark as watched after {threshold}%")).detail("OK to change"));
         let tmdb = if sh.tmdb_token().is_some() { "connected" } else { "not set up" };
         rows.push(Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}")).detail("OK to enter a token"));
+        rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

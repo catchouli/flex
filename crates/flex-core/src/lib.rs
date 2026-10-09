@@ -6,6 +6,7 @@ pub mod library;
 pub mod metadata;
 pub mod natural;
 pub mod parse;
+pub mod plex;
 pub mod progress;
 pub mod scan;
 pub mod search;
