@@ -54,7 +54,12 @@ impl Mpv {
 
         let defaults = [
             ("vo", "libmpv"),
-            ("hwdec", "auto-safe"),
+            // Windows: decoding on the GPU but copying frames back avoids the D3D11→OpenGL
+            // hand-over, which glitches on some GPUs (seen as blocky artefacts on motion).
+            ("hwdec", if cfg!(windows) { "auto-copy-safe" } else { "auto-safe" }),
+            // Time video to the display's refresh, resampling audio slightly to match:
+            // smoother motion than timing by the audio clock alone.
+            ("video-sync", "display-resample"),
             ("config", "no"),
             ("terminal", "no"),
             ("input-default-bindings", "no"),
@@ -235,8 +240,13 @@ impl Renderer {
     }
 
     /// Renders the current video frame to framebuffer `fbo` (0 = default) of size `w`×`h` pixels.
+    ///
+    /// Also reports the previous frame as shown: egui swaps buffers right after painting,
+    /// so by the next paint the last frame is on screen. Without this mpv can only guess
+    /// when frames appear, which shows up as stutter on fast motion.
     pub fn render(&self, fbo: i32, w: i32, h: i32, flip_y: bool) {
         let api = self.mpv.api;
+        unsafe { (api.mpv_render_context_report_swap)(self.ctx) };
         let mut target = ffi::OpenGlFbo { fbo, w, h, internal_format: 0 };
         let mut flip: c_int = flip_y.into();
         let mut params = [

@@ -3,6 +3,7 @@
 
 mod app;
 mod input;
+mod logging;
 mod mpv;
 mod player;
 mod screens;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use eframe::egui;
 
 fn main() -> eframe::Result {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    logging::init();
 
     let mut windowed = false;
     let mut start = None;

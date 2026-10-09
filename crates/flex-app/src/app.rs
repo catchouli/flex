@@ -98,6 +98,11 @@ impl FlexApp {
                 self.stack.push(screen);
             }
             Nav::Play { req, replace } => self.play(ctx, req, replace),
+            Nav::PlayOver { screen, req } => {
+                self.top_bar.focus = None;
+                self.stack.push(screen);
+                self.play(ctx, req, false);
+            }
             Nav::FocusTopBar => self.top_bar.focus = Some(topbar::Item::Search),
         }
     }
@@ -255,12 +260,13 @@ impl FlexApp {
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(next_expiry - now));
     }
 
-    fn update_cursor(&mut self, ctx: &egui::Context, now: f64, playing: bool) {
+    /// Shows the cursor while the mouse moves; hides it after a moment still.
+    fn update_cursor(&mut self, ctx: &egui::Context, now: f64) {
         if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
             self.last_pointer_move = now;
         }
         let idle = now - self.last_pointer_move;
-        if playing || idle > CURSOR_HIDE_SECS {
+        if idle > CURSOR_HIDE_SECS {
             ctx.set_cursor_icon(egui::CursorIcon::None);
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CURSOR_HIDE_SECS - idle + 0.05));
@@ -288,10 +294,15 @@ impl eframe::App for FlexApp {
         self.sh.poll_scans();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         theme::update_scale(&ctx);
+        self.sh.display_fps = frame
+            .winit_window()
+            .and_then(|w| w.current_monitor())
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map(|mhz| f64::from(mhz) / 1000.0);
         self.frames += 1;
         if self.restore_fullscreen && self.frames > 2 {
             self.restore_fullscreen = false;
@@ -357,8 +368,7 @@ impl eframe::App for FlexApp {
         let nav = self.stack.last_mut().expect("never empty").ui(ui, sh, content, focused);
         self.apply(&ctx, nav);
 
-        let playing = !self.top().shows_top_bar();
-        self.update_cursor(&ctx, now, playing);
+        self.update_cursor(&ctx, now);
         self.draw_toasts(ui, now);
         self.hold_to_quit(ui, now, text_focused);
         if self.show_input_log {

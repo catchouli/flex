@@ -28,6 +28,9 @@ pub enum Nav {
     Replace(Box<dyn Screen>),
     /// Start playback; `replace` swaps out the current screen instead of stacking on it.
     Play { req: PlayRequest, replace: bool },
+    /// Open `screen`, then play on top of it, so Back from the player lands there
+    /// (e.g. the show's page when starting from Continue Watching).
+    PlayOver { screen: Box<dyn Screen>, req: PlayRequest },
     /// Move input focus up to the top bar.
     FocusTopBar,
 }

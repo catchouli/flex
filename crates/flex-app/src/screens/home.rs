@@ -1,12 +1,13 @@
 //! Home: a Continue Watching row (when there's anything to continue) above a grid of
 //! library cards.
 
-use eframe::egui::{Align2, Color32, Pos2, Rect, Style, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, Pos2, Rect, Style, TextStyle, Ui, pos2, vec2};
 use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
-use super::{Nav, Screen, library::LibraryView, picker::FolderPicker, shows::ShowsView};
+use super::shows::{ShowView, ShowsView};
+use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
 use crate::{theme, widgets};
@@ -16,6 +17,8 @@ const CONTINUE_CARD: [f32; 2] = [520.0, 200.0];
 const GAP: f32 = 28.0;
 const SECTION_GAP: f32 = 48.0;
 const MAX_CONTINUE: usize = 20;
+/// Height of a section heading (as laid out by `widgets::header` without a subtitle).
+const HEADER_H: f32 = 80.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -42,6 +45,10 @@ pub struct Home {
     items: Vec<ContinueItem>,
     /// Library versions the items were computed for.
     items_key: Option<Vec<(i64, u64)>>,
+    /// Vertical scroll, and whether to bring the selection into view on the next frame
+    /// (set when the selection moves, so mouse-wheel scrolling isn't undone).
+    scroll: f32,
+    reveal_selection: bool,
 }
 
 impl Default for Home {
@@ -54,6 +61,8 @@ impl Default for Home {
             lib_columns: 1,
             items: Vec::new(),
             items_key: None,
+            scroll: 0.0,
+            reveal_selection: true,
         }
     }
 }
@@ -132,9 +141,16 @@ impl Home {
                 }
             }
             _ if press.is_activate() => {
-                if let Some(i) = item {
-                    return Nav::play(sh.play_request(i.library_id, i.file_id));
-                }
+                let Some(i) = item else { return Nav::None };
+                let Some(req) = sh.play_request(i.library_id, i.file_id) else { return Nav::None };
+                // Back from the player returns to the show rather than Home.
+                let show = sh.lib(i.library_id).and_then(|l| l.catalog()?.show_of_file(i.file_id));
+                return match show {
+                    Some(s) if s.is_series() => {
+                        Nav::PlayOver { screen: Box::new(ShowView::new(i.library_id, s.show.id)), req }
+                    }
+                    _ => Nav::Play { req, replace: false },
+                };
             }
             _ => {}
         }
@@ -180,6 +196,7 @@ impl Screen for Home {
             sh.toast("Hold Back to quit");
             return Nav::None;
         }
+        self.reveal_selection = true;
         match self.section {
             Section::Continue => self.handle_continue(sh, press),
             Section::Libraries => self.handle_libraries(sh, press),
@@ -189,10 +206,40 @@ impl Screen for Home {
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.refresh(sh);
         let style = ui.style().clone();
-        let mut top = rect.top();
+
+        // Lay out vertically (relative to the top of the content), then scroll so the
+        // selection is visible, then draw clipped to `rect`.
+        let lib_columns = (((rect.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
+        let cont_h = if self.items.is_empty() { 0.0 } else { HEADER_H + CONTINUE_CARD[1] + SECTION_GAP };
+        let lib_rows = sh.libs.len().max(1).div_ceil(lib_columns);
+        let content_h = cont_h + HEADER_H + lib_rows as f32 * (LIBRARY_CARD[1] + GAP);
+        if std::mem::take(&mut self.reveal_selection) {
+            let (sel_top, sel_bottom) = match self.section {
+                Section::Continue => (0.0, cont_h),
+                Section::Libraries => {
+                    let row = self.lib / lib_columns;
+                    let card_top = cont_h + HEADER_H + row as f32 * (LIBRARY_CARD[1] + GAP);
+                    (if row == 0 { cont_h } else { card_top }, card_top + LIBRARY_CARD[1])
+                }
+            };
+            if sel_top < self.scroll {
+                self.scroll = sel_top;
+            } else if sel_bottom > self.scroll + rect.height() {
+                self.scroll = sel_bottom - rect.height() + GAP;
+            }
+        }
+        if ui.rect_contains_pointer(rect) {
+            self.scroll -= ui.input(|i| i.smooth_scroll_delta.y);
+        }
+        self.scroll = self.scroll.clamp(0.0, (content_h - rect.height()).max(0.0));
+
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.set_clip_rect(rect);
+        let ui = &mut child;
+        let mut top = rect.top() - self.scroll;
 
         if !self.items.is_empty() {
-            let area = Rect::from_min_max(pos2(rect.left(), top), rect.max);
+            let area = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + content_h));
             let body = widgets::header(ui.painter(), area, "Continue Watching", "", &style);
             let visible = (((body.width() + GAP) / (CONTINUE_CARD[0] + GAP)) as usize).max(1);
             // Scroll sideways to keep the selected card in view.
@@ -211,7 +258,7 @@ impl Screen for Home {
         }
 
         let painter = ui.painter();
-        let area = Rect::from_min_max(pos2(rect.left(), top), rect.max);
+        let area = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + content_h));
         let body = widgets::header(painter, area, "Libraries", "", &style);
         self.lib_columns = (((body.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
         let card_rect = |i: usize| {

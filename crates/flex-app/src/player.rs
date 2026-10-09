@@ -2,6 +2,10 @@
 //!
 //! OK / Play-Pause: pause/play · Left/Right: seek (hold to go faster) · Up: subtitles ·
 //! Down: audio · Back: hide the OSD, or stop if it's already hidden · Stop: stop.
+//! F2: playback stats (dropped frames, decoder, refresh rate).
+//!
+//! The subtitle track chosen with Up is remembered (by name and language, or "off") and
+//! picked again in later files that have a track like it.
 
 use std::sync::Arc;
 
@@ -22,6 +26,9 @@ const SAVE_EVERY_SECS: f64 = 10.0;
 const MESSAGE_SECS: f64 = 2.5;
 /// Extra mpv options for testing, e.g. `FLEX_MPV_OPTS="hwdec=no,profile=fast"`.
 const OPTS_ENV: &str = "FLEX_MPV_OPTS";
+const SUBTITLE_SETTING: &str = "last_subtitle";
+/// Separates title and language in the saved subtitle choice.
+const SUB_SEP: char = '\u{1f}';
 
 #[derive(Clone, Copy)]
 enum Track {
@@ -48,6 +55,11 @@ pub struct Player {
     osd_until: f64,
     /// Track whose current selection is being shown, and until when.
     message: Option<(Track, f64)>,
+    /// The user changed subtitles: save the new choice once mpv has applied it.
+    sub_changed: bool,
+    /// Display refresh rate last passed to mpv.
+    display_fps: Option<f64>,
+    show_stats: bool,
 }
 
 impl Player {
@@ -76,6 +88,9 @@ impl Player {
             logged: false,
             osd_until: now + OSD_SECS,
             message: None,
+            sub_changed: false,
+            display_fps: None,
+            show_stats: false,
         })
     }
 
@@ -142,6 +157,7 @@ impl Player {
             }
             Action::Up if !press.repeat => {
                 self.command(&["cycle", "sub"]);
+                self.sub_changed = true;
                 self.message = Some((Track::Sub, now + MESSAGE_SECS));
             }
             Action::Down if !press.repeat => {
@@ -161,6 +177,80 @@ impl Player {
             self.osd_until = now + OSD_SECS;
         }
         Nav::None
+    }
+
+    /// The current subtitle choice as stored: "off" or title + SUB_SEP + language.
+    fn current_sub(&self) -> String {
+        if self.mpv.get_i64("current-tracks/sub/id").is_none() {
+            return "off".to_owned();
+        }
+        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/sub/{p}")).unwrap_or_default();
+        format!("{}{SUB_SEP}{}", prop("title"), prop("lang"))
+    }
+
+    /// Picks the subtitle track that best matches the remembered choice, if any does.
+    fn apply_saved_sub(&self, sh: &Shared) {
+        let Some(saved) = sh.setting(SUBTITLE_SETTING) else { return };
+        if saved == "off" {
+            let _ = self.mpv.set_string("sid", "no");
+            return;
+        }
+        let (title, lang) = saved.split_once(SUB_SEP).unwrap_or((&saved, ""));
+        let count = self.mpv.get_i64("track-list/count").unwrap_or(0);
+        let mut best: Option<(u8, i64)> = None;
+        for i in 0..count {
+            let prop = |p: &str| self.mpv.get_string(&format!("track-list/{i}/{p}")).unwrap_or_default();
+            if prop("type") != "sub" {
+                continue;
+            }
+            let Some(id) = self.mpv.get_i64(&format!("track-list/{i}/id")) else { continue };
+            let same_title = !title.is_empty() && prop("title").eq_ignore_ascii_case(title);
+            let same_lang = !lang.is_empty() && prop("lang").eq_ignore_ascii_case(lang);
+            // Same name matters most; a language-only match only counts if the saved
+            // track had no name.
+            let score = match (same_title, same_lang) {
+                (true, true) => 3,
+                (true, false) => 2,
+                (false, true) if title.is_empty() => 1,
+                _ => 0,
+            };
+            if score > 0 && best.is_none_or(|(s, _)| score > s) {
+                best = Some((score, id));
+            }
+        }
+        if let Some((_, id)) = best {
+            let _ = self.mpv.set_string("sid", &id.to_string());
+        }
+    }
+
+    fn stats_lines(&self) -> Vec<String> {
+        let f = |p: &str| self.mpv.get_f64(p);
+        let i = |p: &str| self.mpv.get_i64(p).map_or("-".to_owned(), |v| v.to_string());
+        let s = |p: &str| self.mpv.get_string(p).unwrap_or_else(|| "-".to_owned());
+        vec![
+            format!("Video: {} {}x{}", s("video-codec"), i("width"), i("height")),
+            format!("Decoder: hwdec {}", s("hwdec-current")),
+            format!(
+                "Video fps {:.3} · display {:.3} Hz",
+                f("container-fps").unwrap_or(0.0),
+                f("display-fps").unwrap_or(0.0)
+            ),
+            format!("Sync: {} · speed {:.4}", s("video-sync"), f("speed").unwrap_or(1.0) * f("audio-speed-correction").unwrap_or(1.0)),
+            format!("Dropped: {} by output · {} by decoder", i("frame-drop-count"), i("decoder-frame-drop-count")),
+            format!("Late frames: {} · mistimed: {}", i("vo-delayed-frame-count"), i("mistimed-frame-count")),
+        ]
+    }
+
+    fn draw_stats(&self, ui: &egui::Ui, safe: Rect) {
+        let painter = ui.painter();
+        let mono = TextStyle::Monospace.resolve(ui.style());
+        let lines = self.stats_lines();
+        let rect = Rect::from_min_size(safe.min, vec2(860.0, 32.0 + 36.0 * lines.len() as f32));
+        painter.rect_filled(rect, CornerRadius::same(10), theme::OSD_BG);
+        for (n, line) in lines.iter().enumerate() {
+            let pos = rect.min + vec2(20.0, 16.0 + 36.0 * n as f32);
+            painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::TEXT);
+        }
     }
 
     fn track_label(&self, track: Track) -> String {
@@ -190,7 +280,10 @@ impl Player {
         let now = ctx.input(|i| i.time);
         for event in self.mpv.poll_events() {
             match event {
-                mpv::Event::FileLoaded => self.loaded = true,
+                mpv::Event::FileLoaded => {
+                    self.loaded = true;
+                    self.apply_saved_sub(sh);
+                }
                 mpv::Event::EndFile { error: Some(e), .. } => {
                     sh.toast(format!("Couldn't play {}: {e}", self.req.title));
                     return Nav::Pop;
@@ -214,6 +307,22 @@ impl Player {
             }
         }
 
+        if std::mem::take(&mut self.sub_changed) {
+            sh.set_setting(SUBTITLE_SETTING, &self.current_sub());
+        }
+        // Tell mpv the real refresh rate (it can't see the display through the render API).
+        if let Some(fps) = sh.display_fps
+            && self.display_fps != Some(fps)
+        {
+            self.display_fps = Some(fps);
+            let value = format!("{fps:.3}");
+            if self.mpv.set_string("display-fps-override", &value).is_err() {
+                let _ = self.mpv.set_string("override-display-fps", &value); // mpv < 0.37
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+            self.show_stats = !self.show_stats;
+        }
         if self.loaded {
             self.duration = self.mpv.get_f64("duration").or(self.duration);
             if now - self.last_save >= SAVE_EVERY_SECS {
@@ -234,7 +343,6 @@ impl Player {
             unsafe { painter.gl().bind_framebuffer(glow::FRAMEBUFFER, target) };
         });
         ui.painter().add(egui::PaintCallback { rect: screen, callback: Arc::new(callback) });
-        ctx.set_cursor_icon(egui::CursorIcon::None);
 
         let painter = ui.painter();
         let safe = theme::safe_rect(&ctx);
@@ -242,7 +350,16 @@ impl Player {
             painter.text(screen.center(), Align2::CENTER_CENTER, "Loading…", TextStyle::Heading.resolve(ui.style()), theme::TEXT);
         }
 
+        if self.show_stats {
+            self.draw_stats(ui, safe);
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
         let paused = self.paused();
+        if self.loaded && !paused {
+            // With display-synced timing mpv decides per refresh which frame to show, so it
+            // must be asked every refresh while playing, not only when it signals an update.
+            ctx.request_repaint();
+        }
         if paused || now < self.osd_until {
             self.draw_osd(ui, safe, paused);
             ctx.request_repaint_after(std::time::Duration::from_millis(250));

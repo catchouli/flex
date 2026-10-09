@@ -116,6 +116,7 @@ api! {
     mpv_render_context_set_update_callback: fn(*mut RenderContext, Option<Callback>, *mut c_void);
     mpv_render_context_update: fn(*mut RenderContext) -> u64;
     mpv_render_context_render: fn(*mut RenderContext, *mut RenderParam) -> c_int;
+    mpv_render_context_report_swap: fn(*mut RenderContext);
     mpv_render_context_free: fn(*mut RenderContext);
 }
 

@@ -20,7 +20,7 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        match self.list.handle(press, libs + 5) {
+        match self.list.handle(press, libs + 6) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
@@ -32,6 +32,10 @@ impl Screen for Settings {
             }
             ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
             ListInput::Activate(i) if i == libs + 3 => Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase)),
+            ListInput::Activate(i) if i == libs + 5 => {
+                crate::logging::open_logs_folder();
+                Nav::None
+            }
             ListInput::Activate(_) => {
                 sh.scan_all();
                 sh.toast("Rescanning all libraries…");
@@ -58,6 +62,7 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}")).detail("OK to enter a token"));
         rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
+        rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }

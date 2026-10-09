@@ -125,6 +125,8 @@ pub struct Shared {
     db: Db,
     pub libs: Vec<LibState>,
     pub search_query: String,
+    /// The window's monitor refresh rate, for smooth video timing.
+    pub display_fps: Option<f64>,
     search: Option<SearchIndex>,
     scan_tx: Sender<ScanMsg>,
     scan_rx: Receiver<ScanMsg>,
@@ -146,6 +148,7 @@ impl Shared {
             db,
             libs: Vec::new(),
             search_query: String::new(),
+            display_fps: None,
             search: None,
             scan_tx,
             scan_rx,
@@ -170,6 +173,16 @@ impl Shared {
             }
         }
         Ok(shared)
+    }
+
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.db.setting(key).ok().flatten()
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) {
+        if let Err(e) = self.db.set_setting(key, value) {
+            log::warn!("saving setting {key}: {e:#}");
+        }
     }
 
     pub fn setting_bool(&self, key: &str) -> bool {

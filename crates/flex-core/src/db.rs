@@ -218,9 +218,10 @@ impl Db {
                 let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
-            let show_norm: HashMap<i64, String> = {
-                let mut stmt = tx.prepare("SELECT id, norm FROM shows WHERE library_id = ?1")?;
-                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            // show id -> (norm, matched online)
+            let show_info: HashMap<i64, (String, bool)> = {
+                let mut stmt = tx.prepare("SELECT id, norm, state != 'local' FROM shows WHERE library_id = ?1")?;
+                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
             let mut by_norm: HashMap<String, i64> = {
@@ -236,11 +237,16 @@ impl Db {
             )?;
             let current: std::collections::HashSet<&str> = groups.iter().map(|g| g.key.as_str()).collect();
             for g in groups {
-                // Keep manual choices, and automatic ones whose show still has this title;
-                // re-place automatic ones whose parsed title has changed.
+                // Keep manual choices, automatic ones whose show still has this title, and
+                // ones in a show already matched online (where differently named folders
+                // were merged). Re-place the rest: their parsed title has changed.
                 match existing.get(&g.key) {
                     Some((_, true)) => continue,
-                    Some((show, false)) if show_norm.get(show) == Some(&g.norm) => continue,
+                    Some((show, false))
+                        if show_info.get(show).is_some_and(|(norm, matched)| *matched || *norm == g.norm) =>
+                    {
+                        continue
+                    }
                     _ => {}
                 }
                 let show_id = match by_norm.get(&g.norm) {
@@ -582,6 +588,12 @@ mod tests {
         assert!(db.shows(lib).unwrap().iter().all(|s| s.id != other));
         let c = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "C").unwrap();
         assert_eq!(c.show_id, a);
+        // ...and stays merged on the next sync instead of being split off and re-matched.
+        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B"), group("C", "Other")])
+            .unwrap();
+        let c = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "C").unwrap();
+        assert_eq!(c.show_id, a);
+        assert!(db.shows(lib).unwrap().iter().all(|s| s.title != "Other"));
 
         // A vanished automatic group is dropped.
         db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
