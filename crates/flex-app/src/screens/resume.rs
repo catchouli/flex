@@ -51,6 +51,11 @@ impl Screen for ResumePrompt {
         let resume = Rect::from_min_size(pos2(safe.left(), top + 120.0), size);
         let restart = resume.translate(vec2(size.x + 28.0, 0.0));
         let label = format!("Resume from {}", theme::format_time(self.position));
+        for (i, r) in [resume, restart].into_iter().enumerate() {
+            if widgets::hit(ui, r).any() {
+                self.focus = i;
+            }
+        }
         widgets::button(painter, resume, &label, self.focus == 0, style);
         widgets::button(painter, restart, "Start from beginning", self.focus == 1, style);
         Nav::None

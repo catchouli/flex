@@ -54,6 +54,11 @@ impl Screen for UpNext {
         let size = vec2(300.0, 76.0);
         let play = Rect::from_min_size(pos2(safe.left(), y), size);
         let back = play.translate(vec2(size.x + 28.0, 0.0));
+        for (i, r) in [play, back].into_iter().enumerate() {
+            if widgets::hit(ui, r).any() {
+                self.focus = i;
+            }
+        }
         widgets::button(painter, play, "Play", self.focus == 0, style);
         widgets::button(painter, back, "Back", self.focus == 1, style);
         Nav::None

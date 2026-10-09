@@ -121,6 +121,9 @@ impl Screen for SearchView {
         for (i, (_, label)) in scopes(sh).iter().enumerate() {
             let w = painter.layout_no_wrap(label.clone(), font.clone(), crate::theme::TEXT).size().x + 44.0;
             let r = Rect::from_min_size(pos2(x, body.top()), vec2(w, SCOPE_H));
+            if widgets::hit(ui, r).any() {
+                (self.scope, self.on_scopes) = (i, true);
+            }
             let color = widgets::paint_focusable(&painter, r, focused && self.on_scopes && i == self.scope, i == self.scope);
             painter.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
             x += w + 14.0;
@@ -141,7 +144,9 @@ impl Screen for SearchView {
                 Row::new(icon, item.title.as_str()).detail(item.context.as_str())
             })
             .collect();
-        widgets::list(ui, list_rect, &rows, &mut self.list, focused && !self.on_scopes);
+        if widgets::list(ui, list_rect, &rows, &mut self.list, focused && !self.on_scopes).any() {
+            self.on_scopes = false;
+        }
         Nav::None
     }
 

@@ -338,7 +338,8 @@ impl ShowsView {
         Nav::None
     }
 
-    fn draw_toolbar(&mut self, painter: &Painter, rect: Rect, focused: bool, style: &egui::Style) {
+    fn draw_toolbar(&mut self, ui: &Ui, rect: Rect, focused: bool, style: &egui::Style) {
+        let painter = ui.painter();
         let font = TextStyle::Small.resolve(style);
         let mut x = rect.left();
         for (i, tool) in self.tools().iter().enumerate() {
@@ -346,19 +347,29 @@ impl ShowsView {
             let width = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x + 44.0;
             let r = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
             self.tool_x[i] = x;
+            if widgets::hit(ui, r).any() {
+                self.toolbar = Some(i);
+            }
             let color = widgets::paint_focusable(painter, r, focused && self.toolbar == Some(i), false);
             painter.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
             x += width + 14.0;
         }
     }
 
-    /// The open dropdown, under its toolbar button.
-    fn draw_popup(&mut self, ui: &mut Ui, toolbar: Rect) {
-        let Some((tool, list)) = &mut self.popup else { return };
-        let (options, current) = tool.options(&self.prefs);
+    /// Where the open dropdown goes: under its toolbar button.
+    fn popup_rect(&self, toolbar: Rect) -> Option<Rect> {
+        let (tool, _) = self.popup.as_ref()?;
+        let (options, _) = tool.options(&self.prefs);
         let index = TOOLS.iter().position(|t| t == tool).unwrap_or(0);
         let x = self.tool_x[index];
-        let rect = Rect::from_min_size(pos2(x, toolbar.bottom() + 8.0), vec2(420.0, 28.0 + 70.0 * options.len() as f32));
+        Some(Rect::from_min_size(pos2(x, toolbar.bottom() + 8.0), vec2(420.0, 28.0 + 70.0 * options.len() as f32)))
+    }
+
+    /// The open dropdown, under its toolbar button.
+    fn draw_popup(&mut self, ui: &mut Ui, toolbar: Rect) {
+        let Some(rect) = self.popup_rect(toolbar) else { return };
+        let Some((tool, list)) = &mut self.popup else { return };
+        let (options, current) = tool.options(&self.prefs);
         ui.painter().rect_filled(rect.expand(6.0), CornerRadius::same(12), theme::OSD_BG);
         let rows: Vec<Row> = options
             .iter()
@@ -477,7 +488,18 @@ impl Screen for ShowsView {
         let style = ui.style().clone();
         let body = widgets::header(ui.painter(), rect, &name, &subtitle, &style);
         let toolbar = Rect::from_min_size(body.min, vec2(body.width(), TOOLBAR_H));
-        self.draw_toolbar(ui.painter(), toolbar, focused, &style);
+        if let Some(popup) = self.popup_rect(toolbar) {
+            // Clicking outside the dropdown closes it.
+            let outside = ui.input(|i| i.pointer.primary_clicked() && i.pointer.hover_pos().is_some_and(|p| !popup.contains(p)));
+            if outside {
+                // Only closes it: nothing underneath gets the click.
+                self.popup = None;
+                widgets::modal(ui.ctx(), Rect::NOTHING);
+            } else {
+                widgets::modal(ui.ctx(), popup.expand(6.0));
+            }
+        }
+        self.draw_toolbar(ui, toolbar, focused, &style);
         let content = Rect::from_min_max(pos2(body.left(), toolbar.bottom() + 24.0), body.max);
         let content_focused = focused && self.toolbar.is_none() && self.popup.is_none();
 
@@ -496,11 +518,14 @@ impl Screen for ShowsView {
             match self.prefs.layout {
                 Layout::Posters => {
                     let (items, images) = (&self.items, &mut sh.images);
-                    widgets::grid(ui, content, items.len(), GRID, &mut self.grid, content_focused, |painter, i, r, f| {
+                    let hit = widgets::grid(ui, content, items.len(), GRID, &mut self.grid, content_focused, |painter, i, r, f| {
                         let item = &items[i];
                         let poster = item.poster.as_deref().and_then(|p| images.get(p, Size::Poster));
                         paint_card(painter, r, item, poster.as_ref(), f, &style);
                     });
+                    if hit.any() {
+                        self.toolbar = None;
+                    }
                 }
                 Layout::List => {
                     let rows: Vec<Row> = self
@@ -525,7 +550,9 @@ impl Screen for ShowsView {
                             Row::new(icon, title).detail(detail).progress(it.progress).dim(it.unwatched == 0)
                         })
                         .collect();
-                    widgets::list(ui, content, &rows, &mut self.list, content_focused);
+                    if widgets::list(ui, content, &rows, &mut self.list, content_focused).any() {
+                        self.toolbar = None;
+                    }
                 }
             }
         }

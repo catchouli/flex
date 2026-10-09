@@ -247,6 +247,9 @@ impl Screen for Home {
             for (slot, i) in (self.cont_offset..self.items.len()).take(visible).enumerate() {
                 let Some(text) = describe(sh, &self.items[i]) else { continue };
                 let min = Pos2::new(body.left() + slot as f32 * (CONTINUE_CARD[0] + GAP), body.top());
+                if widgets::hit(ui, Rect::from_min_size(min, CONTINUE_CARD.into())).any() {
+                    (self.section, self.cont) = (Section::Continue, i);
+                }
                 let selected = focused && self.section == Section::Continue && i == self.cont;
                 continue_card(ui, Rect::from_min_size(min, CONTINUE_CARD.into()), &text, selected, &style);
             }
@@ -256,12 +259,18 @@ impl Screen for Home {
         let painter = ui.painter();
         let area = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), top + content_h));
         let body = widgets::header(painter, area, "Libraries", "", &style);
-        self.lib_columns = (((body.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
+        let cols = (((body.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
+        self.lib_columns = cols;
         let card_rect = |i: usize| {
-            let (row, col) = (i / self.lib_columns, i % self.lib_columns);
+            let (row, col) = (i / cols, i % cols);
             let min = pos2(body.left() + col as f32 * (LIBRARY_CARD[0] + GAP), body.top() + row as f32 * (LIBRARY_CARD[1] + GAP));
             Rect::from_min_size(min, LIBRARY_CARD.into())
         };
+        for i in 0..1 + sh.libs.len().max(1) {
+            if widgets::hit(ui, card_rect(i)).any() {
+                (self.section, self.lib) = (Section::Libraries, i);
+            }
+        }
         let libs_focused = focused && self.section == Section::Libraries;
         let listed = sh.watchlist_shows().len();
         let count = match listed {

@@ -429,7 +429,13 @@ impl Screen for TitlePage {
             painter.with_clip_rect(r.intersect(rect)).galley(r.min, galley, theme::TEXT);
         }
 
-        // Rows.
+        // Rows. `hovered` = (row, item) under the mouse.
+        let mut hovered = None;
+        let mut hit = |row: usize, i: usize, r: Rect| {
+            if widgets::hit(ui, r.intersect(rect)).any() {
+                hovered = Some((row, i));
+            }
+        };
         for (index, (kind, count)) in rows.iter().enumerate() {
             let (top, _) = row_tops[index];
             let row_focus = focus.filter(|(k, _)| k == kind).map(|(_, i)| i);
@@ -440,6 +446,7 @@ impl Screen for TitlePage {
                         let label = b.label();
                         let w = button_width(&painter, &label, &style);
                         let r = Rect::from_min_size(pos2(x, origin.y + top), vec2(w, BUTTON_H));
+                        hit(index, i, r);
                         paint_button(&painter, r, &label, row_focus == Some(i), i == 0 && matches!(b, Button::Play { .. }), &style);
                         x += w + 16.0;
                     }
@@ -448,6 +455,7 @@ impl Screen for TitlePage {
                     painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, "Seasons", TextStyle::Body.resolve(&style), theme::TEXT);
                     let sel = self.nav.col[1];
                     hrow(&painter, Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0)), SEASON_CARD, *count, sel, &mut self.nav.offset[1], |p, i, r, _| {
+                        hit(index, i, r);
                         let (name, sub) = &season_cards[i];
                         let color = widgets::paint_focusable(p, r, row_focus == Some(i), false);
                         p.text(r.left_top() + vec2(20.0, 16.0), Align2::LEFT_TOP, name, TextStyle::Body.resolve(&style), color);
@@ -461,12 +469,17 @@ impl Screen for TitlePage {
                     let sel = self.nav.col[2];
                     let images = &mut sh.images;
                     hrow(&painter, Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0)), CAST_CARD, *count, sel, &mut self.nav.offset[2], |p, i, r, _| {
+                        hit(index, i, r);
                         let member = &cast[i];
                         let photo = member.image.as_deref().and_then(|img| images.get(img, Size::Profile));
                         paint_cast(p, r, member, photo.as_ref(), row_focus == Some(i), &style);
                     });
                 }
             }
+        }
+        if let Some((row, i)) = hovered {
+            self.nav.row = row;
+            self.nav.col[PageNav::kind_index(rows[row].0)] = i;
         }
         if ui.rect_contains_pointer(rect) {
             self.nav.scroll -= ui.input(|i| i.smooth_scroll_delta.y);
@@ -580,6 +593,9 @@ impl Screen for EpisodePage {
             let label = b.label();
             let w = button_width(&painter, &label, &style);
             let r = Rect::from_min_size(pos2(x, y), vec2(w, BUTTON_H));
+            if widgets::hit(ui, r.intersect(rect)).any() {
+                self.nav.col[0] = i;
+            }
             paint_button(&painter, r, &label, focused && self.nav.col[0] == i, i == 0, &style);
             x += w + 16.0;
         }

@@ -7,6 +7,7 @@ use crate::input::{self, Action, InputLog, Press};
 use crate::player::Player;
 use crate::screens::{Nav, Screen, home::Home, resume::ResumePrompt, search::SearchView, settings::Settings};
 use crate::shared::{PlayRequest, Shared};
+use crate::widgets::{self, Hit};
 use crate::theme;
 use crate::topbar::{self, TopBar};
 
@@ -372,6 +373,18 @@ impl eframe::App for FlexApp {
         let sh = &mut self.sh;
         let nav = self.stack.last_mut().expect("never empty").ui(ui, sh, content, focused);
         self.apply(&ctx, nav);
+        // The screen has selected whatever the mouse is on; a click then acts like OK.
+        match widgets::take_hit(&ctx) {
+            Hit::None => {}
+            Hit::Hover => self.top_bar.focus = None,
+            Hit::Click => {
+                self.top_bar.focus = None;
+                let sh = &mut self.sh;
+                let ok = Press { action: Action::Ok, repeat: false };
+                let nav = self.stack.last_mut().expect("never empty").handle(sh, ok);
+                self.apply(&ctx, nav);
+            }
+        }
 
         self.update_cursor(&ctx, now);
         self.draw_toasts(ui, now);
