@@ -265,11 +265,24 @@ impl Shared {
 
     /// The next episode after `req`: the next file in the same folder, for episodic libraries.
     pub fn next_after(&self, req: &PlayRequest) -> Option<PlayRequest> {
+        self.neighbour(req, flex_core::Tree::next_in_folder)
+    }
+
+    /// The episode before `req` in the same folder, for episodic libraries.
+    pub fn prev_before(&self, req: &PlayRequest) -> Option<PlayRequest> {
+        self.neighbour(req, flex_core::Tree::prev_in_folder)
+    }
+
+    fn neighbour(
+        &self,
+        req: &PlayRequest,
+        find: impl for<'t> Fn(&'t flex_core::Tree, i64) -> Option<&'t flex_core::MediaFile>,
+    ) -> Option<PlayRequest> {
         let state = self.lib(req.library_id)?;
         if !state.lib.kind.is_episodic() {
             return None;
         }
-        let next = state.tree.next_in_folder(req.file_id)?;
-        self.play_request(req.library_id, next.id)
+        let file = find(&state.tree, req.file_id)?;
+        self.play_request(req.library_id, file.id)
     }
 }

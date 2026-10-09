@@ -37,7 +37,7 @@ fn main() -> eframe::Result {
             #[cfg(windows)]
             {
                 use winit::platform::windows::EventLoopBuilderExtWindows;
-                _builder.with_msg_hook(input::media::hook);
+                _builder.with_msg_hook(input::os::hook);
             }
         })),
         ..Default::default()

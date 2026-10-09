@@ -88,6 +88,13 @@ impl Tree {
         self.files[pos + 1..].iter().find(|f| parent_of(&f.rel_path) == dir)
     }
 
+    /// The file before `id` in the same folder, in natural order.
+    pub fn prev_in_folder(&self, id: i64) -> Option<&MediaFile> {
+        let pos = self.files.iter().position(|f| f.id == id)?;
+        let dir = parent_of(&self.files[pos].rel_path);
+        self.files[..pos].iter().rev().find(|f| parent_of(&f.rel_path) == dir)
+    }
+
     /// Every distinct folder path, for search.
     pub fn dirs(&self) -> Vec<String> {
         let mut dirs: Vec<String> = Vec::new();
@@ -135,6 +142,8 @@ mod tests {
         assert_eq!(t.next_in_folder(ep2).unwrap().rel_path, "Show/S1/ep10.mkv");
         let ep10 = t.next_in_folder(ep2).unwrap().id;
         assert!(t.next_in_folder(ep10).is_none(), "end of season must not roll into S2");
+        assert_eq!(t.prev_in_folder(ep10).unwrap().id, ep2);
+        assert!(t.prev_in_folder(ep2).is_none());
 
         assert!(t.single_video_in("Show/S2").is_some());
         assert!(t.single_video_in("Show/S1").is_none());

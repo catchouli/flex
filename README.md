@@ -25,10 +25,12 @@ Everyday use only needs the remote; typing (search) needs a keyboard.
 | Play/Pause | Space, remote play/pause (Windows). Acts as OK outside the player |
 | Back | Esc, Backspace, Browser Back (remote), mouse back button |
 | Stop | Remote stop button (Windows) |
+| Next / previous episode | Remote next/previous buttons (Windows), Page Down / Page Up |
+| Search | Remote search button (Windows), Ctrl/Cmd+F, or just start typing |
 | Quit | Hold Back for 1.5 seconds |
-| Search | Just start typing, or Up to the top bar and OK on the search box. Down moves into results, Enter opens the best match, Esc clears |
-| Input log | F1, which shows exactly what each key or remote button sends |
-| Fullscreen | Remote zoom-in (Ctrl/Cmd + `=`) toggles, zoom-out (Ctrl/Cmd + `-`) leaves; also the top-bar button, double-clicking the video, or F11 (Windows; macOS reserves F11). Remembered between runs; `--windowed` ignores it |
+| In the search box | Down moves into results, Enter opens the best match, Esc clears |
+| Input log | F1, which shows exactly what each key or remote button sends (on Windows also raw key codes and HID reports) |
+| Fullscreen | Remote zoom-in toggles, zoom-out leaves (handled as HID zoom, Ctrl/Cmd + `=`/`-` or Ctrl+wheel); also the top-bar button, double-clicking the video, or F11 (Windows; macOS reserves F11). Remembered between runs; `--windowed` ignores it |
 
 In the player: **OK/Play** pause · **Left/Right** seek 10s (hold for 30s steps) ·
 **Up** cycle subtitles · **Down** cycle audio · **Back** hide the OSD, then stop · **Stop** stop.

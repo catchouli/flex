@@ -16,6 +16,8 @@ const TOAST_SECS: f64 = 4.0;
 const QUIT_HOLD_SECS: f64 = 1.5;
 const QUIT_PROMPT_SECS: f64 = 0.4;
 const FULLSCREEN_SETTING: &str = "fullscreen";
+/// Ctrl+wheel zoom sends a burst of events per gesture; toggle at most this often.
+const ZOOM_DEBOUNCE_SECS: f64 = 0.8;
 
 pub struct FlexApp {
     sh: Shared,
@@ -32,18 +34,20 @@ pub struct FlexApp {
     /// on Windows: the window ends up borderless in a corner).
     restore_fullscreen: bool,
     frames: u64,
+    last_zoom: f64,
 }
 
 impl FlexApp {
     /// `start` may be a video to play immediately (handy for testing playback).
     pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool) -> anyhow::Result<Self> {
         theme::install(&cc.egui_ctx);
-        input::media::set_context(&cc.egui_ctx);
+        input::os::set_context(&cc.egui_ctx);
         let sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
         let restore_fullscreen = !windowed && sh.setting_bool(FULLSCREEN_SETTING);
         let mut app = Self {
             restore_fullscreen,
             frames: 0,
+            last_zoom: f64::NEG_INFINITY,
             sh,
             stack: vec![Box::new(Home::default())],
             top_bar: TopBar::default(),
@@ -165,6 +169,7 @@ impl FlexApp {
         let (f1, f11) = ctx.input(|i| (i.key_pressed(Key::F1), i.key_pressed(Key::F11)));
         if f1 {
             self.show_input_log = !self.show_input_log;
+            input::os::set_diagnostics(self.show_input_log);
         }
         if f11 {
             self.toggle_fullscreen(ctx);
@@ -281,9 +286,22 @@ impl eframe::App for FlexApp {
         }
         for press in presses {
             match press.action {
-                Action::ZoomIn if !press.repeat => self.toggle_fullscreen(&ctx),
-                Action::ZoomOut if !press.repeat => self.set_fullscreen(&ctx, false),
-                Action::ZoomIn | Action::ZoomOut => {}
+                Action::ZoomIn | Action::ZoomOut => {
+                    if !press.repeat && now - self.last_zoom > ZOOM_DEBOUNCE_SECS {
+                        self.last_zoom = now;
+                        match press.action {
+                            Action::ZoomIn => self.toggle_fullscreen(&ctx),
+                            _ => self.set_fullscreen(&ctx, false),
+                        }
+                    }
+                }
+                Action::Search => {
+                    // Not from the player: a stray press shouldn't end playback.
+                    if self.top().shows_top_bar() {
+                        topbar::focus_text(&ctx);
+                        self.top_bar.focus = Some(topbar::Item::Search);
+                    }
+                }
                 _ => {
                     let nav = self.route(&ctx, press);
                     self.apply(&ctx, nav);

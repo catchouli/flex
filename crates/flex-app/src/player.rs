@@ -43,6 +43,7 @@ impl Player {
         let options: Vec<(&str, &str)> = extra.split(',').filter_map(|kv| kv.split_once('=')).collect();
         let mpv = Arc::new(Mpv::new(ctx, &options)?);
         let renderer = Arc::new(Renderer::new(mpv.clone(), proc_address, ctx)?);
+        log::info!("playing {}", req.path.display());
         mpv.command(&["loadfile", &req.path.to_string_lossy()])?;
         let now = ctx.input(|i| i.time);
         Ok(Self { req, mpv, renderer, loaded: false, osd_until: now + OSD_SECS, message: None })
@@ -212,7 +213,23 @@ impl Player {
 impl Screen for Player {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
         let now = sh.ctx.input(|i| i.time);
-        self.handle_press(now, press)
+        match press.action {
+            Action::Next if !press.repeat => match sh.next_after(&self.req) {
+                Some(req) => Nav::Play { req, replace: true },
+                None => {
+                    sh.toast("No next episode in this folder");
+                    Nav::None
+                }
+            },
+            Action::Previous if !press.repeat => match sh.prev_before(&self.req) {
+                Some(req) => Nav::Play { req, replace: true },
+                None => {
+                    sh.toast("No previous episode in this folder");
+                    Nav::None
+                }
+            },
+            _ => self.handle_press(now, press),
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, sh: &mut Shared, _rect: Rect, _focused: bool) -> Nav {

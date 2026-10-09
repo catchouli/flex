@@ -28,7 +28,7 @@ impl Screen for UpNext {
             Action::Left => self.focus = 0,
             Action::Right => self.focus = 1,
             Action::Back | Action::Stop if !press.repeat => return Nav::Pop,
-            Action::PlayPause if !press.repeat => return play,
+            Action::PlayPause | Action::Next if !press.repeat => return play,
             Action::Ok if !press.repeat => return if self.focus == 0 { play } else { Nav::Pop },
             _ => {}
         }
