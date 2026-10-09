@@ -1,6 +1,7 @@
 //! Screens live on a stack: Back pops to whatever you came from, so the player and
 //! end screen always return to the view playback was started from.
 
+pub mod browse;
 pub mod history;
 pub mod home;
 pub mod inspector;

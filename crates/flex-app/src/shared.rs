@@ -520,7 +520,7 @@ impl Shared {
         std::thread::spawn(move || {
             let result = (|| -> Result<usize> {
                 let progress = |done: usize| {
-                    if done % 10 == 0 || done == total {
+                    if done.is_multiple_of(10) || done == total {
                         let _ = tx.send(ScanMsg::Fetching(id, done, total));
                         ctx.request_repaint();
                     }

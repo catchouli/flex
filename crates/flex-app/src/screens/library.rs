@@ -45,11 +45,7 @@ pub fn open_folder(sh: &Shared, library_id: i64, rel: &str) -> Nav {
 }
 
 /// A video row: dimmed with "Watched" once watched, time left and a bar if partway.
-pub fn file_row(f: &flex_core::MediaFile) -> Row {
-    file_row_titled(f, display_name(f.file_name(), true))
-}
-
-/// [`file_row`] with a given title (e.g. the episode's name from TMDB).
+/// A video row titled `title` (e.g. the episode's name from TMDB).
 pub fn file_row_titled(f: &flex_core::MediaFile, title: String) -> Row {
     let p = f.progress;
     let row = Row::new(Icon::Video, title);

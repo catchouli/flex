@@ -8,12 +8,10 @@ use crate::images::Size;
 /// Width of the poster on a show's page.
 const POSTER_W: f32 = 340.0;
 use flex_core::catalog::ShowEntry;
-use flex_core::library::LibraryKind;
 
-use super::history::HistoryView;
 use super::inspector::MatchInspector;
 use super::match_online::MatchOnline;
-use super::library::{LibraryView, file_row, file_row_titled};
+use super::library::file_row_titled;
 use super::options::{OptionsMenu, Target};
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
@@ -52,7 +50,7 @@ fn episode_summary(state: &LibState, ids: impl Iterator<Item = i64>) -> (String,
 }
 
 /// Opens a show: its only season directly, a season list otherwise; movies play.
-fn open_show(sh: &Shared, library_id: i64, entry: &ShowEntry) -> Nav {
+pub fn open_show(sh: &Shared, library_id: i64, entry: &ShowEntry) -> Nav {
     if !entry.is_series() {
         let first = entry.episodes.first().map(|e| e.file_id);
         return Nav::play(first.and_then(|id| sh.play_request(library_id, id)));
@@ -60,85 +58,6 @@ fn open_show(sh: &Shared, library_id: i64, entry: &ShowEntry) -> Nav {
     match entry.seasons().as_slice() {
         [only] => Nav::push(SeasonView::new(library_id, entry.show.id, *only)),
         _ => Nav::push(ShowView::new(library_id, entry.show.id)),
-    }
-}
-
-/// Rows above the shows: "Browse folders" and "History".
-const FIXED_ROWS: usize = 2;
-
-fn fixed_rows() -> [Row; FIXED_ROWS] {
-    [Row::new(Icon::Folder, "Browse folders"), Row::new(Icon::Refresh, "History")]
-}
-
-pub struct ShowsView {
-    library_id: i64,
-    list: ListState,
-}
-
-impl ShowsView {
-    pub fn new(library_id: i64) -> Self {
-        Self { library_id, list: ListState::default() }
-    }
-}
-
-impl Screen for ShowsView {
-    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
-        if press.is(Action::Back) {
-            return Nav::Pop;
-        }
-        let Some(catalog) = sh.lib(self.library_id).and_then(|l| l.catalog()) else {
-            return match self.list.handle(press, FIXED_ROWS) {
-                ListInput::AtTop => Nav::FocusTopBar,
-                ListInput::Activate(0) => Nav::push(LibraryView::new(self.library_id, String::new())),
-                ListInput::Activate(_) => Nav::push(HistoryView::new(self.library_id)),
-                ListInput::None => Nav::None,
-            };
-        };
-        let entry = self.list.selected.checked_sub(FIXED_ROWS).and_then(|i| catalog.shows.get(i)).cloned();
-        if press.is(Action::Menu) {
-            return entry.map_or(Nav::None, |e| Nav::push(ShowOptions::new(self.library_id, e.show.id)));
-        }
-        match self.list.handle(press, catalog.shows.len() + FIXED_ROWS) {
-            ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::Activate(0) => Nav::push(LibraryView::new(self.library_id, String::new())),
-            ListInput::Activate(1) => Nav::push(HistoryView::new(self.library_id)),
-            ListInput::Activate(_) => entry.map_or(Nav::None, |e| open_show(sh, self.library_id, &e)),
-            ListInput::None => Nav::None,
-        }
-    }
-
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
-        let movies = state.lib.kind == LibraryKind::Movies;
-        let Some(catalog) = state.catalog() else {
-            let subtitle = if state.organising || state.scanning.is_some() { "Organising…" } else { "" };
-            let body = widgets::header(ui.painter(), rect, &state.lib.name, subtitle, ui.style());
-            let rows = fixed_rows();
-            widgets::list(ui, body, &rows, &mut self.list, focused);
-            return Nav::None;
-        };
-        let what = if movies { "movies" } else { "shows" };
-        let subtitle = format!("{} {what} · {}", thousands(catalog.shows.len()), state.status());
-        let body = widgets::header(ui.painter(), rect, &state.lib.name, &subtitle, ui.style());
-        let mut rows = Vec::from(fixed_rows());
-        for entry in &catalog.shows {
-            let row = if !entry.is_series() {
-                let file = entry.episodes.first().and_then(|e| state.tree.file(e.file_id));
-                let mut row = file.map_or_else(|| Row::new(Icon::Video, ""), file_row);
-                row.title = title_with_year(entry);
-                row.detail.push_str(unmatched_note(entry));
-                row
-            } else {
-                let (summary, done) = episode_summary(state, entry.episodes.iter().map(|e| e.file_id));
-                let seasons = entry.seasons().iter().filter(|s| **s != 0).count();
-                let mut detail = if seasons > 1 { format!("{seasons} seasons · {summary}") } else { summary };
-                detail.push_str(unmatched_note(entry));
-                Row::new(Icon::Folder, title_with_year(entry)).detail(detail).dim(done)
-            };
-            rows.push(row);
-        }
-        widgets::list(ui, body, &rows, &mut self.list, focused);
-        Nav::None
     }
 }
 

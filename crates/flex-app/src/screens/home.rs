@@ -6,7 +6,8 @@ use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 
 use super::options::{OptionsMenu, Target};
-use super::shows::{ShowView, ShowsView};
+use super::browse::ShowsView;
+use super::shows::ShowView;
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -170,7 +171,7 @@ impl Home {
             _ if press.is_activate() => {
                 return match sh.libs.get(self.lib) {
                     Some(l) => match sh.library_view(l.lib.id) {
-                        crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(l.lib.id)),
+                        crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(sh, l.lib.id)),
                         crate::shared::LibraryView::Folders => Nav::push(LibraryView::new(l.lib.id, String::new())),
                     },
                     None => Nav::push(FolderPicker::new(sh)),

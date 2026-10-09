@@ -236,3 +236,102 @@ pub fn paragraph(painter: &Painter, rect: Rect, text: &str, max_lines: usize, st
 pub fn message(painter: &Painter, rect: Rect, text: &str, style: &egui::Style) {
     painter.text(rect.center_top() + vec2(0.0, 80.0), Align2::CENTER_TOP, text, TextStyle::Body.resolve(style), theme::DIM);
 }
+
+/// Selection and scroll position for a [`grid`].
+#[derive(Default)]
+pub struct GridState {
+    pub selected: usize,
+    /// Columns at the last draw (navigation needs it).
+    cols: usize,
+    /// Rows that fit on screen at the last draw (for paging).
+    visible_rows: usize,
+    scroll: f32,
+    reveal: bool,
+}
+
+impl GridState {
+    pub fn select(&mut self, i: usize) {
+        self.selected = i;
+        self.reveal = true;
+    }
+
+    /// D-pad navigation over `len` items. Up from the first row reports `AtTop`.
+    pub fn handle(&mut self, press: Press, len: usize) -> ListInput {
+        if len == 0 {
+            return if press.is(Action::Up) { ListInput::AtTop } else { ListInput::None };
+        }
+        let cols = self.cols.max(1);
+        let last = len - 1;
+        let page = cols * self.visible_rows.max(1);
+        let before = self.selected;
+        let s = self.selected.min(last);
+        self.selected = match press.action {
+            Action::Left if !s.is_multiple_of(cols) => s - 1,
+            Action::Right if s < last && !(s + 1).is_multiple_of(cols) => s + 1,
+            Action::Up if s < cols => return if press.repeat { ListInput::None } else { ListInput::AtTop },
+            Action::Up => s - cols,
+            // Down from the row above a short last row lands on its last item.
+            Action::Down if s / cols < last / cols => (s + cols).min(last),
+            Action::PageUp => s.saturating_sub(page),
+            Action::PageDown => (s + page).min(last),
+            _ if press.is_activate() => return ListInput::Activate(s),
+            _ => s,
+        };
+        self.reveal |= before != self.selected;
+        ListInput::None
+    }
+}
+
+/// Card size and spacing for a [`grid`].
+#[derive(Clone, Copy)]
+pub struct GridSpec {
+    pub card: egui::Vec2,
+    pub gap: f32,
+}
+
+/// A scrolling grid of `len` cards filling `rect`. Only visible cards are drawn (so posters
+/// load lazily); `draw(painter, index, card_rect, focused)` paints one.
+pub fn grid(
+    ui: &mut Ui,
+    rect: Rect,
+    len: usize,
+    spec: GridSpec,
+    state: &mut GridState,
+    focused: bool,
+    mut draw: impl FnMut(&Painter, usize, Rect, bool),
+) {
+    let GridSpec { card, gap } = spec;
+    let cols = (((rect.width() + gap) / (card.x + gap)) as usize).max(1);
+    let row_h = card.y + gap;
+    let rows = len.div_ceil(cols);
+    state.cols = cols;
+    state.visible_rows = ((rect.height() / row_h) as usize).max(1);
+    state.selected = state.selected.min(len.saturating_sub(1));
+    let content_h = rows as f32 * row_h;
+    if std::mem::take(&mut state.reveal) {
+        let top = (state.selected / cols) as f32 * row_h;
+        if top < state.scroll {
+            state.scroll = top;
+        } else if top + card.y > state.scroll + rect.height() {
+            state.scroll = top + card.y - rect.height() + gap;
+        }
+    }
+    if ui.rect_contains_pointer(rect) {
+        state.scroll -= ui.input(|i| i.smooth_scroll_delta.y);
+    }
+    state.scroll = state.scroll.clamp(0.0, (content_h - rect.height()).max(0.0));
+
+    let painter = ui.painter().with_clip_rect(rect);
+    let first_row = (state.scroll / row_h) as usize;
+    let last_row = (((state.scroll + rect.height()) / row_h) as usize + 1).min(rows);
+    for row in first_row..last_row {
+        for col in 0..cols {
+            let i = row * cols + col;
+            if i >= len {
+                break;
+            }
+            let min = egui::pos2(rect.left() + col as f32 * (card.x + gap), rect.top() + row as f32 * row_h - state.scroll);
+            draw(&painter, i, Rect::from_min_size(min, card), focused && i == state.selected);
+        }
+    }
+}
