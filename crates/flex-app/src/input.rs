@@ -18,6 +18,10 @@ pub enum Action {
     /// The remote's stop button (Windows only: macOS keeps media keys for itself).
     #[cfg_attr(not(windows), allow(dead_code))]
     Stop,
+    /// Ctrl/Cmd + "+" or "=" (what air-mouse zoom buttons usually send): toggles fullscreen.
+    ZoomIn,
+    /// Ctrl/Cmd + "-": leaves fullscreen.
+    ZoomOut,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +54,14 @@ fn map_key(key: Key) -> Option<Action> {
         Key::Escape | Key::Backspace | Key::BrowserBack => Action::Back,
         _ => return None,
     })
+}
+
+fn zoom_key(key: Key) -> Option<Action> {
+    match key {
+        Key::Plus | Key::Equals => Some(Action::ZoomIn),
+        Key::Minus => Some(Action::ZoomOut),
+        _ => None,
+    }
 }
 
 const BACK_KEYS: [Key; 3] = [Key::Escape, Key::Backspace, Key::BrowserBack];
@@ -98,8 +110,14 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
                     let physical = physical_key.filter(|p| p != key).map(|p| format!(" (physical {p:?})"));
                     let mods = (!modifiers.is_none()).then(|| format!(" +{modifiers:?}"));
                     let raw = format!("Key {key:?}{}{}", physical.unwrap_or_default(), mods.unwrap_or_default());
-                    // Leave shortcuts like Cmd+Backspace alone.
-                    let action = if modifiers.command || modifiers.alt { None } else { map_key(*key) };
+                    let action = match (modifiers.command, modifiers.alt) {
+                        // Remotes send physical key codes, so check those too: on non-US
+                        // layouts (e.g. Dvorak) the physical "=" key isn't "=".
+                        (true, false) => zoom_key(*key).or_else(|| physical_key.and_then(zoom_key)),
+                        (false, false) => map_key(*key),
+                        // Leave other shortcuts like Cmd+Alt+... alone.
+                        _ => None,
+                    };
                     (raw, action, *repeat)
                 }
                 Event::PointerButton { button, pressed: true, .. } => {
@@ -131,7 +149,7 @@ pub mod media {
         use std::sync::{Mutex, OnceLock};
 
         use eframe::egui;
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_MEDIA_PLAY_PAUSE, VK_MEDIA_STOP};
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_MEDIA_PLAY_PAUSE, VK_MEDIA_STOP, VK_ZOOM};
         use windows_sys::Win32::UI::WindowsAndMessaging::{MSG, WM_APPCOMMAND, WM_KEYDOWN};
 
         use super::Action;
@@ -157,6 +175,7 @@ pub mod media {
                 WM_KEYDOWN => match msg.wParam as u16 {
                     VK_MEDIA_PLAY_PAUSE => Action::PlayPause,
                     VK_MEDIA_STOP => Action::Stop,
+                    VK_ZOOM => Action::ZoomIn,
                     _ => return false,
                 },
                 WM_APPCOMMAND => match ((msg.lParam as u32) >> 16) & !0xF000 {

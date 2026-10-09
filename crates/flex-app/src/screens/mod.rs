@@ -53,6 +53,10 @@ pub trait Screen {
         false
     }
 
+    fn is_player(&self) -> bool {
+        false
+    }
+
     /// For the search screen: open the best result (Enter in the search box).
     fn activate_first(&mut self, _sh: &mut Shared) -> Nav {
         Nav::None

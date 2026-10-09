@@ -43,6 +43,8 @@ fn install_fonts(ctx: &egui::Context) {
 
 pub fn install(ctx: &egui::Context) {
     install_fonts(ctx);
+    // Ctrl +/- is ours (fullscreen); the layout already scales itself to the screen.
+    ctx.options_mut(|o| o.zoom_with_keyboard = false);
     ctx.all_styles_mut(|style| {
         style.text_styles = [
             (TextStyle::Small, FontId::new(22.0, FontFamily::Proportional)),

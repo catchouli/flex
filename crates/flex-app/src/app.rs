@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Align2, CornerRadius, Key, Rect, TextStyle, ViewportCommand, pos2, vec2};
 
-use crate::input::{self, InputLog};
+use crate::input::{self, Action, InputLog, Press};
 use crate::player::Player;
 use crate::screens::{Nav, Screen, home::Home, search::SearchView, settings::Settings};
 use crate::shared::{PlayRequest, Shared};
@@ -115,9 +115,28 @@ impl FlexApp {
     }
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
-        let fullscreen = !ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        self.set_fullscreen(ctx, !fullscreen);
+    }
+
+    fn set_fullscreen(&mut self, ctx: &egui::Context, fullscreen: bool) {
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(fullscreen));
         self.sh.set_setting_bool(FULLSCREEN_SETTING, fullscreen);
+    }
+
+    /// Sends a press to the top bar if it has focus, otherwise to the current screen.
+    fn route(&mut self, ctx: &egui::Context, press: Press) -> Nav {
+        if self.top_bar.focus.is_some() && self.top().shows_top_bar() {
+            match self.top_bar.handle(ctx, press) {
+                topbar::Event::OpenSettings => self.open_settings(),
+                topbar::Event::ToggleFullscreen => self.toggle_fullscreen(ctx),
+                _ => {}
+            }
+            Nav::None
+        } else {
+            let sh = &mut self.sh;
+            self.stack.last_mut().expect("never empty").handle(sh, press)
+        }
     }
 
     fn open_settings(&mut self) {
@@ -152,13 +171,11 @@ impl FlexApp {
         }
     }
 
-    /// Double-clicking the window toggles fullscreen, except on the top bar
-    /// (where double-click selects text in the search box).
-    fn double_click_fullscreen(&mut self, ctx: &egui::Context, top_bar: Option<Rect>) {
-        let (double, pos) =
-            ctx.input(|i| (i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.interact_pos()));
-        let on_top_bar = top_bar.zip(pos).is_some_and(|(bar, p)| bar.contains(p));
-        if double && !on_top_bar {
+    /// Double-clicking the video toggles fullscreen. Elsewhere the mouse is left free
+    /// for normal clicking.
+    fn double_click_fullscreen(&mut self, ctx: &egui::Context) {
+        let double = ctx.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
+        if double && self.top().is_player() {
             self.toggle_fullscreen(ctx);
         }
     }
@@ -263,25 +280,22 @@ impl eframe::App for FlexApp {
             topbar::focus_text(&ctx);
         }
         for press in presses {
-            let nav = if self.top_bar.focus.is_some() && self.top().shows_top_bar() {
-                match self.top_bar.handle(&ctx, press) {
-                    topbar::Event::OpenSettings => self.open_settings(),
-                    topbar::Event::ToggleFullscreen => self.toggle_fullscreen(&ctx),
-                    _ => {}
+            match press.action {
+                Action::ZoomIn if !press.repeat => self.toggle_fullscreen(&ctx),
+                Action::ZoomOut if !press.repeat => self.set_fullscreen(&ctx, false),
+                Action::ZoomIn | Action::ZoomOut => {}
+                _ => {
+                    let nav = self.route(&ctx, press);
+                    self.apply(&ctx, nav);
                 }
-                Nav::None
-            } else {
-                let sh = &mut self.sh;
-                self.stack.last_mut().expect("never empty").handle(sh, press)
-            };
-            self.apply(&ctx, nav);
+            }
         }
+        self.double_click_fullscreen(&ctx);
 
         ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
         let safe = theme::safe_rect(&ctx);
-        let bar = self.top().shows_top_bar().then(|| Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT)));
-        self.double_click_fullscreen(&ctx, bar);
-        let content = if let Some(bar) = bar {
+        let content = if self.top().shows_top_bar() {
+            let bar = Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT));
             match self.top_bar.ui(ui, bar, &mut self.sh) {
                 topbar::Event::Submit => {
                     self.sync_search();

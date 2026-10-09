@@ -222,4 +222,8 @@ impl Screen for Player {
     fn shows_top_bar(&self) -> bool {
         false
     }
+
+    fn is_player(&self) -> bool {
+        true
+    }
 }
