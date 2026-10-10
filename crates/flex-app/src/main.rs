@@ -9,6 +9,7 @@ mod mpv;
 mod player;
 mod screens;
 mod shared;
+mod shots;
 mod theme;
 mod topbar;
 mod widgets;

@@ -19,7 +19,39 @@ pub struct MatchOnline {
     results: Vec<Candidate>,
     pending: Option<Receiver<Result<Vec<Candidate>, String>>>,
     status: String,
+    /// What's being matched: the current title and the files, so a wrong match can be
+    /// recognised.
+    about: String,
     list: ListState,
+}
+
+/// "Now: Title (2001)" plus the files: the file itself, or the folders and an example.
+fn describe(sh: &Shared, library_id: i64, show_id: i64) -> String {
+    let Some(state) = sh.lib(library_id) else { return String::new() };
+    let Some(entry) = state.catalog().and_then(|c| c.show(show_id)) else { return String::new() };
+    let mut lines = Vec::new();
+    let title = match entry.show.year {
+        Some(y) => format!("{} ({y})", entry.show.title),
+        None => entry.show.title.clone(),
+    };
+    let how = if entry.show.provider_id.is_some() { "matched" } else { "not matched" };
+    lines.push(format!("Now: {title} · {how}"));
+    let mut paths: Vec<&str> = entry.episodes.iter().filter_map(|e| state.tree.file(e.file_id)).map(|f| f.rel_path.as_str()).collect();
+    paths.sort_unstable();
+    match paths.as_slice() {
+        [] => {}
+        [one] => lines.push(format!("File: {one}")),
+        [first, ..] => {
+            let mut dirs: Vec<&str> = paths.iter().map(|p| p.rsplit_once('/').map_or("(library folder)", |(d, _)| d)).collect();
+            dirs.dedup();
+            let more = if dirs.len() > 2 { format!(" and {} more", dirs.len() - 2) } else { String::new() };
+            let label = if dirs.len() == 1 { "Folder" } else { "Folders" };
+            lines.push(format!("{label}: {}{more}", dirs.iter().take(2).copied().collect::<Vec<_>>().join(" · ")));
+            let name = first.rsplit('/').next().unwrap_or(first);
+            lines.push(format!("{} files, e.g. {name}", paths.len()));
+        }
+    }
+    lines.join("\n")
 }
 
 impl MatchOnline {
@@ -35,6 +67,7 @@ impl MatchOnline {
             results: Vec::new(),
             pending: None,
             status: String::new(),
+            about: describe(sh, library_id, show_id),
             list: ListState::default(),
         };
         screen.search(sh);
@@ -105,7 +138,8 @@ impl Screen for MatchOnline {
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.poll();
         let body = widgets::header(ui.painter(), rect, "Match online", &self.status, ui.style());
-        let field = Rect::from_min_size(body.min, vec2(body.width().min(900.0), 56.0));
+        let about_h = widgets::paragraph(ui.painter(), body, &self.about, 4, ui.style());
+        let field = Rect::from_min_size(body.min + vec2(0.0, about_h + 20.0), vec2(body.width().min(900.0), 56.0));
         let edit = egui::TextEdit::singleline(&mut self.query)
             .id(Self::query_id())
             .hint_text("Title to search for (keyboard)")

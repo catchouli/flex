@@ -1,10 +1,11 @@
 //! Online metadata: TMDB for titles, years, overviews and posters (TV and films), with
 //! AniList as a helper that turns romaji anime titles into ones TMDB knows.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::parse::normalize;
 
@@ -172,6 +173,8 @@ pub struct CastMember {
     pub role: String,
     /// TMDB profile image path, or a full image URL (AniList).
     pub image: Option<String>,
+    /// "tmdb:123" or "anilist:456", for their page.
+    pub person: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -244,6 +247,7 @@ impl Tmdb {
                 // TV credits list roles; films a single character.
                 role: c["roles"][0]["character"].as_str().map_or_else(|| str_of(&c["character"]), str::to_owned),
                 image: opt_str(&c["profile_path"]),
+                person: c["id"].as_u64().map(|id| format!("tmdb:{id}")),
             })
             .collect();
         let runtime = if tv { v["episode_run_time"][0].as_i64() } else { v["runtime"].as_i64() };
@@ -328,7 +332,7 @@ pub struct AniListInfo {
 /// Looks an anime up on AniList (one request).
 pub fn anilist_info(title: &str) -> Result<AniListInfo> {
     let body = serde_json::json!({
-        "query": "query($s:String){Media(search:$s,type:ANIME){title{romaji english native} synonyms characters(sort:[ROLE,RELEVANCE],perPage:16){edges{node{name{full}}voiceActors(language:JAPANESE){name{full}image{medium}}}}}}",
+        "query": "query($s:String){Media(search:$s,type:ANIME){title{romaji english native} synonyms characters(sort:[ROLE,RELEVANCE],perPage:16){edges{node{name{full}}voiceActors(language:JAPANESE){id name{full}image{medium}}}}}}",
         "variables": { "s": title },
     });
     anilist_wait();
@@ -356,6 +360,7 @@ pub fn anilist_info(title: &str) -> Result<AniListInfo> {
                 name: str_of(&va["name"]["full"]),
                 role: character,
                 image: opt_str(&va["image"]["medium"]),
+                person: va["id"].as_u64().map(|id| format!("anilist:{id}")),
             });
         }
     }
@@ -387,6 +392,173 @@ pub fn anilist_titles(query: &str) -> Result<Vec<String>> {
         }
     }
     Ok(titles)
+}
+
+/// What a person's page shows from online: about them, and everything they've been in.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Person {
+    pub name: String,
+    pub biography: String,
+    /// "1980-04-12".
+    pub born: Option<String>,
+    pub birthplace: Option<String>,
+    pub image: Option<String>,
+    /// Most popular first.
+    pub credits: Vec<PersonCredit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreditKind {
+    Movie,
+    Tv,
+    Anime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersonCredit {
+    pub kind: CreditKind,
+    /// TMDB entry ("movie:123"), comparable with shows' provider ids.
+    pub provider_id: Option<String>,
+    pub title: String,
+    /// Other titles (AniList: romaji, English, native), for spotting ones in the library.
+    pub other_titles: Vec<String>,
+    pub year: Option<i32>,
+    /// Characters played, comma separated.
+    pub role: String,
+    /// TMDB poster path or image URL.
+    pub poster: Option<String>,
+}
+
+/// TMDB genres that are people appearing as themselves on talk shows and the news.
+const TALK_AND_NEWS: [u64; 2] = [10767, 10763];
+
+impl Tmdb {
+    /// A person's details and acting credits (films and TV), most popular first.
+    pub fn person(&self, id: &str) -> Result<Person> {
+        let v = self.get_json(&format!("/person/{id}"), &[("append_to_response", "combined_credits")])?;
+        let mut credits: Vec<(PersonCredit, f64)> = Vec::new();
+        for c in v["combined_credits"]["cast"].as_array().into_iter().flatten() {
+            let genres: Vec<u64> = c["genre_ids"].as_array().into_iter().flatten().filter_map(|g| g.as_u64()).collect();
+            if genres.iter().any(|g| TALK_AND_NEWS.contains(g)) {
+                continue;
+            }
+            let (kind, title, date) = match c["media_type"].as_str() {
+                Some("movie") => (CreditKind::Movie, &c["title"], &c["release_date"]),
+                Some("tv") => (CreditKind::Tv, &c["name"], &c["first_air_date"]),
+                _ => continue,
+            };
+            let Some(tmdb_id) = c["id"].as_u64() else { continue };
+            let provider_id = format!("{}:{tmdb_id}", if kind == CreditKind::Movie { "movie" } else { "tv" });
+            let role = str_of(&c["character"]);
+            // Several roles in one entry are listed once.
+            if let Some((existing, _)) = credits.iter_mut().find(|(e, _)| e.provider_id.as_deref() == Some(provider_id.as_str())) {
+                if !role.is_empty() && !existing.role.split(", ").any(|r| r == role) {
+                    existing.role = if existing.role.is_empty() { role } else { format!("{}, {role}", existing.role) };
+                }
+                continue;
+            }
+            let credit = PersonCredit {
+                kind,
+                provider_id: Some(provider_id),
+                title: str_of(title),
+                other_titles: Vec::new(),
+                year: year_of(date.as_str()),
+                role,
+                poster: opt_str(&c["poster_path"]),
+            };
+            // Best known first: by votes, and for TV shows with real parts (10+ episodes)
+            // before guest spots.
+            let votes = c["vote_count"].as_f64().unwrap_or(0.0);
+            let rank = match kind {
+                CreditKind::Movie => votes,
+                _ => c["episode_count"].as_f64().unwrap_or(1.0).min(10.0) * 1e7 + votes,
+            };
+            // Appearing as themselves (award shows, documentaries) goes last.
+            let first_role = credit.role.split([',', '(', '-']).next().unwrap_or_default().trim().to_lowercase();
+            let as_self = matches!(first_role.as_str(), "self" | "himself" | "herself" | "themselves" | "themself");
+            credits.push((credit, if as_self { rank - 1e9 } else { rank }));
+        }
+        credits.sort_by(|a, b| b.1.total_cmp(&a.1));
+        Ok(Person {
+            name: str_of(&v["name"]),
+            // TMDB copies Wikipedia, credit line and all.
+            biography: str_of(&v["biography"]).split("Description above from the Wikipedia").next().unwrap_or_default().trim().to_owned(),
+            born: opt_str(&v["birthday"]),
+            birthplace: opt_str(&v["place_of_birth"]),
+            image: opt_str(&v["profile_path"]),
+            credits: credits.into_iter().map(|(c, _)| c).collect(),
+        })
+    }
+}
+
+/// Removes AniList's markdown, collapsed-block markers ("~!...!~", used for long lists of
+/// roles) and lines of nothing but links from a description.
+fn plain_text(s: &str) -> String {
+    static LINK: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
+    let s = s.replace("~!", "\n").replace("!~", "\n").replace("<br>", "\n");
+    let lines: Vec<String> = s
+        .lines()
+        .filter(|l| !LINK.replace_all(l, "").trim_matches(|c: char| c == '|' || c.is_whitespace()).is_empty())
+        .map(|l| LINK.replace_all(l, "$1").replace("__", "").replace("**", "").trim().to_owned())
+        .collect();
+    lines.join("\n")
+}
+
+/// A voice actor's details and anime roles from AniList, most popular first.
+pub fn anilist_person(id: &str) -> Result<Person> {
+    let body = serde_json::json!({
+        "query": "query($id:Int){Staff(id:$id){name{full} image{large} description dateOfBirth{year month day} homeTown characterMedia(sort:POPULARITY_DESC,perPage:50){edges{node{type title{romaji english native} startDate{year} coverImage{large}} characters{name{full}}}}}}",
+        "variables": { "id": id.parse::<i64>().context("bad AniList id")? },
+    });
+    anilist_wait();
+    let value: serde_json::Value = agent().post(ANILIST_API).send_json(&body).context("AniList lookup")?.body_mut().read_json()?;
+    let staff = &value["data"]["Staff"];
+    let born = {
+        let d = &staff["dateOfBirth"];
+        match (d["year"].as_i64(), d["month"].as_i64(), d["day"].as_i64()) {
+            (Some(y), Some(m), Some(day)) => Some(format!("{y:04}-{m:02}-{day:02}")),
+            (Some(y), _, _) => Some(y.to_string()),
+            _ => None,
+        }
+    };
+    let mut credits = Vec::new();
+    for edge in staff["characterMedia"]["edges"].as_array().into_iter().flatten() {
+        let node = &edge["node"];
+        if node["type"].as_str() != Some("ANIME") {
+            continue;
+        }
+        let names = ["english", "romaji", "native"].map(|k| opt_str(&node["title"][k]));
+        let mut titles = names.into_iter().flatten();
+        let Some(title) = titles.next() else { continue };
+        let characters: Vec<String> =
+            edge["characters"].as_array().into_iter().flatten().filter_map(|c| opt_str(&c["name"]["full"])).collect();
+        credits.push(PersonCredit {
+            kind: CreditKind::Anime,
+            provider_id: None,
+            title,
+            other_titles: titles.collect(),
+            year: node["startDate"]["year"].as_i64().map(|y| y as i32),
+            role: characters.join(", "),
+            poster: opt_str(&node["coverImage"]["large"]),
+        });
+    }
+    Ok(Person {
+        name: str_of(&staff["name"]["full"]),
+        biography: plain_text(staff["description"].as_str().unwrap_or_default()),
+        born,
+        birthplace: opt_str(&staff["homeTown"]),
+        image: opt_str(&staff["image"]["large"]),
+        credits,
+    })
+}
+
+/// Looks a person up by their id ("tmdb:123" needs `tmdb`; "anilist:456" doesn't).
+pub fn person(tmdb: Option<&Tmdb>, person: &str) -> Result<Person> {
+    match person.split_once(':') {
+        Some(("tmdb", id)) => tmdb.context("TMDB isn't set up")?.person(id),
+        Some(("anilist", id)) => anilist_person(id),
+        _ => anyhow::bail!("unknown person {person:?}"),
+    }
 }
 
 /// How well a candidate fits the title (and year) parsed from file names: 0–1.
@@ -576,6 +748,12 @@ mod tests {
         assert_eq!(map_episode(1, 40, &seasons), None);
         assert_eq!(map_episode(3, 1, &seasons), None);
         assert_eq!(map_episode(0, 2, &seasons), Some((0, 2)));
+    }
+
+    #[test]
+    fn anilist_descriptions_become_plain_text() {
+        let d = "[Profile](https://a) | [Twitter](https://b)\n__Height:__ 156 cm\n\nShe voiced [Mai](https://anilist.co/character/1).\n**Roles:**~!\n• A\n!~";
+        assert_eq!(plain_text(d), "Height: 156 cm\nShe voiced Mai.\nRoles:\n• A");
     }
 
     #[test]

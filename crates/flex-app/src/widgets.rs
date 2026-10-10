@@ -59,6 +59,14 @@ pub fn paint_progress(painter: &Painter, rect: Rect, fraction: f32, color: Color
     painter.rect_filled(done, 2, color);
 }
 
+/// The "watched" badge: a tick in a dark circle centred on `c`.
+pub fn paint_tick(painter: &Painter, c: Pos2) {
+    painter.circle_filled(c, 18.0, Color32::from_black_alpha(190));
+    let tick = [c + vec2(-8.0, 0.0), c + vec2(-2.0, 7.0), c + vec2(9.0, -7.0)];
+    painter.line_segment([tick[0], tick[1]], Stroke::new(3.5, theme::FOCUS));
+    painter.line_segment([tick[1], tick[2]], Stroke::new(3.5, theme::FOCUS));
+}
+
 const ROW_HEIGHT: f32 = 64.0;
 const ROW_GAP: f32 = 6.0;
 const PAGE: usize = 8;
@@ -307,6 +315,14 @@ pub fn paragraph(painter: &Painter, rect: Rect, text: &str, max_lines: usize, st
     let clip = Rect::from_min_size(rect.min, vec2(rect.width(), height));
     painter.with_clip_rect(clip).galley(rect.min, galley, theme::DIM);
     height
+}
+
+/// Wrapped text filling `rect` from the top, cut off after the last line that fits whole.
+pub fn text_block(painter: &Painter, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
+    let galley = painter.layout(text.to_owned(), font, color, rect.width());
+    let fits = galley.rows.iter().map(|r| r.rect().bottom()).take_while(|b| *b <= rect.height()).last().unwrap_or(0.0);
+    let clip = Rect::from_min_size(rect.min, vec2(rect.width(), fits));
+    painter.with_clip_rect(clip.intersect(painter.clip_rect())).galley(rect.min, galley, color);
 }
 
 /// Dim centred message, for empty states.

@@ -34,6 +34,8 @@ enum Filter {
     All,
     Unwatched,
     Watched,
+    /// Not found online (or not looked up yet): to match by hand.
+    Unmatched,
 }
 
 const LAYOUTS: [(Layout, &str, &str); 2] = [(Layout::Posters, "Posters", "posters"), (Layout::List, "List", "list")];
@@ -42,10 +44,11 @@ const SORTS: [(Sort, &str, &str); 3] = [
     (Sort::Title, "A–Z", "title"),
     (Sort::Released, "Release date", "released"),
 ];
-const FILTERS: [(Filter, &str, &str); 3] = [
+const FILTERS: [(Filter, &str, &str); 4] = [
     (Filter::All, "All", "all"),
     (Filter::Unwatched, "Unwatched", "unwatched"),
     (Filter::Watched, "Watched", "watched"),
+    (Filter::Unmatched, "Not matched", "unmatched"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -178,6 +181,7 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
                 Filter::All => true,
                 Filter::Unwatched => unwatched > 0,
                 Filter::Watched => unwatched == 0,
+                Filter::Unmatched => entry.show.provider_id.is_none(),
             };
             if !keep {
                 return None;
@@ -273,9 +277,16 @@ impl ShowsView {
         let key = (version, self.prefs);
         if self.built_for != Some(key) {
             // Keep the same show selected across rebuilds when possible.
-            let selected = self.selected_index().and_then(|i| self.items.get(i)).map(|it| it.show_id);
+            // If it's gone (e.g. just matched, under "Not matched"), stay at the same place.
+            let index = self.selected_index();
+            let selected = index.and_then(|i| self.items.get(i)).map(|it| it.show_id);
+            let same_prefs = self.built_for.is_some_and(|(_, p)| p == self.prefs);
             self.items = build_items(sh, self.source, &self.prefs);
-            let new_index = selected.and_then(|id| self.items.iter().position(|it| it.show_id == id)).unwrap_or(0);
+            let new_index = match selected.and_then(|id| self.items.iter().position(|it| it.show_id == id)) {
+                Some(i) => i,
+                None if same_prefs => index.unwrap_or(0).min(self.items.len().saturating_sub(1)),
+                None => 0,
+            };
             self.grid.select(new_index);
             self.list.select(new_index);
             self.built_for = Some(key);
@@ -394,10 +405,7 @@ fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::
     // Watched state: an unwatched-episode count, a tick when all watched, or progress.
     let badge_c = poster_rect.right_top() + vec2(-26.0, 26.0);
     if item.unwatched == 0 && item.episodes > 0 {
-        painter.circle_filled(badge_c, 18.0, Color32::from_black_alpha(190));
-        let tick = [badge_c + vec2(-8.0, 0.0), badge_c + vec2(-2.0, 7.0), badge_c + vec2(9.0, -7.0)];
-        painter.line_segment([tick[0], tick[1]], Stroke::new(3.5, theme::FOCUS));
-        painter.line_segment([tick[1], tick[2]], Stroke::new(3.5, theme::FOCUS));
+        widgets::paint_tick(painter, badge_c);
     } else if item.series && item.unwatched > 0 {
         let text = thousands(item.unwatched);
         let font = TextStyle::Small.resolve(style);
@@ -511,6 +519,7 @@ impl Screen for ShowsView {
                 }
                 (true, Filter::Unwatched) => "Everything here has been watched",
                 (true, Filter::Watched) => "Nothing watched here yet",
+                (true, Filter::Unmatched) => "Everything here is matched online",
                 (true, Filter::All) => "No videos here",
             };
             widgets::message(ui.painter(), content, message, &style);

@@ -123,6 +123,19 @@ const MIGRATIONS: &[&str] = &[
         library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
         added_at   INTEGER NOT NULL
     );",
+    // 8: who's who in credits (TMDB / AniList person ids) for actor pages, and their
+    // online filmographies. Cast is fetched again (cheaply: no episodes) to get the ids.
+    "ALTER TABLE credits ADD COLUMN person TEXT;
+    CREATE INDEX credits_by_person ON credits(person);
+    CREATE INDEX credits_by_name ON credits(name COLLATE NOCASE);
+    -- set once the cast has been saved with person ids
+    ALTER TABLE shows ADD COLUMN cast_ids INTEGER;
+    UPDATE shows SET voice_at = NULL;
+    CREATE TABLE people (
+        person     TEXT PRIMARY KEY,
+        fetched_at INTEGER NOT NULL,
+        data       TEXT NOT NULL -- JSON metadata::Person
+    );",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -424,15 +437,16 @@ impl Db {
         Ok(())
     }
 
-    /// Matched shows whose details are missing or older than `max_age` seconds:
-    /// (show id, provider id, title).
-    pub fn shows_needing_details(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String)>> {
+    /// Matched shows whose details are missing or older than `max_age` seconds, or whose
+    /// cast was saved without person ids: (show id, provider id, title, whole details
+    /// needed). When only the cast is needed, episodes needn't be fetched again.
+    pub fn shows_needing_details(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String, bool)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, provider_id, title FROM shows
-             WHERE library_id = ?1 AND provider_id IS NOT NULL
-             AND (details_at IS NULL OR details_at < strftime('%s', 'now') - ?2)",
+            "SELECT id, provider_id, title, details_at IS NULL OR details_at < strftime('%s', 'now') - ?2 AS stale
+             FROM shows
+             WHERE library_id = ?1 AND provider_id IS NOT NULL AND (stale OR cast_ids IS NULL)",
         )?;
-        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -442,7 +456,7 @@ impl Db {
         let genres = (!d.genres.is_empty()).then(|| d.genres.join(", "));
         tx.execute(
             "UPDATE shows SET overview = ?2, release_date = ?3, runtime = ?4, genres = ?5, backdrop = ?6,
-             poster = COALESCE(?7, poster), details_at = strftime('%s', 'now') WHERE id = ?1",
+             poster = COALESCE(?7, poster), details_at = strftime('%s', 'now'), cast_ids = 1 WHERE id = ?1",
             params![show_id, d.overview, d.release_date, d.runtime, genres, d.backdrop_path, d.poster_path],
         )?;
         Self::replace_credits(&tx, provider_id, "cast", &d.cast)?;
@@ -461,8 +475,8 @@ impl Db {
         conn.execute("DELETE FROM credits WHERE provider_id = ?1 AND kind = ?2", params![provider_id, kind])?;
         for (i, c) in cast.iter().enumerate() {
             conn.execute(
-                "INSERT INTO credits (provider_id, kind, ord, name, role, image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![provider_id, kind, i as i64, c.name, c.role, c.image],
+                "INSERT INTO credits (provider_id, kind, ord, name, role, image, person) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![provider_id, kind, i as i64, c.name, c.role, c.image, c.person],
             )?;
         }
         Ok(())
@@ -526,15 +540,57 @@ impl Db {
     /// Credits of one kind ("cast" or "voice"), in billing order.
     pub fn credits(&self, provider_id: &str, kind: &str) -> Result<Vec<crate::metadata::CastMember>> {
         let mut stmt =
-            self.conn.prepare("SELECT name, role, image FROM credits WHERE provider_id = ?1 AND kind = ?2 ORDER BY ord")?;
+            self.conn.prepare("SELECT name, role, image, person FROM credits WHERE provider_id = ?1 AND kind = ?2 ORDER BY ord")?;
         let rows = stmt.query_map(params![provider_id, kind], |r| {
             Ok(crate::metadata::CastMember {
                 name: r.get(0)?,
                 role: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 image: r.get(2)?,
+                person: r.get(3)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Everything a person is credited in: (provider id, role), found by their id, or by
+    /// name (the same person under TMDB and AniList, or credits saved before ids were).
+    pub fn appearances(&self, person: Option<&str>, name: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT provider_id, COALESCE(role, '') FROM credits
+             WHERE person = ?1 OR name = ?2 COLLATE NOCASE ORDER BY provider_id, kind, ord",
+        )?;
+        let rows = stmt.query_map(params![person, name], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out: Vec<(String, String)> = Vec::new();
+        for row in rows {
+            let (pid, role) = row?;
+            // Credited twice (cast and voice cast): keep the first role.
+            if !out.iter().any(|(p, _)| *p == pid) {
+                out.push((pid, role));
+            }
+        }
+        Ok(out)
+    }
+
+    /// A person's cached online details, if fetched within `max_age` seconds.
+    pub fn person(&self, person: &str, max_age: i64) -> Result<Option<crate::metadata::Person>> {
+        let data: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT data FROM people WHERE person = ?1 AND fetched_at >= strftime('%s', 'now') - ?2",
+                params![person, max_age],
+                |r| r.get(0),
+            )
+            .optional()?;
+        // Unreadable (e.g. from an older version): fetch again.
+        Ok(data.and_then(|d| serde_json::from_str(&d).ok()))
+    }
+
+    pub fn save_person(&self, person: &str, info: &crate::metadata::Person) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO people (person, fetched_at, data) VALUES (?1, strftime('%s', 'now'), ?2)",
+            params![person, serde_json::to_string(info)?],
+        )?;
+        Ok(())
     }
 
     pub fn save_episodes(&mut self, provider_id: &str, episodes: &[crate::metadata::EpisodeInfo]) -> Result<()> {
@@ -893,7 +949,7 @@ mod tests {
             overview: "About".into(),
             runtime: Some(24),
             genres: vec!["Animation".into(), "Comedy".into()],
-            cast: vec![CastMember { name: "A".into(), role: "B".into(), image: None }],
+            cast: vec![CastMember { name: "A".into(), role: "B".into(), image: None, person: Some("tmdb:7".into()) }],
             seasons: vec![SeasonInfo { number: 1, episode_count: 12 }, SeasonInfo { number: 2, episode_count: 12 }],
             ..Default::default()
         };
@@ -901,7 +957,14 @@ mod tests {
         let s = db.shows(lib).unwrap().into_iter().find(|s| s.id == show).unwrap();
         assert_eq!((s.genres.as_deref(), s.runtime), (Some("Animation, Comedy"), Some(24)));
         assert!(s.details_at.is_some());
-        assert_eq!(db.credits("tv:1", "cast").unwrap().len(), 1);
+        assert_eq!(db.credits("tv:1", "cast").unwrap()[0].person.as_deref(), Some("tmdb:7"));
+        assert_eq!(db.shows_needing_details(lib, 3600).unwrap().len(), 0);
+        // Found by id, or by name (case aside).
+        assert_eq!(db.appearances(Some("tmdb:7"), "x").unwrap(), [("tv:1".to_owned(), "B".to_owned())]);
+        assert_eq!(db.appearances(None, "a").unwrap().len(), 1);
+        let info = crate::metadata::Person { name: "A".into(), ..Default::default() };
+        db.save_person("tmdb:7", &info).unwrap();
+        assert_eq!(db.person("tmdb:7", 60).unwrap().unwrap().name, "A");
         let ep = |season, episode, title: &str| EpisodeInfo {
             season,
             episode,

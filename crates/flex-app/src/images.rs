@@ -21,6 +21,8 @@ pub enum Size {
     Profile,
     /// Wide background images.
     Backdrop,
+    /// Screenshots taken locally (see [`crate::shots`]).
+    Shot,
 }
 
 impl Size {
@@ -31,6 +33,7 @@ impl Size {
             Size::Still => ("w780", 780),
             Size::Profile => ("w185", 278),
             Size::Backdrop => ("w1280", 1280),
+            Size::Shot => ("shot", 1280),
         }
     }
 }
@@ -72,6 +75,7 @@ fn hashed(s: &str) -> String {
 fn load(job: &Job, agent: &ureq::Agent) -> anyhow::Result<ColorImage> {
     let bytes = match std::fs::read(&job.file) {
         Ok(bytes) => bytes,
+        Err(e) if job.url.is_empty() => return Err(e.into()),
         Err(_) => {
             let bytes = agent.get(&job.url).call()?.body_mut().with_config().limit(20_000_000).read_to_vec()?;
             if let Some(dir) = job.file.parent() {
@@ -121,7 +125,7 @@ impl Images {
     }
 
     /// The image as a texture if it's ready; otherwise starts loading it and returns None.
-    /// `path` is a TMDB image path ("/abc.jpg") or a full URL.
+    /// `path` is a TMDB image path ("/abc.jpg"), a full URL, or "file:" and a local path.
     pub fn get(&mut self, path: &str, size: Size) -> Option<TextureHandle> {
         let (tmdb_size, max_side) = size.spec();
         let key = format!("{tmdb_size}{path}");
@@ -133,7 +137,9 @@ impl Images {
             Some(Entry::Loading | Entry::Failed) => return None,
             None => {}
         }
-        let (url, file) = if path.starts_with("http") {
+        let (url, file) = if let Some(local) = path.strip_prefix("file:") {
+            (String::new(), PathBuf::from(local))
+        } else if path.starts_with("http") {
             let ext = path.rsplit('.').next().filter(|e| e.len() <= 4).unwrap_or("img");
             (path.to_owned(), self.dir.join("web").join(format!("{}.{ext}", hashed(path))))
         } else {

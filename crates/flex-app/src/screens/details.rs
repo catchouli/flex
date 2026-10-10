@@ -11,6 +11,8 @@ use flex_core::progress::{NextUp, next_up};
 use super::inspector::MatchInspector;
 use super::options::{OptionsMenu, Target};
 use super::match_online::MatchOnline;
+use super::person::PersonPage;
+use super::screenshots::ScreenshotsView;
 use super::shows::{SeasonView, ShowOptions};
 use super::{Nav, Screen};
 use crate::images::{Size, paint_cover};
@@ -23,8 +25,8 @@ const BUTTON_H: f32 = 64.0;
 const SEASON_CARD: egui::Vec2 = egui::vec2(250.0, 100.0);
 const CAST_CARD: egui::Vec2 = egui::vec2(160.0, 300.0);
 const GAP: f32 = 22.0;
-const ROW_LABEL_H: f32 = 52.0;
-const SECTION_GAP: f32 = 44.0;
+pub(super) const ROW_LABEL_H: f32 = 52.0;
+pub(super) const SECTION_GAP: f32 = 44.0;
 
 #[derive(Clone)]
 enum Button {
@@ -34,6 +36,7 @@ enum Button {
     Watchlist(bool),
     Folders,
     MatchOnline,
+    Screenshots(i64),
 }
 
 impl Button {
@@ -46,15 +49,20 @@ impl Button {
             Button::Watchlist(false) => "On watchlist ✓".into(),
             Button::Folders => "Folders & seasons…".into(),
             Button::MatchOnline => "Match online…".into(),
+            Button::Screenshots(_) => "Screenshots".into(),
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RowKind {
+pub(super) enum RowKind {
     Buttons,
     Seasons,
     Cast,
+    // On a person's page:
+    InLibrary,
+    Films,
+    Shows,
 }
 
 fn play_label(sh: &Shared, library_id: i64, file_id: i64) -> String {
@@ -83,7 +91,7 @@ fn play_buttons(sh: &Shared, library_id: i64, file_id: i64) -> Vec<Button> {
 }
 
 /// A horizontal row that scrolls to keep the selected item in view.
-fn hrow(
+pub(super) fn hrow(
     painter: &Painter,
     // Top-left corner and available width (the height is unused).
     area: Rect,
@@ -106,7 +114,8 @@ fn hrow(
     }
 }
 
-fn paint_cast(painter: &Painter, rect: Rect, member: &CastMember, photo: Option<&egui::TextureHandle>, focused: bool, style: &egui::Style) {
+/// A portrait card (actor photo or poster) with two lines of text under it.
+pub(super) fn paint_card(painter: &Painter, rect: Rect, title: &str, sub: &str, photo: Option<&egui::TextureHandle>, focused: bool, style: &egui::Style) {
     let photo_rect = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width() * 1.5));
     match photo {
         Some(t) => paint_cover(painter, photo_rect, t),
@@ -120,8 +129,8 @@ fn paint_cast(painter: &Painter, rect: Rect, member: &CastMember, photo: Option<
     let text = Rect::from_min_max(pos2(rect.left(), photo_rect.bottom() + 6.0), rect.max);
     let clip = painter.with_clip_rect(text);
     let color = if focused { theme::FOCUS } else { theme::TEXT };
-    clip.text(text.left_top(), Align2::LEFT_TOP, &member.name, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 30.0), Align2::LEFT_TOP, &member.role, TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Small.resolve(style), color);
+    clip.text(text.left_top() + vec2(0.0, 30.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
 }
 
 fn paint_button(painter: &Painter, rect: Rect, label: &str, focused: bool, primary: bool, style: &egui::Style) {
@@ -141,26 +150,29 @@ fn button_width(painter: &Painter, label: &str, style: &egui::Style) -> f32 {
 
 /// Shared focus/scroll handling for the pages.
 #[derive(Default)]
-struct PageNav {
-    row: usize,
-    /// Selected item per row kind (buttons, seasons, cast).
-    col: [usize; 3],
-    offset: [usize; 3],
-    scroll: f32,
+pub(super) struct PageNav {
+    pub row: usize,
+    /// Selected item and scroll offset per row kind (see [`PageNav::kind_index`]).
+    pub col: [usize; 6],
+    pub offset: [usize; 6],
+    pub scroll: f32,
     reveal: bool,
 }
 
 impl PageNav {
-    fn kind_index(kind: RowKind) -> usize {
+    pub fn kind_index(kind: RowKind) -> usize {
         match kind {
             RowKind::Buttons => 0,
             RowKind::Seasons => 1,
             RowKind::Cast => 2,
+            RowKind::InLibrary => 3,
+            RowKind::Films => 4,
+            RowKind::Shows => 5,
         }
     }
 
     /// Moves focus; returns `Some(nav)` when the press leaves the page or isn't a move.
-    fn handle(&mut self, press: Press, rows: &[(RowKind, usize)]) -> Option<Nav> {
+    pub fn handle(&mut self, press: Press, rows: &[(RowKind, usize)]) -> Option<Nav> {
         self.row = self.row.min(rows.len().saturating_sub(1));
         let &(kind, len) = rows.get(self.row)?;
         let c = &mut self.col[Self::kind_index(kind)];
@@ -176,12 +188,12 @@ impl PageNav {
         Some(Nav::None)
     }
 
-    fn focused(&self, rows: &[(RowKind, usize)]) -> Option<(RowKind, usize)> {
+    pub fn focused(&self, rows: &[(RowKind, usize)]) -> Option<(RowKind, usize)> {
         rows.get(self.row).map(|&(kind, _)| (kind, self.col[Self::kind_index(kind)]))
     }
 
     /// Scrolls so the focused row (top..bottom, relative to content) is visible.
-    fn scroll_to(&mut self, top: f32, bottom: f32, view_h: f32, content_h: f32) {
+    pub fn scroll_to(&mut self, top: f32, bottom: f32, view_h: f32, content_h: f32) {
         if std::mem::take(&mut self.reveal) {
             if top < self.scroll {
                 self.scroll = top;
@@ -232,6 +244,11 @@ impl TitlePage {
         let all_watched = entry.episodes.iter().all(|e| state.tree.file(e.file_id).is_some_and(|f| f.progress.watched));
         buttons.push(Button::MarkWatched(!all_watched));
         buttons.push(Button::Watchlist(!sh.on_watchlist(self.library_id, self.show_id)));
+        if !entry.is_series()
+            && let Some(e) = entry.episodes.first()
+        {
+            buttons.push(Button::Screenshots(e.file_id));
+        }
         buttons.push(Button::MatchOnline);
         buttons.push(Button::Folders);
         buttons
@@ -318,13 +335,18 @@ impl Screen for TitlePage {
                 }
                 Some(Button::MatchOnline) => Nav::push(MatchOnline::new(sh, self.library_id, self.show_id)),
                 Some(Button::Folders) => Nav::push(MatchInspector::new(self.library_id, self.show_id)),
+                Some(Button::Screenshots(file_id)) => Nav::push(ScreenshotsView::new(self.library_id, file_id)),
                 None => Nav::None,
             },
             Some((RowKind::Seasons, i)) => {
                 let season = sh.lib(self.library_id).and_then(|l| l.catalog()?.show(self.show_id)).and_then(|e| e.seasons().get(i).copied());
-                season.map_or(Nav::None, |s| Nav::push(SeasonView::new(self.library_id, self.show_id, s)))
+                season.map_or(Nav::None, |s| Nav::push(SeasonView::new(sh, self.library_id, self.show_id, s)))
             }
-            Some((RowKind::Cast, _)) | None => Nav::None,
+            Some((RowKind::Cast, i)) => match self.cast.as_ref().and_then(|(_, c)| c.get(i)) {
+                Some(member) => Nav::push(PersonPage::new(sh, member.clone())),
+                None => Nav::None,
+            },
+            _ => Nav::None,
         }
     }
 
@@ -366,7 +388,7 @@ impl Screen for TitlePage {
                     row_tops.push((y, y + ROW_LABEL_H + SEASON_CARD.y));
                     y += ROW_LABEL_H + SEASON_CARD.y + SECTION_GAP;
                 }
-                RowKind::Cast => {
+                RowKind::Cast | RowKind::InLibrary | RowKind::Films | RowKind::Shows => {
                     row_tops.push((y, y + ROW_LABEL_H + CAST_CARD.y));
                     y += ROW_LABEL_H + CAST_CARD.y + SECTION_GAP;
                 }
@@ -424,9 +446,8 @@ impl Screen for TitlePage {
         clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::DIM);
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
             let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, 124.0), text_rect.max);
-            let font = TextStyle::Body.resolve(&style);
-            let galley = painter.layout(overview.to_owned(), font, theme::TEXT, r.width().min(1100.0));
-            painter.with_clip_rect(r.intersect(rect)).galley(r.min, galley, theme::TEXT);
+            let r = r.with_max_x(r.left() + r.width().min(1100.0));
+            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::TEXT);
         }
 
         // Rows. `hovered` = (row, item) under the mouse.
@@ -472,9 +493,11 @@ impl Screen for TitlePage {
                         hit(index, i, r);
                         let member = &cast[i];
                         let photo = member.image.as_deref().and_then(|img| images.get(img, Size::Profile));
-                        paint_cast(p, r, member, photo.as_ref(), row_focus == Some(i), &style);
+                        paint_card(p, r, &member.name, &member.role, photo.as_ref(), row_focus == Some(i), &style);
                     });
                 }
+                // Only on a person's page.
+                RowKind::InLibrary | RowKind::Films | RowKind::Shows => {}
             }
         }
         if let Some((row, i)) = hovered {
@@ -504,6 +527,7 @@ impl EpisodePage {
         let mut buttons = play_buttons(sh, self.library_id, self.file_id);
         let watched = sh.progress(self.library_id, self.file_id).is_some_and(|p| p.watched);
         buttons.push(Button::MarkWatched(!watched));
+        buttons.push(Button::Screenshots(self.file_id));
         buttons
     }
 }
@@ -537,6 +561,7 @@ impl Screen for EpisodePage {
                 sh.set_watched(self.library_id, &[self.file_id], w);
                 Nav::None
             }
+            Some(Button::Screenshots(file_id)) => Nav::push(ScreenshotsView::new(self.library_id, file_id)),
             _ => Nav::None,
         }
     }
@@ -584,8 +609,8 @@ impl Screen for EpisodePage {
         clip.text(text.left_top() + vec2(0.0, 120.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::DIM);
         if let Some(overview) = meta.as_ref().map(|m| m.overview.clone()).filter(|o| !o.is_empty()) {
             let r = Rect::from_min_max(text.left_top() + vec2(0.0, 170.0), text.max);
-            let galley = painter.layout(overview, TextStyle::Body.resolve(&style), theme::TEXT, r.width().min(1000.0));
-            painter.with_clip_rect(r).galley(r.min, galley, theme::TEXT);
+            let r = r.with_max_x(r.left() + r.width().min(1000.0));
+            widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::TEXT);
         }
         let mut x = rect.left();
         let y = still_rect.bottom() + 40.0;

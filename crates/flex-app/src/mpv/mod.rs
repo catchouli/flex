@@ -40,18 +40,6 @@ impl Mpv {
     /// Creates and initialises a player. `options` are applied before initialisation and may
     /// override the defaults below.
     pub fn new(egui_ctx: &egui::Context, options: &[(&str, &str)]) -> Result<Self> {
-        let api = ffi::api().map_err(|e| anyhow!(e))?;
-        let version = unsafe { (api.mpv_client_api_version)() };
-        if version >> 16 != 2 {
-            bail!("unsupported libmpv client API version {}.{}", version >> 16, version & 0xffff);
-        }
-
-        let handle = unsafe { (api.mpv_create)() };
-        if handle.is_null() {
-            bail!("mpv_create failed");
-        }
-        let mut mpv = Self { api, handle, wakeup_ctx: ptr::null_mut() };
-
         let defaults = [
             ("vo", "libmpv"),
             // Windows: decoding on the GPU but copying frames back avoids the D3D11→OpenGL
@@ -69,14 +57,37 @@ impl Mpv {
             ("idle", "yes"),
             ("tone-mapping", "auto"),
         ];
-        for (k, v) in defaults.iter().chain(options) {
+        let options: Vec<(&str, &str)> = defaults.iter().chain(options).copied().collect();
+        let mut mpv = Self::create(&options)?;
+        mpv.wakeup_ctx = Box::into_raw(Box::new(egui_ctx.clone()));
+        unsafe { (mpv.api.mpv_set_wakeup_callback)(mpv.handle, Some(request_repaint), mpv.wakeup_ctx.cast()) };
+        Ok(mpv)
+    }
+
+    /// A player with no window or wakeups, for background work (screenshots): events are
+    /// read with [`Mpv::wait_event`].
+    pub fn headless(options: &[(&str, &str)]) -> Result<Self> {
+        let defaults = [("config", "no"), ("terminal", "no"), ("idle", "yes"), ("input-default-bindings", "no")];
+        let options: Vec<(&str, &str)> = defaults.iter().chain(options).copied().collect();
+        Self::create(&options)
+    }
+
+    fn create(options: &[(&str, &str)]) -> Result<Self> {
+        let api = ffi::api().map_err(|e| anyhow!(e))?;
+        let version = unsafe { (api.mpv_client_api_version)() };
+        if version >> 16 != 2 {
+            bail!("unsupported libmpv client API version {}.{}", version >> 16, version & 0xffff);
+        }
+        let handle = unsafe { (api.mpv_create)() };
+        if handle.is_null() {
+            bail!("mpv_create failed");
+        }
+        let mpv = Self { api, handle, wakeup_ctx: ptr::null_mut() };
+        for (k, v) in options {
             mpv.set_option(k, v)?;
         }
         mpv.check(unsafe { (api.mpv_initialize)(handle) }, "initialize")?;
         unsafe { (api.mpv_request_log_messages)(handle, c"warn".as_ptr()) };
-
-        mpv.wakeup_ctx = Box::into_raw(Box::new(egui_ctx.clone()));
-        unsafe { (api.mpv_set_wakeup_callback)(handle, Some(request_repaint), mpv.wakeup_ctx.cast()) };
         Ok(mpv)
     }
 
@@ -157,28 +168,52 @@ impl Mpv {
     pub fn poll_events(&self) -> Vec<Event> {
         let mut events = Vec::new();
         loop {
-            let ev = unsafe { &*(self.api.mpv_wait_event)(self.handle, 0.0) };
-            match ev.event_id {
-                ffi::EVENT_NONE => break,
-                ffi::EVENT_SHUTDOWN => events.push(Event::Shutdown),
-                ffi::EVENT_FILE_LOADED => events.push(Event::FileLoaded),
-                ffi::EVENT_END_FILE => {
-                    let data = unsafe { &*(ev.data as *const ffi::EventEndFile) };
-                    let error = (data.reason == ffi::END_FILE_REASON_ERROR).then(|| {
-                        let msg = unsafe { CStr::from_ptr((self.api.mpv_error_string)(data.error)) };
-                        msg.to_string_lossy().into_owned()
-                    });
-                    events.push(Event::EndFile { eof: data.reason == ffi::END_FILE_REASON_EOF, error });
-                }
-                ffi::EVENT_LOG_MESSAGE => {
-                    let m = unsafe { &*(ev.data as *const ffi::EventLogMessage) };
-                    let (prefix, text) = unsafe { (CStr::from_ptr(m.prefix), CStr::from_ptr(m.text)) };
-                    log::warn!("mpv[{}] {}", prefix.to_string_lossy(), text.to_string_lossy().trim_end());
-                }
-                _ => {}
+            match self.next_event(0.0) {
+                Some(Some(e)) => events.push(e),
+                Some(None) => {}
+                None => break,
             }
         }
         events
+    }
+
+    /// Waits up to `timeout` seconds for an event of interest; `None` on timeout.
+    pub fn wait_event(&self, timeout: f64) -> Option<Event> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+            match self.next_event(left)? {
+                Some(e) => return Some(e),
+                None if left <= 0.0 => return None,
+                None => {}
+            }
+        }
+    }
+
+    /// The next event: `None` if there was none within `timeout`, `Some(None)` for one
+    /// that's of no interest (log messages are forwarded to `log`).
+    fn next_event(&self, timeout: f64) -> Option<Option<Event>> {
+        let ev = unsafe { &*(self.api.mpv_wait_event)(self.handle, timeout) };
+        Some(match ev.event_id {
+            ffi::EVENT_NONE => return None,
+            ffi::EVENT_SHUTDOWN => Some(Event::Shutdown),
+            ffi::EVENT_FILE_LOADED => Some(Event::FileLoaded),
+            ffi::EVENT_END_FILE => {
+                let data = unsafe { &*(ev.data as *const ffi::EventEndFile) };
+                let error = (data.reason == ffi::END_FILE_REASON_ERROR).then(|| {
+                    let msg = unsafe { CStr::from_ptr((self.api.mpv_error_string)(data.error)) };
+                    msg.to_string_lossy().into_owned()
+                });
+                Some(Event::EndFile { eof: data.reason == ffi::END_FILE_REASON_EOF, error })
+            }
+            ffi::EVENT_LOG_MESSAGE => {
+                let m = unsafe { &*(ev.data as *const ffi::EventLogMessage) };
+                let (prefix, text) = unsafe { (CStr::from_ptr(m.prefix), CStr::from_ptr(m.text)) };
+                log::warn!("mpv[{}] {}", prefix.to_string_lossy(), text.to_string_lossy().trim_end());
+                None
+            }
+            _ => None,
+        })
     }
 }
 
