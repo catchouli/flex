@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod db;
+pub mod disc;
 pub mod library;
 pub mod metadata;
 pub mod natural;

@@ -72,7 +72,7 @@ impl Player {
             mpv.set_string("start", &format!("{start:.1}"))?;
         }
         log::info!("playing {}", req.path.display());
-        mpv.command(&["loadfile", &Self::load_target(&mpv, &req.path)?])?;
+        mpv.load(&req.path)?;
         let now = ctx.input(|i| i.time);
         Ok(Self {
             req,
@@ -92,23 +92,6 @@ impl Player {
             display_fps: None,
             show_stats: false,
         })
-    }
-
-    /// What to hand mpv's `loadfile`: the file itself, or for a disc folder (`VIDEO_TS` or a
-    /// folder of `.VOB`s, or `BDMV`) the disc URL with the folder set as the device.
-    fn load_target(mpv: &Mpv, path: &std::path::Path) -> Result<String> {
-        if !path.is_dir() {
-            return Ok(path.to_string_lossy().into_owned());
-        }
-        let is_bluray = path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("BDMV"));
-        if is_bluray {
-            let device = path.parent().unwrap_or(path);
-            mpv.set_string("bluray-device", &device.to_string_lossy())?;
-            Ok("bd://".to_owned())
-        } else {
-            mpv.set_string("dvd-device", &path.to_string_lossy())?;
-            Ok("dvd://".to_owned())
-        }
     }
 
     fn save_progress(&mut self, sh: &mut Shared) {

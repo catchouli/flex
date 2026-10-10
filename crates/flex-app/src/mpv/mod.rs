@@ -114,6 +114,41 @@ impl Mpv {
         self.check(code, &format!("command {args:?}"))
     }
 
+    /// Starts playing `path`: a video file, a disc image (`.iso`), or a disc folder
+    /// (`VIDEO_TS` or a folder of `.VOB`s, or `BDMV`), which plays through the disc URL with
+    /// the folder or image set as the device. Without DVD support in libmpv, a DVD image
+    /// plays its main feature's VOBs directly (no menus or chapters).
+    pub fn load(&self, path: &std::path::Path) -> Result<()> {
+        use flex_core::disc::{DiscImage, disc_image, dvd_main_title};
+        let disc = if path.is_dir() {
+            let bluray = path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("BDMV"));
+            // libbluray wants the folder that contains `BDMV`.
+            Some(if bluray { (DiscImage::Bluray, path.parent().unwrap_or(path)) } else { (DiscImage::Dvd, path) })
+        } else {
+            disc_image(path).map(|kind| (kind, path))
+        };
+        let url = match disc {
+            None => path.to_string_lossy().into_owned(),
+            Some((DiscImage::Bluray, device)) => {
+                self.set_string("bluray-device", &device.to_string_lossy())?;
+                "bd://".to_owned()
+            }
+            Some((DiscImage::Dvd, device)) if path.is_dir() || self.has_protocol("dvd") => {
+                self.set_string("dvd-device", &device.to_string_lossy())?;
+                "dvd://".to_owned()
+            }
+            Some((DiscImage::Dvd, image)) => match dvd_main_title(image) {
+                Some(range) => format!("slice://{}-{}@{}", range.start, range.end, image.to_string_lossy()),
+                None => image.to_string_lossy().into_owned(),
+            },
+        };
+        self.command(&["loadfile", &url])
+    }
+
+    fn has_protocol(&self, name: &str) -> bool {
+        self.get_string("protocol-list").is_some_and(|list| list.split(',').any(|p| p == name))
+    }
+
     pub fn set_string(&self, name: &str, value: &str) -> Result<()> {
         let value = cstr(value);
         let mut ptr = value.as_ptr();

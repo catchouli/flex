@@ -179,7 +179,7 @@ fn take(mpv: &mut Option<Mpv>, job: &Job, index: usize, scratch: &Path) -> Resul
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).with_context(|| format!("creating {}", scratch.display()))?;
     mpv.set_string("start", &format!("{:.1}%", percent(index)))?;
-    mpv.command(&["loadfile", &job.video.to_string_lossy()])?;
+    mpv.load(&job.video)?;
     let deadline = Instant::now() + Duration::from_secs_f64(TIMEOUT);
     loop {
         let left = deadline.saturating_duration_since(Instant::now()).as_secs_f64();

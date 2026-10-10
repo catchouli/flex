@@ -77,7 +77,7 @@ pub fn join_rel(root: &Path, rel: &str) -> PathBuf {
 
 pub const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "m4v", "avi", "mov", "wmv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg", "vob", "ogv",
-    "flv", "3gp", "rmvb", "divx",
+    "flv", "3gp", "rmvb", "divx", "iso",
 ];
 
 pub fn is_video(path: &Path) -> bool {

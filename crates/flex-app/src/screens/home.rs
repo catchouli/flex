@@ -1,7 +1,7 @@
 //! Home: a Continue Watching row (when there's anything to continue) above a grid of
 //! library cards.
 
-use eframe::egui::{self, Align2, Color32, Pos2, Rect, Style, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, Style, TextStyle, TextureHandle, Ui, pos2, vec2};
 use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 
@@ -9,8 +9,10 @@ use super::options::{OptionsMenu, Target};
 use super::browse::{ShowsView, Source};
 use super::details::{TitleOf, TitlePage};
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
+use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
+use crate::shots::{self, Shot};
 use crate::{theme, widgets};
 
 const LIBRARY_CARD: [f32; 2] = [520.0, 240.0];
@@ -89,16 +91,46 @@ fn describe(sh: &Shared, item: &ContinueItem) -> Option<CardText> {
     Some(CardText { show, episode, status, fraction })
 }
 
-fn continue_card(ui: &Ui, rect: Rect, text: &CardText, focused: bool, style: &Style) {
+/// The picture for a Continue Watching card, as shown elsewhere for what it'll play: an
+/// episode's TMDB still or a film's backdrop, else a screenshot from the video itself.
+fn card_image(sh: &mut Shared, item: &ContinueItem) -> Option<TextureHandle> {
+    let entry = sh.lib(item.library_id)?.catalog()?.show_of_file(item.file_id);
+    let tmdb = match entry {
+        Some(e) if e.is_series() => sh.episode_meta(item.library_id, item.file_id).and_then(|m| m.still.clone()).map(|p| (p, Size::Still)),
+        Some(e) => e.show.backdrop.clone().map(|p| (p, Size::Backdrop)),
+        None => None,
+    };
+    match tmdb {
+        Some((path, size)) => sh.images.get(&path, size),
+        None => match sh.shot(item.library_id, item.file_id, shots::THUMB) {
+            Shot::Ready(path) => sh.images.get(&path, Size::Shot),
+            _ => None,
+        },
+    }
+}
+
+fn continue_card(ui: &Ui, rect: Rect, text: &CardText, image: Option<&TextureHandle>, focused: bool, style: &Style) {
     let painter = ui.painter();
-    let color = widgets::paint_focusable(painter, rect, focused, false);
+    let color = match image {
+        Some(t) => {
+            // The picture, darkened so the text reads over it.
+            paint_cover(painter, rect, t);
+            painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(if focused { 140 } else { 175 }));
+            if focused {
+                painter.rect_stroke(rect, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
+            }
+            theme::TEXT
+        }
+        None => widgets::paint_focusable(painter, rect, focused, false),
+    };
     let clip = painter.with_clip_rect(rect.shrink(8.0));
     let inner = rect.shrink(24.0);
     clip.text(inner.left_top(), Align2::LEFT_TOP, &text.show, TextStyle::Body.resolve(style), color);
     clip.text(inner.left_top() + vec2(0.0, 44.0), Align2::LEFT_TOP, &text.episode, TextStyle::Small.resolve(style), color);
     clip.text(inner.left_bottom() - vec2(0.0, 8.0), Align2::LEFT_BOTTOM, &text.status, TextStyle::Small.resolve(style), color);
     if let Some(f) = text.fraction {
-        widgets::paint_progress(painter, rect, f as f32, if focused { Color32::BLACK } else { theme::FOCUS });
+        let bar = if focused && image.is_none() { Color32::BLACK } else { theme::FOCUS };
+        widgets::paint_progress(painter, rect, f as f32, bar);
     }
 }
 
@@ -257,7 +289,8 @@ impl Screen for Home {
                     (self.section, self.cont) = (Section::Continue, i);
                 }
                 let selected = focused && self.section == Section::Continue && i == self.cont;
-                continue_card(ui, Rect::from_min_size(min, CONTINUE_CARD.into()), &text, selected, &style);
+                let image = card_image(sh, &self.items[i]);
+                continue_card(ui, Rect::from_min_size(min, CONTINUE_CARD.into()), &text, image.as_ref(), selected, &style);
             }
             top = body.top() + CONTINUE_CARD[1] + SECTION_GAP;
         }
