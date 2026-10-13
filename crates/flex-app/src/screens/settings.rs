@@ -23,9 +23,9 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        // "Close to system tray" where there's a tray, then "Start with Windows".
-        let tray_row = libs + 6;
-        let rows = libs + 6 + usize::from(TRAY) + usize::from(cfg!(windows));
+        // Web access, "Close to system tray" where there's a tray, then "Start with Windows".
+        let tray_row = libs + 7;
+        let rows = libs + 7 + usize::from(TRAY) + usize::from(cfg!(windows));
         match self.list.handle(press, rows) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
@@ -45,6 +45,14 @@ impl Screen for Settings {
             }
             ListInput::Activate(i) if i == libs + 5 => {
                 crate::logging::open_logs_folder();
+                Nav::None
+            }
+            ListInput::Activate(i) if i == libs + 6 => {
+                let on = !sh.web_enabled();
+                sh.set_web_enabled(on);
+                if let Some(url) = sh.web_url().filter(|_| on) {
+                    sh.toast(format!("Web UI on: open {url} on another device"));
+                }
                 Nav::None
             }
             ListInput::Activate(i) if TRAY && i == tray_row => {
@@ -80,6 +88,10 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
         rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
+        rows.push(match sh.web_url() {
+            Some(url) => Row::new(Icon::None, "Web access: on").detail(format!("Open {url} on phones and PCs at home")),
+            None => Row::new(Icon::None, "Web access: off").detail("Browse your libraries from other devices at home"),
+        });
         if TRAY {
             let on = if sh.close_to_tray { "on" } else { "off" };
             rows.push(Row::new(Icon::None, format!("Close to system tray: {on}")).detail("Closing keeps Flex running in the tray, so it opens instantly"));

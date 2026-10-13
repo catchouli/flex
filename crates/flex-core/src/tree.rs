@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::library::MediaFile;
 use crate::natural::natural_cmp;
 
+#[derive(Clone)]
 pub struct Tree {
     files: Vec<MediaFile>,
 }

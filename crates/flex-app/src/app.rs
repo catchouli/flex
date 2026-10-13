@@ -57,7 +57,8 @@ impl FlexApp {
     pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool, hidden: bool) -> anyhow::Result<Self> {
         theme::install(&cc.egui_ctx);
         input::os::set_context(&cc.egui_ctx);
-        let sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
+        let mut sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
+        sh.start_web_if_enabled();
         let (command_tx, commands) = channel();
         crate::instance::listen(command_tx.clone(), cc.egui_ctx.clone());
         let tray = if sh.close_to_tray { crate::tray::create(command_tx.clone(), &cc.egui_ctx) } else { None };

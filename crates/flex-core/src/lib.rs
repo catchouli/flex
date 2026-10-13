@@ -11,6 +11,7 @@ pub mod plex;
 pub mod progress;
 pub mod scan;
 pub mod search;
+pub mod titles;
 pub mod tree;
 
 pub use db::Db;

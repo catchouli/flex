@@ -19,7 +19,8 @@ use crate::mpv::GetProcAddress;
 
 pub struct LibState {
     pub lib: Library,
-    pub tree: Tree,
+    /// Shared with the web server's snapshots; edits copy it only while one holds it.
+    pub tree: Arc<Tree>,
     /// Videos found so far while a scan is running.
     pub scanning: Option<usize>,
     pub error: Option<String>,
@@ -34,27 +35,7 @@ pub struct LibState {
     pub fetching: Option<(usize, usize)>,
 }
 
-/// Display names for a file, from online metadata where available.
-#[derive(Clone, Debug)]
-pub struct Titles {
-    /// Show or film title (None if the file isn't organised yet).
-    pub show: Option<String>,
-    /// For episodes: "S1E5 · Title", "S1E5", or the file name.
-    pub episode: Option<String>,
-    /// The best single name for the file itself: episode title, film title, else file name.
-    pub name: String,
-}
-
-impl Titles {
-    /// "Show · S1E5 · Title" for episodes, the title for films.
-    pub fn full(&self) -> String {
-        match (&self.show, &self.episode) {
-            (Some(show), Some(ep)) => format!("{show} · {ep}"),
-            (Some(show), None) => show.clone(),
-            (None, _) => self.name.clone(),
-        }
-    }
-}
+pub use flex_core::titles::Titles;
 
 /// A library sorted into shows. `parsed` and `groups` are kept so the catalog can be
 /// rebuilt instantly after a manual fix.
@@ -75,7 +56,7 @@ impl LibState {
     fn new(lib: Library, tree: Tree) -> Self {
         Self {
             lib,
-            tree,
+            tree: Arc::new(tree),
             scanning: None,
             error: None,
             version: 0,
@@ -163,6 +144,9 @@ const TMDB_TOKEN_SETTING: &str = "tmdb_token";
 const MATCHER_VERSION: &str = "4";
 const MATCHER_VERSION_SETTING: &str = "matcher_version";
 const CLOSE_TO_TRAY_SETTING: &str = "close_to_tray";
+const WEB_SETTING: &str = "web_ui";
+const WEB_PORT_SETTING: &str = "web_port";
+const DEFAULT_WEB_PORT: u16 = 8484;
 /// Pause between TMDB requests (TMDB allows ~50/s; no need to hurry).
 const MATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(60);
 
@@ -182,7 +166,7 @@ pub struct Shared {
     /// Bumped whenever the watchlist changes, so screens showing it refresh.
     pub watchlist_version: u64,
     /// Episode titles etc. for matched series, by provider id ("tv:123").
-    pub series: HashMap<String, flex_core::db::SeriesMeta>,
+    pub series: Arc<HashMap<String, flex_core::db::SeriesMeta>>,
     /// The window's monitor refresh rate, for smooth video timing.
     pub display_fps: Option<f64>,
     search: Option<SearchIndex>,
@@ -193,6 +177,12 @@ pub struct Shared {
     toasts: Vec<String>,
     /// Closing the window hides Flex in the system tray instead of quitting.
     pub close_to_tray: bool,
+    /// The web UI, while switched on.
+    web: Option<flex_web::Server>,
+    /// What the web UI was last given: (library id, version, name) per library.
+    web_published: Vec<(i64, u64, String)>,
+    web_tx: Sender<flex_web::Change>,
+    web_rx: Receiver<flex_web::Change>,
 }
 
 impl Shared {
@@ -201,6 +191,7 @@ impl Shared {
         log::info!("database: {}", db_path.display());
         let db = Db::open(&db_path)?;
         let (scan_tx, scan_rx) = channel();
+        let (web_tx, web_rx) = channel();
         let mut shared = Self {
             ctx: ctx.clone(),
             proc_address,
@@ -208,7 +199,7 @@ impl Shared {
             db,
             libs: Vec::new(),
             search_query: String::new(),
-            series: HashMap::new(),
+            series: Arc::default(),
             alt_titles: HashMap::new(),
             watchlist: Vec::new(),
             watchlist_version: 0,
@@ -221,9 +212,13 @@ impl Shared {
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
             close_to_tray: false,
+            web: None,
+            web_published: Vec::new(),
+            web_tx,
+            web_rx,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
-        shared.series = shared.db.series_meta()?;
+        shared.series = Arc::new(shared.db.series_meta()?);
         shared.alt_titles = shared.db.alt_titles()?;
         shared.watchlist = shared.db.watchlist()?;
         if shared.db.setting(MATCHER_VERSION_SETTING)?.as_deref() != Some(MATCHER_VERSION) {
@@ -266,6 +261,97 @@ impl Shared {
         }
     }
 
+    /// Starts the web UI at startup if it was left on.
+    pub fn start_web_if_enabled(&mut self) {
+        if self.setting_bool(WEB_SETTING) {
+            self.set_web_enabled(true);
+        }
+    }
+
+    pub fn web_enabled(&self) -> bool {
+        self.web.is_some()
+    }
+
+    /// The address other devices can open, while the web UI is on.
+    pub fn web_url(&self) -> Option<String> {
+        let port = self.web.as_ref()?.port();
+        let host = flex_web::lan_address().map_or_else(|| "localhost".to_owned(), |ip| ip.to_string());
+        Some(format!("http://{host}:{port}"))
+    }
+
+    pub fn set_web_enabled(&mut self, on: bool) {
+        self.set_setting_bool(WEB_SETTING, on);
+        if !on {
+            self.web = None;
+            return;
+        }
+        if self.web.is_some() {
+            return;
+        }
+        let port = self.setting(WEB_PORT_SETTING).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_WEB_PORT);
+        let config = flex_web::Config {
+            port,
+            db_path: self.db_path.clone(),
+            images_dir: flex_core::data_dir().join("images"),
+            shots_dir: flex_core::data_dir().join("shots"),
+        };
+        let (tx, ctx) = (self.web_tx.clone(), self.ctx.clone());
+        let on_change = move |change| {
+            let _ = tx.send(change);
+            ctx.request_repaint();
+        };
+        match flex_web::Server::start(config, self.web_snapshot(), on_change) {
+            Ok(server) => {
+                self.web = Some(server);
+                self.web_published = self.web_key();
+            }
+            Err(e) => {
+                log::error!("starting the web UI: {e:#}");
+                self.toast(format!("Couldn't start the web UI: {e:#}"));
+            }
+        }
+    }
+
+    fn web_key(&self) -> Vec<(i64, u64, String)> {
+        self.libs.iter().map(|l| (l.lib.id, l.version, l.lib.name.clone())).collect()
+    }
+
+    fn web_snapshot(&self) -> flex_web::Snapshot {
+        flex_web::Snapshot {
+            libraries: self
+                .libs
+                .iter()
+                .map(|l| flex_web::LibrarySnapshot {
+                    lib: l.lib.clone(),
+                    tree: l.tree.clone(),
+                    catalog: l.organised.as_ref().map(|o| o.catalog.clone()),
+                })
+                .collect(),
+            series: self.series.clone(),
+        }
+    }
+
+    /// Applies changes made from the web and keeps the web UI up to date with ours.
+    fn poll_web(&mut self) {
+        while let Ok(change) = self.web_rx.try_recv() {
+            match change {
+                flex_web::Change::Watched { library_id, file_ids, watched } => {
+                    log::info!("web: marked {} file(s) {}", file_ids.len(), if watched { "watched" } else { "unwatched" });
+                    self.apply_watched(library_id, &file_ids, watched);
+                }
+            }
+        }
+        if self.web.is_some() {
+            let key = self.web_key();
+            if key != self.web_published {
+                if let Some(web) = &self.web {
+                    web.publish(self.web_snapshot());
+                }
+                self.web_published = key;
+            }
+        }
+    }
+
     pub fn set_close_to_tray(&mut self, on: bool) {
         self.close_to_tray = on;
         self.set_setting_bool(CLOSE_TO_TRAY_SETTING, on);
@@ -304,7 +390,7 @@ impl Shared {
             return None;
         }
         if let Some(state) = self.lib_mut(req.library_id)
-            && let Some(file) = state.tree.file_mut(req.file_id)
+            && let Some(file) = Arc::make_mut(&mut state.tree).file_mut(req.file_id)
         {
             file.progress = new;
             state.version += 1;
@@ -337,7 +423,7 @@ impl Shared {
             match self.db.files(id) {
                 Ok(files) => {
                     let l = &mut self.libs[i];
-                    l.tree = Tree::new(files);
+                    l.tree = Arc::new(Tree::new(files));
                     l.version += 1;
                 }
                 Err(e) => log::warn!("reloading library {id}: {e:#}"),
@@ -352,9 +438,14 @@ impl Shared {
             self.toast(format!("Couldn't update: {e:#}"));
             return;
         }
+        self.apply_watched(library_id, ids, watched);
+    }
+
+    /// Updates watched state in memory (the database is already up to date).
+    fn apply_watched(&mut self, library_id: i64, ids: &[i64], watched: bool) {
         if let Some(state) = self.lib_mut(library_id) {
             for id in ids {
-                if let Some(file) = state.tree.file_mut(*id) {
+                if let Some(file) = Arc::make_mut(&mut state.tree).file_mut(*id) {
                     file.progress.watched = watched;
                     file.progress.position = None;
                 }
@@ -367,9 +458,9 @@ impl Shared {
     /// Continue Watching: per show for organised libraries, per folder for the rest
     /// (while they're still being organised).
     pub fn continue_watching(&self, limit: usize) -> Vec<ContinueItem> {
-        let organised = self.libs.iter().filter_map(|l| l.catalog().map(|c| (&l.lib, &l.tree, c)));
+        let organised = self.libs.iter().filter_map(|l| l.catalog().map(|c| (&l.lib, &*l.tree, c)));
         let mut items = progress::continue_watching_shows(organised, limit);
-        let pending = self.libs.iter().filter(|l| l.organised.is_none()).map(|l| (&l.lib, &l.tree));
+        let pending = self.libs.iter().filter(|l| l.organised.is_none()).map(|l| (&l.lib, &*l.tree));
         items.extend(progress::continue_watching(pending, limit));
         items.truncate(limit);
         items
@@ -596,7 +687,7 @@ impl Shared {
     /// Picks up newly fetched details: episode titles and the shows' overviews/posters.
     fn reload_details(&mut self, id: i64) {
         match self.db.series_meta() {
-            Ok(series) => self.series = series,
+            Ok(series) => self.series = Arc::new(series),
             Err(e) => log::warn!("loading episode titles: {e:#}"),
         }
         match self.db.alt_titles() {
@@ -648,43 +739,12 @@ impl Shared {
     /// available, the file name otherwise.
     pub fn titles(&self, library_id: i64, file_id: i64) -> Option<Titles> {
         let state = self.lib(library_id)?;
-        let file = state.tree.file(file_id)?;
-        let file_name = flex_core::library::display_name(file.file_name(), true);
-        let Some(entry) = state.catalog().and_then(|c| c.show_of_file(file_id)) else {
-            return Some(Titles { show: None, episode: None, name: file_name });
-        };
-        let show = entry.show.title.clone();
-        if !entry.is_series() {
-            return Some(Titles { name: show.clone(), show: Some(show), episode: None });
-        }
-        let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
-        let meta = match (ep.season, ep.number, entry.show.provider_id.as_ref()) {
-            // Specials' numbering rarely lines up with TMDB's, so they keep file names.
-            (s, Some(n), Some(pid)) if s > 0 => self.series.get(pid).and_then(|m| m.episode(s, n)),
-            _ => None,
-        };
-        let title = meta.map(|m| m.title.clone()).filter(|t| !t.is_empty());
-        let code = match (ep.season, ep.number) {
-            (0, _) => None,
-            (s, Some(n)) => Some(format!("S{s}E{n}")),
-            _ => None,
-        };
-        let episode = match (code, &title) {
-            (Some(c), Some(t)) => format!("{c} · {t}"),
-            (Some(c), None) => c,
-            (None, Some(t)) => t.clone(),
-            (None, None) => file_name.clone(),
-        };
-        Some(Titles { show: Some(show), episode: Some(episode), name: title.unwrap_or(file_name) })
+        flex_core::titles::titles(&state.tree, state.catalog(), &self.series, file_id)
     }
 
     /// TMDB metadata (description, still) for an episode, if known.
     pub fn episode_meta(&self, library_id: i64, file_id: i64) -> Option<&flex_core::db::EpisodeMeta> {
-        let entry = self.lib(library_id)?.catalog()?.show_of_file(file_id)?;
-        let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
-        let pid = entry.show.provider_id.as_ref()?;
-        (ep.season > 0).then_some(())?;
-        self.series.get(pid)?.episode(ep.season, ep.number?)
+        flex_core::titles::episode_meta(self.lib(library_id)?.catalog()?, &self.series, file_id)
     }
 
     pub fn credits(&self, provider_id: &str, kind: &str) -> Vec<flex_core::metadata::CastMember> {
@@ -897,6 +957,7 @@ impl Shared {
 
     /// Applies finished/progressing scans. Call once per frame.
     pub fn poll_scans(&mut self) {
+        self.poll_web();
         self.images.poll();
         self.shots.poll();
         let mut reorganise = Vec::new();
@@ -918,7 +979,7 @@ impl Shared {
                     l.scanning = None;
                     let toast = match outcome {
                         Ok((summary, files)) => {
-                            l.tree = Tree::new(files);
+                            l.tree = Arc::new(Tree::new(files));
                             l.version += 1;
                             reorganise.push(id);
                             format!("{}: {summary}", l.lib.name)

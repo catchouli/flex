@@ -1,0 +1,150 @@
+/* Flex web UI: the app's dark look, light enough for a slow mini PC. */
+:root {
+  --bg: #0e0f12;
+  --row: #1c1e24;
+  --row-hover: #262932;
+  --focus: #ebaa28;
+  --text: #ebebeb;
+  --dim: #9696a0;
+  --gutter: 16px;
+  color-scheme: dark;
+}
+@media (min-width: 900px) { :root { --gutter: 40px; } }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans CJK JP", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; }
+img { display: block; }
+
+/* Keyboard / remote focus: the app's amber ring. */
+:focus { outline: none; }
+:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+
+.top {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px var(--gutter);
+  padding-top: max(12px, env(safe-area-inset-top));
+  background: linear-gradient(var(--bg) 70%, transparent);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 22px; }
+.brand img { width: 32px; height: 32px; }
+.back {
+  margin-left: auto; padding: 8px 16px; border: 0; border-radius: 10px;
+  background: var(--row); cursor: pointer;
+}
+.back:hover { background: var(--row-hover); }
+
+main { padding: 0 var(--gutter) 48px; }
+h1 { font-size: 28px; margin: 8px 0 16px; }
+h2 { font-size: 20px; margin: 28px 0 12px; color: var(--dim); font-weight: 600; }
+.dim { color: var(--dim); }
+.empty { color: var(--dim); padding: 24px 0; }
+
+/* Continue Watching: a sideways-scrolling row of 16:9 cards. */
+.row {
+  display: grid; grid-auto-flow: column; grid-auto-columns: min(78vw, 320px); gap: 14px;
+  overflow-x: auto; padding: 6px 6px 14px; margin: 0 -6px;
+  scroll-snap-type: x proximity; scrollbar-width: thin;
+}
+.card {
+  position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
+  background: var(--row); scroll-snap-align: start; cursor: pointer;
+}
+.card img { width: 100%; height: 100%; object-fit: cover; }
+.card .shade {
+  position: absolute; inset: 0; padding: 12px 14px;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  background: linear-gradient(transparent 35%, rgba(0, 0, 0, .85));
+}
+.card .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .e, .card .s { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .s { color: #ccc; }
+.bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, .2); }
+.bar i { display: block; height: 100%; background: var(--focus); }
+
+/* Library tiles on Home. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.tile {
+  display: block; padding: 22px 20px; border-radius: 12px; background: var(--row); cursor: pointer;
+}
+.tile:hover { background: var(--row-hover); }
+.tile b { display: block; font-size: 20px; margin-bottom: 4px; }
+
+/* A library's poster grid. */
+.tools { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.tools select, .tools input {
+  font: inherit; color: var(--text); background: var(--row); border: 0; border-radius: 10px;
+  padding: 9px 12px;
+}
+.tools input { flex: 1 1 180px; min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px 14px; }
+@media (min-width: 900px) { .grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); } }
+.poster { display: block; cursor: pointer; border-radius: 10px; }
+/* Big libraries have thousands of posters: skip laying out the ones off screen. */
+.grid .poster { content-visibility: auto; contain-intrinsic-size: auto 300px; }
+.poster .art {
+  position: relative; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--row);
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px;
+  color: var(--dim);
+}
+.poster .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.poster .badge {
+  position: absolute; top: 8px; right: 8px; min-width: 28px; padding: 2px 8px; border-radius: 99px;
+  background: var(--focus); color: #000; font-weight: 700; font-size: 13px; text-align: center;
+}
+.poster .badge.done { background: rgba(0, 0, 0, .7); color: var(--focus); }
+.poster .name { margin-top: 8px; font-size: 15px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.poster .sub { font-size: 13px; color: var(--dim); }
+
+/* A show or film. */
+.hero { position: relative; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
+.hero .bg {
+  position: absolute; inset: 0; z-index: -1; overflow: hidden;
+  mask-image: linear-gradient(rgba(0, 0, 0, .55), transparent);
+  -webkit-mask-image: linear-gradient(rgba(0, 0, 0, .55), transparent);
+}
+.hero .bg img { width: 100%; height: 100%; object-fit: cover; }
+.hero .inner { display: flex; gap: 24px; align-items: flex-end; padding-top: 24px; }
+.hero .inner > img { width: 160px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px; flex: none; background: var(--row); }
+@media (max-width: 600px) { .hero .inner > img { width: 110px; } .hero .inner { gap: 16px; } }
+.hero h1 { margin: 0 0 6px; }
+.meta { color: var(--dim); font-size: 15px; }
+.overview { max-width: 900px; margin: 16px 0; color: #d8d8d8; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.btn {
+  padding: 10px 18px; border: 0; border-radius: 10px; background: var(--row); cursor: pointer;
+}
+.btn:hover { background: var(--row-hover); }
+.seasons { display: flex; gap: 8px; overflow-x: auto; padding: 4px 4px 8px; margin: 8px -4px 4px; }
+.seasons .btn { flex: none; }
+.seasons .btn.on { background: var(--focus); color: #000; font-weight: 600; }
+
+.episodes { display: grid; gap: 10px; }
+.ep {
+  display: grid; grid-template-columns: 200px 1fr auto; gap: 16px; align-items: center;
+  padding: 10px; border-radius: 12px; background: var(--row);
+}
+@media (max-width: 600px) { .ep { grid-template-columns: 112px 1fr auto; gap: 12px; padding: 8px; } }
+.ep .thumb { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #2a2d35; }
+.ep .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ep .t { font-weight: 600; }
+.ep .d { font-size: 14px; color: var(--dim); }
+.ep .o { font-size: 14px; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 600px) { .ep .o { display: none; } }
+.ep .w {
+  width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--dim); background: none;
+  cursor: pointer; font-size: 20px; line-height: 1; color: transparent;
+}
+.ep .w.on { border-color: var(--focus); background: var(--focus); color: #000; }
+
+.toast {
+  position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  padding: 12px 20px; border-radius: 12px; background: rgba(0, 0, 0, .85); z-index: 20;
+}
