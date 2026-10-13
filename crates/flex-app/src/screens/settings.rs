@@ -1,4 +1,4 @@
-//! Settings: manage libraries (add, rescan, change type, remove).
+//! Settings: manage libraries (add, rescan, change type, remove), and app options.
 
 use eframe::egui::{Rect, Ui};
 use flex_core::LibraryKind;
@@ -8,6 +8,9 @@ use super::{Nav, Screen, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
+
+/// Whether this platform has a system tray (see [`crate::tray`]).
+const TRAY: bool = cfg!(any(windows, target_os = "macos"));
 
 #[derive(Default)]
 pub struct Settings {
@@ -20,7 +23,10 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        match self.list.handle(press, libs + 6) {
+        // "Close to system tray" where there's a tray, then "Start with Windows".
+        let tray_row = libs + 6;
+        let rows = libs + 6 + usize::from(TRAY) + usize::from(cfg!(windows));
+        match self.list.handle(press, rows) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
@@ -32,13 +38,24 @@ impl Screen for Settings {
             }
             ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
             ListInput::Activate(i) if i == libs + 3 => Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase)),
+            ListInput::Activate(i) if i == libs + 4 => {
+                sh.scan_all();
+                sh.toast("Rescanning all libraries…");
+                Nav::None
+            }
             ListInput::Activate(i) if i == libs + 5 => {
                 crate::logging::open_logs_folder();
                 Nav::None
             }
+            ListInput::Activate(i) if TRAY && i == tray_row => {
+                sh.set_close_to_tray(!sh.close_to_tray);
+                Nav::None
+            }
             ListInput::Activate(_) => {
-                sh.scan_all();
-                sh.toast("Rescanning all libraries…");
+                #[cfg(windows)]
+                if let Err(e) = crate::autostart::set_enabled(!crate::autostart::is_enabled()) {
+                    sh.toast(format!("Couldn't change the startup setting: {e:#}"));
+                }
                 Nav::None
             }
             ListInput::None => Nav::None,
@@ -63,6 +80,16 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
         rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
+        if TRAY {
+            let on = if sh.close_to_tray { "on" } else { "off" };
+            rows.push(Row::new(Icon::None, format!("Close to system tray: {on}")).detail("Closing keeps Flex running in the tray, so it opens instantly"));
+        }
+        #[cfg(windows)]
+        {
+            let on = if crate::autostart::is_enabled() { "on" } else { "off" };
+            let detail = if sh.close_to_tray { "Starts hidden in the tray" } else { "Opens Flex when you sign in" };
+            rows.push(Row::new(Icon::None, format!("Start with Windows: {on}")).detail(detail));
+        }
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }

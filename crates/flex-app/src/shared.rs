@@ -162,6 +162,7 @@ const TMDB_TOKEN_SETTING: &str = "tmdb_token";
 /// start (manual choices are kept).
 const MATCHER_VERSION: &str = "4";
 const MATCHER_VERSION_SETTING: &str = "matcher_version";
+const CLOSE_TO_TRAY_SETTING: &str = "close_to_tray";
 /// Pause between TMDB requests (TMDB allows ~50/s; no need to hurry).
 const MATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(60);
 
@@ -190,6 +191,8 @@ pub struct Shared {
     /// Cancel flags for running scans, by library id.
     scan_cancel: HashMap<i64, Arc<AtomicBool>>,
     toasts: Vec<String>,
+    /// Closing the window hides Flex in the system tray instead of quitting.
+    pub close_to_tray: bool,
 }
 
 impl Shared {
@@ -217,7 +220,9 @@ impl Shared {
             scan_rx,
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
+            close_to_tray: false,
         };
+        shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
         shared.series = shared.db.series_meta()?;
         shared.alt_titles = shared.db.alt_titles()?;
         shared.watchlist = shared.db.watchlist()?;
@@ -259,6 +264,11 @@ impl Shared {
         if let Err(e) = self.db.set_setting(key, if value { "true" } else { "false" }) {
             log::warn!("saving setting {key}: {e:#}");
         }
+    }
+
+    pub fn set_close_to_tray(&mut self, on: bool) {
+        self.close_to_tray = on;
+        self.set_setting_bool(CLOSE_TO_TRAY_SETTING, on);
     }
 
     pub fn watched_threshold(&self) -> f64 {

@@ -2,8 +2,11 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+#[cfg(windows)]
+mod autostart;
 mod images;
 mod input;
+mod instance;
 mod logging;
 mod mpv;
 mod player;
@@ -12,6 +15,7 @@ mod shared;
 mod shots;
 mod theme;
 mod topbar;
+mod tray;
 mod widgets;
 
 use std::path::PathBuf;
@@ -35,26 +39,49 @@ fn keep_com_alive() {
 }
 
 fn main() -> eframe::Result {
-    logging::init();
-    #[cfg(windows)]
-    keep_com_alive();
-
     let mut windowed = false;
+    let mut hidden = false;
+    let mut quit = false;
     let mut start = None;
     for arg in std::env::args_os().skip(1) {
         if arg == "--windowed" {
             windowed = true;
+        } else if arg == "--tray" {
+            hidden = true;
+        } else if arg == "--quit" {
+            quit = true;
         } else {
             start = Some(PathBuf::from(arg));
         }
     }
 
-    // Two copies would both write to the same database (and fight over the screen).
+    // Two copies would both write to the same database (and fight over the screen), so a
+    // second launch shows the running copy's window instead.
+    // Taken before logging starts, which would otherwise rotate the running copy's log.
     let lock = flex_core::single_instance_lock();
     let already_running = matches!(lock, Ok(None));
+    if quit {
+        if already_running && let Err(e) = instance::send(instance::Command::Quit) {
+            eprintln!("couldn't reach the running Flex: {e:#}");
+        }
+        return Ok(());
+    }
+    if already_running {
+        if hidden {
+            return Ok(()); // started with Windows, but Flex is already up
+        }
+        match instance::send(instance::Command::Show) {
+            Ok(()) => return Ok(()),
+            Err(e) => eprintln!("couldn't reach the running Flex: {e:#}"),
+        }
+    } else {
+        logging::init();
+    }
     if let Err(e) = &lock {
         log::warn!("couldn't take the single-instance lock: {e}");
     }
+    #[cfg(windows)]
+    keep_com_alive();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -81,7 +108,7 @@ fn main() -> eframe::Result {
             if already_running {
                 return Ok(Box::new(app::StartupError("Flex is already running.".into())) as Box<dyn eframe::App>);
             }
-            Ok(match app::FlexApp::new(cc, start, windowed) {
+            Ok(match app::FlexApp::new(cc, start, windowed, hidden) {
                 Ok(app) => Box::new(app) as Box<dyn eframe::App>,
                 Err(e) => {
                     log::error!("{e:#}");

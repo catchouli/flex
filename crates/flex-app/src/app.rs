@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui::{self, Align2, CornerRadius, Key, Rect, TextStyle, ViewportCommand, pos2, vec2};
 
 use crate::input::{self, Action, InputLog, Press};
+use crate::instance::Command;
 use crate::player::Player;
 use crate::screens::{Nav, Screen, home::Home, resume::ResumePrompt, search::SearchView, settings::Settings};
 use crate::shared::{PlayRequest, Shared};
@@ -13,7 +15,8 @@ use crate::topbar::{self, TopBar};
 
 const CURSOR_HIDE_SECS: f64 = 2.0;
 const TOAST_SECS: f64 = 4.0;
-/// Holding Back this long quits; the prompt appears after `QUIT_PROMPT_SECS`.
+/// Holding Back this long closes Flex (to the tray if there is one); the prompt appears
+/// after `QUIT_PROMPT_SECS`.
 const QUIT_HOLD_SECS: f64 = 1.5;
 const QUIT_PROMPT_SECS: f64 = 0.4;
 const FULLSCREEN_SETTING: &str = "fullscreen";
@@ -36,14 +39,30 @@ pub struct FlexApp {
     /// Fullscreen state we last asked for. The window's own report can't be relied on:
     /// on macOS it lags while animating and sometimes stays stale afterwards.
     fullscreen: bool,
+    /// From the tray icon and later launches of Flex.
+    commands: Receiver<Command>,
+    command_tx: Sender<Command>,
+    /// Present while "Close to system tray" is on (and there is a tray): closing the
+    /// window then hides Flex there instead of quitting.
+    tray: Option<crate::tray::Tray>,
+    /// Hide the window on the next frame (closed, or started with `--tray`).
+    hide_pending: bool,
+    /// Quit was chosen from the tray: let the window close for real.
+    quitting: bool,
 }
 
 impl FlexApp {
     /// `start` may be a video to play immediately (handy for testing playback).
-    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool) -> anyhow::Result<Self> {
+    /// `hidden` starts Flex in the tray (when it starts with Windows).
+    pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool, hidden: bool) -> anyhow::Result<Self> {
         theme::install(&cc.egui_ctx);
         input::os::set_context(&cc.egui_ctx);
         let sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
+        let (command_tx, commands) = channel();
+        crate::instance::listen(command_tx.clone(), cc.egui_ctx.clone());
+        let tray = if sh.close_to_tray { crate::tray::create(command_tx.clone(), &cc.egui_ctx) } else { None };
+        #[cfg(windows)]
+        crate::autostart::refresh();
         let restore_fullscreen = !windowed && sh.setting_bool(FULLSCREEN_SETTING);
         let mut app = Self {
             restore_fullscreen,
@@ -58,6 +77,11 @@ impl FlexApp {
             back_hold_since: None,
             toasts: VecDeque::new(),
             last_pointer_move: 0.0,
+            hide_pending: hidden && tray.is_some(),
+            commands,
+            command_tx,
+            tray,
+            quitting: false,
         };
         if let Some(path) = start.filter(|p| p.is_file() && flex_core::library::is_video(p)) {
             let title = flex_core::library::display_name(&path.file_name().unwrap_or_default().to_string_lossy(), true);
@@ -144,6 +168,52 @@ impl FlexApp {
         }
     }
 
+    /// Stops playback (saving progress) and hides the window; Flex stays in the tray.
+    fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        while self.top().is_player() {
+            self.pop();
+        }
+        self.back_hold_since = None;
+        ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        log::info!("hidden in the tray");
+    }
+
+    /// Handles the tray icon and later launches, and turns closing the window into hiding
+    /// it. Runs while the window is hidden too.
+    fn handle_commands(&mut self, ctx: &egui::Context) {
+        while let Ok(command) = self.commands.try_recv() {
+            match command {
+                Command::Show => {
+                    self.hide_pending = false;
+                    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+                Command::Quit => {
+                    log::info!("quitting");
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                    // In case the hidden window never gets to process the close.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        log::warn!("didn't close in time; exiting");
+                        std::process::exit(0);
+                    });
+                }
+            }
+            ctx.request_repaint();
+        }
+        // Follow the setting: add or remove the tray icon.
+        if self.sh.close_to_tray != self.tray.is_some() {
+            self.tray = if self.sh.close_to_tray { crate::tray::create(self.command_tx.clone(), ctx) } else { None };
+        }
+        if self.tray.is_some() && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            self.hide_pending = true;
+            ctx.request_repaint();
+        }
+    }
+
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
         self.set_fullscreen(ctx, !self.fullscreen);
     }
@@ -223,7 +293,7 @@ impl FlexApp {
         }
     }
 
-    /// Quits when Back is held for `QUIT_HOLD_SECS`, showing a prompt while held.
+    /// Closes when Back is held for `QUIT_HOLD_SECS`, showing a prompt while held.
     fn hold_to_quit(&mut self, ui: &egui::Ui, now: f64, text_focused: bool) {
         let ctx = ui.ctx();
         if text_focused || !input::back_held(ctx) {
@@ -238,7 +308,8 @@ impl FlexApp {
             let rect = Rect::from_center_size(screen.center(), vec2(560.0, 150.0));
             let painter = ui.painter();
             painter.rect_filled(rect, CornerRadius::same(14), theme::OSD_BG);
-            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, "Keep holding to quit", TextStyle::Body.resolve(ui.style()), theme::TEXT);
+            let prompt = if self.tray.is_some() { "Keep holding to close" } else { "Keep holding to quit" };
+            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, prompt, TextStyle::Body.resolve(ui.style()), theme::TEXT);
             let bar = Rect::from_min_size(pos2(rect.left() + 40.0, rect.bottom() - 46.0), vec2(rect.width() - 80.0, 10.0));
             painter.rect_filled(bar, CornerRadius::same(5), egui::Color32::from_white_alpha(50));
             let t = ((held - QUIT_PROMPT_SECS) / (QUIT_HOLD_SECS - QUIT_PROMPT_SECS)) as f32;
@@ -302,8 +373,9 @@ impl FlexApp {
 
 impl eframe::App for FlexApp {
     /// Runs even while the window is hidden, so scans finish without anyone watching.
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
+        self.handle_commands(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -316,6 +388,11 @@ impl eframe::App for FlexApp {
             .and_then(|m| m.refresh_rate_millihertz())
             .map(|mhz| f64::from(mhz) / 1000.0);
         self.frames += 1;
+        // Not on the first frame: eframe shows the window after painting it.
+        if self.hide_pending && self.frames > 1 {
+            self.hide_pending = false;
+            self.hide_to_tray(&ctx);
+        }
         if self.restore_fullscreen && self.frames > 2 {
             self.restore_fullscreen = false;
             self.set_fullscreen(&ctx, true);
