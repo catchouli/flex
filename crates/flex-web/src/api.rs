@@ -21,11 +21,16 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/", get(index))
         .route("/app.js", get(|| asset(include_str!("../web/app.js"), "text/javascript; charset=utf-8")))
         .route("/app.css", get(|| asset(include_str!("../web/app.css"), "text/css; charset=utf-8")))
+        .route("/player.js", get(|| asset(include_str!("../web/player.js"), "text/javascript; charset=utf-8")))
         .route("/icon.png", get(icon))
         .route("/api/home", get(home))
         .route("/api/library/{id}", get(library))
         .route("/api/show/{library}/{show}", get(show))
         .route("/api/watched", post(set_watched))
+        .route("/api/play/{library}/{file}", get(crate::play::info))
+        .route("/api/progress", post(crate::play::progress))
+        .route("/media/{library}/{file}", get(crate::play::file))
+        .route("/stream/{library}/{file}", get(crate::play::stream))
         .route("/img/web", get(images::web))
         .route("/img/{size}/{name}", get(images::tmdb))
         .route("/shot/{library}/{file}", get(images::shot))
@@ -338,21 +343,10 @@ async fn set_watched(AxState(state): AxState<Arc<State>>, Json(req): Json<Watche
             return Ok(false);
         }
         state.db.lock().unwrap_or_else(|e| e.into_inner()).set_watched(&ids, req.watched)?;
-        // Show it straight away; the app publishes its own copy once it has caught up.
-        {
-            let mut current = state.snapshot.write().unwrap_or_else(|e| e.into_inner());
-            let mut updated = (**current).clone();
-            if let Some(l) = updated.libraries.iter_mut().find(|l| l.lib.id == req.library) {
-                let tree = Arc::make_mut(&mut l.tree);
-                for id in &ids {
-                    if let Some(f) = tree.file_mut(*id) {
-                        f.progress.watched = req.watched;
-                        f.progress.position = None;
-                    }
-                }
-            }
-            *current = Arc::new(updated);
-        }
+        state.patch_files(req.library, &ids, |f| {
+            f.progress.watched = req.watched;
+            f.progress.position = None;
+        });
         (state.on_change)(Change::Watched { library_id: req.library, file_ids: ids, watched: req.watched });
         Ok(true)
     })

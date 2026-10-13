@@ -9,6 +9,13 @@ use crate::tree::Tree;
 pub const MIN_RECORDED_SECS: f64 = 10.0;
 /// Default fraction of a file that counts as watched (Plex uses the same default).
 pub const DEFAULT_WATCHED_THRESHOLD: f64 = 0.9;
+/// Setting holding the fraction that counts as watched.
+pub const WATCHED_THRESHOLD_SETTING: &str = "watched_threshold";
+
+/// The fraction of a file that counts as watched (Settings), as a number in 0–1.
+pub fn watched_threshold(db: &crate::Db) -> f64 {
+    db.setting(WATCHED_THRESHOLD_SETTING).ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_WATCHED_THRESHOLD)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Progress {

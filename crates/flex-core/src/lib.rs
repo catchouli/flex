@@ -34,6 +34,10 @@ pub fn single_instance_lock() -> std::io::Result<Option<std::fs::File>> {
 /// Where Flex keeps its database: `%APPDATA%\Flex\data` on Windows,
 /// `~/Library/Application Support/Flex` on macOS.
 pub fn data_dir() -> std::path::PathBuf {
+    // For testing against a copy of the data.
+    if let Some(dir) = std::env::var_os("FLEX_DATA_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
     directories::ProjectDirs::from("", "", "Flex")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("flex-data"))

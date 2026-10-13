@@ -97,11 +97,14 @@ async function homePage() {
 
 function card(c) {
   const status = c.next ? "Up next" : c.remaining !== null ? remaining(c.remaining) : "";
-  const open = () => {
-    if (c.show !== null) location.hash = `#/show/${c.library}/${c.show}`;
-    else toast("Shows are still being sorted; try again in a moment");
+  const play = `#/play/${c.library}/${c.file}`;
+  const open = (e) => {
+    e.preventDefault();
+    // Back from the player returns to the show or film's page, like the TV app.
+    if (c.show !== null) history.pushState(null, "", `#/show/${c.library}/${c.show}`);
+    location.hash = play;
   };
-  return h("a", { class: "card", href: c.show !== null ? `#/show/${c.library}/${c.show}` : null, tabindex: 0, "data-key": `c${c.file}`, onclick: c.show === null ? open : null },
+  return h("a", { class: "card", href: play, "data-key": `c${c.file}`, onclick: open },
     img(c.image),
     h("div", { class: "shade" },
       h("div", { class: "t" }, c.title),
@@ -196,6 +199,7 @@ async function showPage(library, id) {
         h("div", {}, h("h1", {}, data.title), h("div", { class: "meta" }, meta)))),
     data.overview ? h("p", { class: "overview" }, data.overview) : null,
     h("div", { class: "actions" },
+      playNext(data, all),
       all.length ? h("button", { class: "btn", "data-key": "all", onclick: () => mark(library, all.map((e) => e.file), !allWatched) },
         allWatched ? "Mark as unwatched" : "Mark as watched") : null),
     data.seasons.length > 1 ? tabs : null,
@@ -208,16 +212,27 @@ function episode(show, e) {
   const label = show.series && e.number !== null ? `${e.number}. ${e.title}` : e.title;
   const sub = e.remaining !== null ? remaining(e.remaining) : e.duration ? `${Math.round(e.duration / 60)} min` : null;
   return h("div", { class: "ep" },
-    h("div", { class: "thumb" }, img(e.image), bar(e.fraction)),
-    h("div", {},
-      h("div", { class: "t" }, label),
-      sub ? h("div", { class: "d" }, sub) : null,
-      e.overview ? h("div", { class: "o" }, e.overview) : null),
+    h("a", { class: "play", href: `#/play/${show.library}/${e.file}`, "data-key": `p${e.file}` },
+      h("div", { class: "thumb" }, img(e.image), bar(e.fraction)),
+      h("div", {},
+        h("div", { class: "t" }, label),
+        sub ? h("div", { class: "d" }, sub) : null,
+        e.overview ? h("div", { class: "o" }, e.overview) : null)),
     h("button", {
       class: `w${e.watched ? " on" : ""}`, "data-key": `w${e.file}`, title: e.watched ? "Watched" : "Not watched",
       "aria-label": e.watched ? "Mark as unwatched" : "Mark as watched", "aria-pressed": e.watched ? "true" : "false",
       onclick: () => mark(show.library, [e.file], !e.watched),
     }, "✓"));
+}
+
+/** "Resume S1E3", "Play S1E4" or "Play": the show's next episode (or the film). */
+function playNext(data, all) {
+  const next = all.find((e) => e.file === data.next);
+  if (!next) return null;
+  const season = data.seasons.find((s) => s.episodes.includes(next))?.season;
+  const code = data.series && next.number !== null && season ? ` S${season}E${next.number} · ${next.title}` : "";
+  const verb = next.remaining !== null ? "Resume" : "Play";
+  return h("a", { class: "btn primary", href: `#/play/${data.library}/${next.file}`, "data-key": "play" }, `▶ ${verb}${code}`);
 }
 
 async function mark(library, files, watched) {
@@ -236,9 +251,12 @@ const ROUTES = [
   [/^#?\/?$/, () => homePage()],
   [/^#\/lib\/(\d+)$/, (m) => libraryPage(m[1])],
   [/^#\/show\/(\d+)\/(\d+)$/, (m) => showPage(m[1], m[2])],
+  [/^#\/play\/(\d+)\/(\d+)(?:\?t=([\d.]+))?$/, (m) => Player.page(m[1], m[2], m[3] === undefined ? null : Number(m[3]))],
 ];
 
 let retryTimer;
+/** The page showing (the player has keys and cleanup of its own). */
+let currentPage = null;
 /** Where each page was left (scroll, focused item), to return to it on Back. */
 const positions = new Map();
 let usingKeys = false;
@@ -248,14 +266,24 @@ async function render(options = {}) {
   const route = location.hash || "#/";
   const saved = options.keepFocus ? { y: scrollY, key: document.activeElement?.dataset?.key } : positions.get(route);
   backButton.hidden = route === "#/";
+  // Stop the player (and its stream) before anything else replaces it.
+  currentPage?.destroy?.();
+  currentPage = null;
   let page;
+  const slow = setTimeout(() => main.replaceChildren(h("p", { class: "empty" }, "Loading…")), 400);
   try {
     const [re, handler] = ROUTES.find(([re]) => re.test(route)) || [];
     page = handler ? await handler(route.match(re)) : { title: "Flex", content: [h("p", { class: "empty" }, "Page not found.")] };
   } catch (err) {
     page = { title: "Flex", content: [h("p", { class: "empty" }, `Couldn't load this page: ${err.message}. Is Flex running?`)] };
   }
-  if ((location.hash || "#/") !== route) return; // navigated away meanwhile
+  clearTimeout(slow);
+  if ((location.hash || "#/") !== route) {
+    page.destroy?.(); // navigated away meanwhile
+    return;
+  }
+  currentPage = page;
+  document.body.classList.toggle("fullscreen", !!page.fullscreen);
   document.title = page.title === "Flex" ? "Flex" : `${page.title} · Flex`;
   main.replaceChildren(...page.content.filter(Boolean));
   if (saved) {
@@ -276,7 +304,7 @@ addEventListener("hashchange", (e) => {
 backButton.addEventListener("click", () => history.back());
 // Back in Flex after a while: show what's changed (e.g. watched on the TV).
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) render({ keepFocus: true });
+  if (!document.hidden && !currentPage?.fullscreen) render({ keepFocus: true });
 });
 
 // ---------------------------------------------------------------------------------------
@@ -310,6 +338,10 @@ function neighbour(from, dir) {
 
 addEventListener("keydown", (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
+  if (currentPage?.onKey?.(e)) {
+    e.preventDefault();
+    return;
+  }
   const el = document.activeElement;
   const typing = el && el.tagName === "INPUT";
   if (e.key.startsWith("Arrow")) {

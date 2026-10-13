@@ -110,7 +110,6 @@ pub struct PlayRequest {
     pub start: Option<f64>,
 }
 
-const WATCHED_THRESHOLD_SETTING: &str = "watched_threshold";
 /// Choices offered in Settings for "mark watched at".
 pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
 
@@ -339,6 +338,14 @@ impl Shared {
                     log::info!("web: marked {} file(s) {}", file_ids.len(), if watched { "watched" } else { "unwatched" });
                     self.apply_watched(library_id, &file_ids, watched);
                 }
+                flex_web::Change::Progress { library_id, file_id, progress } => {
+                    if let Some(state) = self.lib_mut(library_id)
+                        && let Some(file) = Arc::make_mut(&mut state.tree).file_mut(file_id)
+                    {
+                        file.progress = progress;
+                        state.version += 1;
+                    }
+                }
             }
         }
         if self.web.is_some() {
@@ -358,16 +365,11 @@ impl Shared {
     }
 
     pub fn watched_threshold(&self) -> f64 {
-        self.db
-            .setting(WATCHED_THRESHOLD_SETTING)
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(progress::DEFAULT_WATCHED_THRESHOLD)
+        progress::watched_threshold(&self.db)
     }
 
     pub fn set_watched_threshold(&mut self, threshold: f64) {
-        if let Err(e) = self.db.set_setting(WATCHED_THRESHOLD_SETTING, &threshold.to_string()) {
+        if let Err(e) = self.db.set_setting(progress::WATCHED_THRESHOLD_SETTING, &threshold.to_string()) {
             log::warn!("saving watched threshold: {e:#}");
         }
     }

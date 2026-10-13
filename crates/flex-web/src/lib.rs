@@ -7,6 +7,8 @@
 
 mod api;
 mod images;
+mod media;
+mod play;
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
@@ -40,6 +42,8 @@ pub struct Snapshot {
 #[derive(Clone, Debug)]
 pub enum Change {
     Watched { library_id: i64, file_ids: Vec<i64>, watched: bool },
+    /// Played in the browser.
+    Progress { library_id: i64, file_id: i64, progress: flex_core::progress::Progress },
 }
 
 pub struct Config {
@@ -60,11 +64,28 @@ pub(crate) struct State {
     shots_dir: PathBuf,
     on_change: Box<dyn Fn(Change) + Send + Sync>,
     agent: ureq::Agent,
+    pub(crate) tools: media::Tools,
 }
 
 impl State {
     pub(crate) fn snapshot(&self) -> Arc<Snapshot> {
         self.snapshot.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Changes files in the snapshot straight away (the app publishes its own copy once
+    /// it has caught up).
+    pub(crate) fn patch_files(&self, library_id: i64, ids: &[i64], f: impl Fn(&mut flex_core::MediaFile)) {
+        let mut current = self.snapshot.write().unwrap_or_else(|e| e.into_inner());
+        let mut updated = (**current).clone();
+        if let Some(l) = updated.libraries.iter_mut().find(|l| l.lib.id == library_id) {
+            let tree = Arc::make_mut(&mut l.tree);
+            for id in ids {
+                if let Some(file) = tree.file_mut(*id) {
+                    f(file);
+                }
+            }
+        }
+        *current = Arc::new(updated);
     }
 }
 
@@ -92,6 +113,7 @@ impl Server {
             shots_dir: config.shots_dir,
             on_change: Box::new(on_change),
             agent,
+            tools: media::Tools::find(),
         });
         let (shutdown, stopped) = tokio::sync::oneshot::channel::<()>();
         let runtime = tokio::runtime::Builder::new_multi_thread()
