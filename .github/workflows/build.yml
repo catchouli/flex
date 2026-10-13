@@ -1,6 +1,7 @@
 # Every push and pull request: build and test on Windows (the build is kept as an
-# artifact for two weeks). A vX.Y.Z tag also packages flex.exe with libmpv and ffmpeg
-# and publishes it as a GitHub release (see .github/scripts/package.sh).
+# artifact for two weeks). A vX.Y.Z tag also packages flex.exe with libmpv and ffmpeg,
+# as a zip and an installer, and publishes them as a GitHub release (see
+# .github/scripts/package.sh and flex.iss).
 name: Build
 
 on:
@@ -45,6 +46,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about
+      - name: Install Inno Setup
+        shell: bash
+        run: |
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [[ -f $ISCC ]] || choco install innosetup -y --no-progress
+          [[ -f $ISCC ]] || { echo "Inno Setup isn't at $ISCC"; exit 1; }
+          echo "ISCC=$ISCC" >>"$GITHUB_ENV"
       - name: Package
         shell: bash
         env:
@@ -55,5 +63,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+          gh release create "$GITHUB_REF_NAME" dist/*-setup.exe dist/*.zip \
             --title "Flex $GITHUB_REF_NAME" --notes-file dist/release-notes.md --generate-notes --verify-tag

@@ -5,14 +5,16 @@
 #   package.sh <tag, e.g. v0.2.0> <path to flex.exe> <output dir>
 #
 # Needs: bash, curl, sha256sum (or shasum), gh (GH_TOKEN set), 7-Zip (`7z`, or set
-# SEVENZIP), cargo-about. Runs on the GitHub Windows runner; also works on macOS for
-# testing.
+# SEVENZIP), cargo-about. Makes a zip, and also an installer (flex.iss) when ISCC is set
+# to Inno Setup's compiler. Runs on the GitHub Windows runner; also works on macOS for
+# testing (without the installer).
 set -euo pipefail
 
 TAG=$1
 EXE=$2
 OUT=$(mkdir -p "$3" && cd "$3" && pwd)
 SEVENZIP=${SEVENZIP:-7z}
+ISCC=${ISCC:-}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 
 # ffmpeg: a pinned gyan.dev build (GPLv3; includes NVENC and x264). Its versioned
@@ -90,7 +92,8 @@ https://github.com/catchouli/flex
 Run flex.exe. Libraries, watch history and settings are kept in %APPDATA%\\Flex, so
 updating doesn't lose anything.
 
-To update: quit Flex (with "Close to system tray" on, right-click the tray icon and
+To update: run the new release's installer, which stops and restarts Flex for you. Or,
+with the zip: quit Flex (with "Close to system tray" on, right-click the tray icon and
 choose Quit, or run "flex.exe --quit"), then replace these files with the new
 release's.
 
@@ -128,7 +131,9 @@ Rust crates compiled into flex.exe: licenses/rust-crates.txt
 EOF
 
 cat >"$OUT/release-notes.md" <<EOF
-Unzip **$NAME.zip** anywhere and run \`flex.exe\`. To update, quit Flex first (tray icon → Quit, or \`flex.exe --quit\`) and replace the files; your libraries and history are kept in \`%APPDATA%\\Flex\`.
+Run **$NAME-setup.exe** to install or update Flex: it installs for your account only (no admin prompt), and if Flex is running it's stopped first and started again afterwards. For unattended updates, run it with \`/SILENT\` or \`/VERYSILENT\`. Your libraries and history are kept in \`%APPDATA%\\Flex\`.
+
+Or unzip **$NAME.zip** anywhere and run \`flex.exe\`. To update that way, quit Flex first (tray icon → Quit, or \`flex.exe --quit\`) and replace the files.
 
 Bundled: FFmpeg $FFMPEG_VERSION ([gyan.dev](https://github.com/GyanD/codexffmpeg/releases/tag/$FFMPEG_VERSION)), libmpv [mpv@$MPV_COMMIT](https://github.com/mpv-player/mpv/tree/$MPV_COMMIT) ([$MPV_TAG](https://github.com/$MPV_BUILDS/releases/tag/$MPV_TAG)). Licenses and source links are in THIRD-PARTY-NOTICES.txt.
 EOF
@@ -136,4 +141,14 @@ EOF
 rm -f "$OUT/$NAME.zip"
 (cd "$WORK" && "$SEVENZIP" a -tzip -mx=7 -bso0 "$OUT/$NAME.zip" "$NAME")
 echo "Packaged $OUT/$NAME.zip"
+
+if [[ -n $ISCC ]]; then
+    winpath() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
+    # MSYS would otherwise take the /D options for paths and rewrite them.
+    MSYS2_ARG_CONV_EXCL='*' "$ISCC" /Q "/DAppVersion=$VERSION" "/DSourceDir=$(winpath "$DIR")" \
+        "/DOutputDir=$(winpath "$OUT")" "/DOutputName=$NAME-setup" "$(winpath "$ROOT/.github/scripts/flex.iss")"
+    echo "Packaged $OUT/$NAME-setup.exe"
+else
+    echo "ISCC isn't set: no installer"
+fi
 ls -la "$OUT"
