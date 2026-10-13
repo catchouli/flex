@@ -293,6 +293,7 @@ impl Shared {
             db_path: self.db_path.clone(),
             images_dir: flex_core::data_dir().join("images"),
             shots_dir: flex_core::data_dir().join("shots"),
+            cache_dir: flex_core::data_dir().join("web-cache"),
         };
         let (tx, ctx) = (self.web_tx.clone(), self.ctx.clone());
         let on_change = move |change| {

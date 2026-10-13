@@ -76,6 +76,9 @@ done
 
 # --- Flex -----------------------------------------------------------------------------
 
+cp "$ROOT/crates/flex-web/web/vendor/jassub/LICENSE.txt" "$DIR/licenses/jassub-LICENSE.txt"
+JASSUB_VERSION=$(sed -n 's/^JASSUB \([0-9.]*\).*/\1/p' "$ROOT/crates/flex-web/web/vendor/jassub/README.txt")
+
 cp "$EXE" "$DIR/flex.exe"
 cp "$LICENSE_FILE" "$DIR/LICENSE.txt"
 (cd "$ROOT" && cargo about generate --fail about.hbs) >"$DIR/licenses/rust-crates.txt"
@@ -114,6 +117,12 @@ libmpv (libmpv-2.dll), mpv commit $MPV_COMMIT
   Source: https://github.com/mpv-player/mpv/tree/$MPV_COMMIT
     (build scripts and the versions of its dependencies:
     https://github.com/$MPV_BUILDS)
+
+JASSUB $JASSUB_VERSION (built into flex.exe; draws subtitles in the web UI's player)
+  JASSUB itself: MIT (licenses/jassub-LICENSE.txt). Its WebAssembly contains libass
+  (ISC), FreeType (FTL or GPL 2), HarfBuzz (MIT), FriBidi (LGPL 2.1 or later) and their
+  dependencies; Liberation Sans (SIL Open Font License) is its default font.
+  Source, including those libraries: https://github.com/ThaUnknown/jassub/tree/v$JASSUB_VERSION
 
 Rust crates compiled into flex.exe: licenses/rust-crates.txt
 EOF

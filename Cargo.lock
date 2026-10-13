@@ -1060,6 +1060,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bytes",
  "flex-core",
  "futures-util",
  "log",

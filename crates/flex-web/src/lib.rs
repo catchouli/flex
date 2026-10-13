@@ -54,6 +54,8 @@ pub struct Config {
     /// The app's screenshots (`shots/<file id>-<size>/NN.jpg`), used for episodes
     /// without a TMDB still.
     pub shots_dir: PathBuf,
+    /// Where the web UI keeps extracted subtitles and fonts.
+    pub cache_dir: PathBuf,
 }
 
 pub(crate) struct State {
@@ -62,9 +64,10 @@ pub(crate) struct State {
     db: Mutex<flex_core::Db>,
     images_dir: PathBuf,
     shots_dir: PathBuf,
+    pub(crate) cache_dir: PathBuf,
     on_change: Box<dyn Fn(Change) + Send + Sync>,
     agent: ureq::Agent,
-    pub(crate) tools: media::Tools,
+    pub(crate) tools: Arc<media::Tools>,
 }
 
 impl State {
@@ -111,9 +114,10 @@ impl Server {
             db: Mutex::new(db),
             images_dir: config.images_dir,
             shots_dir: config.shots_dir,
+            cache_dir: config.cache_dir,
             on_change: Box::new(on_change),
             agent,
-            tools: media::Tools::find(),
+            tools: Arc::new(media::Tools::find()),
         });
         let (shutdown, stopped) = tokio::sync::oneshot::channel::<()>();
         let runtime = tokio::runtime::Builder::new_multi_thread()
