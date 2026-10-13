@@ -142,8 +142,11 @@ impl Home {
             let selected = self.items.get(self.cont).map(|i| i.file_id);
             self.items = sh.continue_watching(MAX_CONTINUE);
             self.items_key = Some(key);
-            // Keep the same item selected when the row reorders (e.g. once shows are sorted).
-            if let Some(i) = selected.and_then(|id| self.items.iter().position(|i| i.file_id == id)) {
+            // Keep the item you moved to selected when the row reorders; on the first card
+            // (where Home starts), stay on the first card, e.g. once shows are sorted.
+            if self.cont > 0
+                && let Some(i) = selected.and_then(|id| self.items.iter().position(|i| i.file_id == id))
+            {
                 self.cont = i;
             }
             // Something new to continue: that's most likely what you want next.
