@@ -14,7 +14,7 @@ use regex::Regex;
 
 use crate::library::MediaFile;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Parsed {
     pub title: Option<String>,
     pub year: Option<i32>,
@@ -237,26 +237,134 @@ pub fn looks_episodic(ids: &[i64], parsed: &HashMap<i64, Parsed>) -> bool {
 /// Parses a whole library: episodes for TV/anime; for movies, films one by one plus any
 /// folders that turn out to hold a series.
 pub fn parse_library(kind: crate::LibraryKind, files: &[MediaFile]) -> HashMap<i64, Parsed> {
+    by_folder(files).into_values().flat_map(|files| parse_folder(kind, &files)).collect()
+}
+
+/// Bump when parsing changes (including a hunch upgrade), so cached results are redone.
+pub const PARSER_VERSION: u32 = 1;
+
+/// A library's files by folder (relative path, "" for the root).
+pub fn by_folder(files: &[MediaFile]) -> HashMap<&str, Vec<MediaFile>> {
+    let mut by_dir: HashMap<&str, Vec<MediaFile>> = HashMap::new();
+    for f in files {
+        by_dir.entry(parent_of(&f.rel_path)).or_default().push(f.clone());
+    }
+    by_dir
+}
+
+/// Parses the files of one folder. Each folder is parsed independently, so results can be
+/// cached per folder (see [`folder_fingerprint`]).
+pub fn parse_folder(kind: crate::LibraryKind, files: &[MediaFile]) -> HashMap<i64, Parsed> {
     if kind.is_episodic() {
         return parse_episodes(files);
     }
-    let mut parsed = parse_movies(files);
-    let mut by_dir: HashMap<&str, Vec<&MediaFile>> = HashMap::new();
-    for f in files {
-        by_dir.entry(parent_of(&f.rel_path)).or_default().push(f);
+    let parsed = parse_movies(files);
+    // A series inside a movies library.
+    let ids: Vec<i64> = files.iter().map(|f| f.id).collect();
+    let quick: HashMap<i64, Parsed> = files
+        .iter()
+        .map(|f| (f.id, Parsed { episode: hunch::hunch(f.file_name()).episode(), ..Default::default() }))
+        .collect();
+    if looks_episodic(&ids, &quick) { parse_episodes(files) } else { parsed }
+}
+
+/// Identifies what a folder's parse depends on: the parser, the library kind and the
+/// folder's files. Only compared for equality, so the hash needn't be stable across builds.
+pub fn folder_fingerprint(kind: crate::LibraryKind, files: &[MediaFile]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut entries: Vec<(i64, &str)> = files.iter().map(|f| (f.id, f.rel_path.as_str())).collect();
+    entries.sort_unstable();
+    let mut h = std::hash::DefaultHasher::new();
+    (PARSER_VERSION, kind.as_str(), entries).hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// One library parses at a time, so organising several at startup can't take over the
+/// whole machine (the UI froze on the TV PC when they all used every core).
+static PARSING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Parses folders on half the cores at low priority, biggest first so one huge folder
+/// doesn't finish last.
+pub fn parse_folders(kind: crate::LibraryKind, folders: &[&[MediaFile]]) -> Vec<HashMap<i64, Parsed>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    if folders.is_empty() {
+        return Vec::new();
     }
-    for files in by_dir.into_values() {
-        let quick: HashMap<i64, Parsed> = files
-            .iter()
-            .map(|f| (f.id, Parsed { episode: hunch::hunch(f.file_name()).episode(), ..Default::default() }))
+    let _one_at_a_time = PARSING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut order: Vec<usize> = (0..folders.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(folders[i].len()));
+    let next = AtomicUsize::new(0);
+    let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+    let threads = (cores / 2).max(1).min(folders.len());
+    let mut out: Vec<HashMap<i64, Parsed>> = vec![HashMap::new(); folders.len()];
+    let done: Vec<(usize, HashMap<i64, Parsed>)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    lower_thread_priority();
+                    let mut mine = Vec::new();
+                    while let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        mine.push((i, parse_folder(kind, folders[i])));
+                    }
+                    mine
+                })
+            })
             .collect();
-        let ids: Vec<i64> = files.iter().map(|f| f.id).collect();
-        if looks_episodic(&ids, &quick) {
-            let owned: Vec<MediaFile> = files.into_iter().cloned().collect();
-            parsed.extend(parse_episodes(&owned));
+        workers.into_iter().flat_map(|w| w.join().expect("parser thread panicked")).collect()
+    });
+    for (i, parsed) in done {
+        out[i] = parsed;
+    }
+    out
+}
+
+/// Lets the UI thread come first while parsing.
+fn lower_thread_priority() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    }
+}
+
+/// [`parse_library`], reusing the parses of folders that haven't changed since last time
+/// (stored in the database) and parsing the rest in parallel.
+pub fn parse_library_cached(
+    db: &mut crate::Db,
+    library_id: i64,
+    kind: crate::LibraryKind,
+    files: &[MediaFile],
+) -> anyhow::Result<HashMap<i64, Parsed>> {
+    let mut cache = db.parse_cache(library_id)?;
+    let mut out = HashMap::with_capacity(files.len());
+    let mut stale: Vec<(&str, String, Vec<MediaFile>)> = Vec::new();
+    let folders = by_folder(files);
+    for (dir, files) in &folders {
+        let fingerprint = folder_fingerprint(kind, files);
+        let cached = cache
+            .remove(*dir)
+            .filter(|(f, _)| *f == fingerprint)
+            .and_then(|(_, data)| serde_json::from_str::<Vec<(i64, Parsed)>>(&data).ok());
+        match cached {
+            Some(parsed) => out.extend(parsed),
+            None => stale.push((dir, fingerprint, files.clone())),
         }
     }
-    parsed
+    let slices: Vec<&[MediaFile]> = stale.iter().map(|(_, _, f)| f.as_slice()).collect();
+    let mut fresh = Vec::with_capacity(stale.len());
+    for ((dir, fingerprint, _), parsed) in stale.iter().zip(parse_folders(kind, &slices)) {
+        let mut rows: Vec<(i64, Parsed)> = parsed.into_iter().collect();
+        rows.sort_unstable_by_key(|(id, _)| *id);
+        fresh.push((dir.to_string(), fingerprint.clone(), serde_json::to_string(&rows)?));
+        out.extend(rows);
+    }
+    // Whatever is left in `cache` is for folders that are gone.
+    let gone: Vec<String> = cache.into_keys().collect();
+    if !fresh.is_empty() || !gone.is_empty() {
+        db.save_parse_cache(library_id, &fresh, &gone)?;
+    }
+    log::info!("library {library_id}: parsed {} of {} folders ({} cached)", fresh.len(), folders.len(), folders.len() - fresh.len());
+    Ok(out)
 }
 
 /// Lower-cased letters and digits only, for deciding whether two titles are the same show.
@@ -289,6 +397,30 @@ mod tests {
         let fs = files(paths);
         let parsed = parse_episodes(&fs);
         fs.iter().map(|f| (parsed[&f.id].season, parsed[&f.id].episode)).collect()
+    }
+
+    #[test]
+    fn cached_parse_matches_and_redoes_only_changed_folders() {
+        use crate::LibraryKind::Anime;
+        let mut db = crate::Db::open_in_memory().unwrap();
+        let lib = db.add_library("anime", std::path::Path::new("/anime"), Anime).unwrap();
+        let mut fs = files(&["A/Show A - 01.mkv", "A/Show A - 02.mkv", "B/Show B - 01.mkv", "C/Show C - 01.mkv"]);
+        let first = parse_library_cached(&mut db, lib, Anime, &fs).unwrap();
+        assert_eq!(first, parse_library(Anime, &fs));
+        assert_eq!(db.parse_cache(lib).unwrap().len(), 3);
+
+        // Poison B's cached entry: it must be reused as is while B is unchanged.
+        let poisoned = serde_json::to_string(&[(2, Parsed { title: Some("cached".into()), ..Default::default() })]).unwrap();
+        let fp = folder_fingerprint(Anime, &fs[2..3]);
+        db.save_parse_cache(lib, &[("B".into(), fp, poisoned)], &[]).unwrap();
+        // Rename a file in A and drop folder C: A is parsed again, C is forgotten.
+        fs[1].rel_path = "A/Show A - 03.mkv".into();
+        fs.pop();
+        let second = parse_library_cached(&mut db, lib, Anime, &fs).unwrap();
+        assert_eq!(second[&2].title.as_deref(), Some("cached"));
+        assert_eq!(second[&1].episode, Some(3));
+        assert!(!second.contains_key(&3));
+        assert_eq!(db.parse_cache(lib).unwrap().len(), 2);
     }
 
     #[test]

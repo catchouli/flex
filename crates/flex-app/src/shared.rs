@@ -379,7 +379,8 @@ impl Shared {
         }
     }
 
-    /// Sorts a library into shows on a background thread (parsing ~10k names takes a second).
+    /// Sorts a library into shows on a background thread. Parsed names are cached per
+    /// folder, so only new or changed folders are parsed (13k anime names took ~8s).
     pub fn organise(&mut self, id: i64) {
         let Some(state) = self.lib_mut(id) else { return };
         state.organising = true;
@@ -390,13 +391,14 @@ impl Shared {
             let result = (|| -> Result<Organised> {
                 let started = std::time::Instant::now();
                 let tree = Tree::new(files);
-                let parsed = flex_core::parse::parse_library(kind, tree.files());
-                let groups = catalog::derive_groups(kind, &tree, &parsed);
                 let mut db = Db::open(&db_path)?;
+                let parsed = flex_core::parse::parse_library_cached(&mut db, id, kind, tree.files())?;
+                let parse_time = started.elapsed();
+                let groups = catalog::derive_groups(kind, &tree, &parsed);
                 db.sync_groups(id, &groups)?;
                 let catalog = Catalog::build(&tree, &parsed, &groups, db.shows(id)?, &db.group_matches(id)?);
                 log::info!(
-                    "organised library {id}: {} groups into {} shows in {:?}",
+                    "organised library {id}: {} groups into {} shows in {:?} (parsing {parse_time:?})",
                     groups.len(),
                     catalog.shows.len(),
                     started.elapsed()

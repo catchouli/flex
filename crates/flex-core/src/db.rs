@@ -136,6 +136,14 @@ const MIGRATIONS: &[&str] = &[
         fetched_at INTEGER NOT NULL,
         data       TEXT NOT NULL -- JSON metadata::Person
     );",
+    // 9: parsed file names per folder, so organising at startup needn't parse them again
+    "CREATE TABLE parse_cache (
+        library_id  INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        dir         TEXT NOT NULL,
+        fingerprint TEXT NOT NULL, -- parse::folder_fingerprint
+        data        TEXT NOT NULL, -- JSON [[file id, parse::Parsed], ...]
+        PRIMARY KEY (library_id, dir)
+    );",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -691,6 +699,34 @@ impl Db {
 
     pub fn remove_library(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM libraries WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Cached folder parses for a library: dir -> (fingerprint, JSON data).
+    pub fn parse_cache(&self, library_id: i64) -> Result<HashMap<String, (String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT dir, fingerprint, data FROM parse_cache WHERE library_id = ?1")?;
+        let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Stores new folder parses (dir, fingerprint, JSON data) and forgets folders that
+    /// no longer exist.
+    pub fn save_parse_cache(&mut self, library_id: i64, fresh: &[(String, String, String)], gone: &[String]) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        {
+            let mut upsert = tx.prepare(
+                "INSERT INTO parse_cache (library_id, dir, fingerprint, data) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(library_id, dir) DO UPDATE SET fingerprint = ?3, data = ?4",
+            )?;
+            for (dir, fingerprint, data) in fresh {
+                upsert.execute(params![library_id, dir, fingerprint, data])?;
+            }
+            let mut delete = tx.prepare("DELETE FROM parse_cache WHERE library_id = ?1 AND dir = ?2")?;
+            for dir in gone {
+                delete.execute(params![library_id, dir])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
