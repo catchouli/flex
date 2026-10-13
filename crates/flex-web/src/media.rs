@@ -18,6 +18,8 @@ pub struct Tools {
     locks: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
     /// Subtitle extractions under way, by cache file.
     extracting: Mutex<HashMap<PathBuf, Finished>>,
+    /// Whether ffmpeg has libass (the `subtitles` filter), to burn in text subtitles.
+    text_burn: OnceLock<bool>,
 }
 
 fn find_tool(name: &str) -> Option<PathBuf> {
@@ -47,6 +49,7 @@ impl Tools {
             encoder: OnceLock::new(),
             locks: Mutex::default(),
             extracting: Mutex::default(),
+            text_burn: OnceLock::new(),
         };
         match (&tools.ffmpeg, &tools.ffprobe) {
             (Some(f), Some(p)) => log::info!("web playback: {} and {}", f.display(), p.display()),
@@ -75,6 +78,24 @@ impl Tools {
         let info = Arc::new(MediaInfo::from(raw));
         self.probes.lock().unwrap_or_else(|e| e.into_inner()).insert(key, info.clone());
         Ok(info)
+    }
+
+    /// Whether this ffmpeg can burn in text subtitles (it has libass; Homebrew's
+    /// doesn't, the bundled Windows build does).
+    pub async fn can_burn_text(&self) -> bool {
+        if let Some(can) = self.text_burn.get() {
+            return *can;
+        }
+        let can = match &self.ffmpeg {
+            Some(ffmpeg) => command(ffmpeg)
+                .args(["-hide_banner", "-filters"])
+                .stdin(Stdio::null())
+                .output()
+                .await
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("subtitles"))),
+            None => false,
+        };
+        *self.text_burn.get_or_init(|| can)
     }
 
     /// The H.264 encoder to transcode with: a GPU one if it works here, else x264.
@@ -321,9 +342,21 @@ pub struct StreamRequest<'a> {
     pub audio: Option<usize>,
     pub video: VideoMode,
     pub audio_mode: AudioMode,
-    /// A picture subtitle track to burn in (needs `VideoMode::H264`).
+    /// A subtitle track to burn in (needs `VideoMode::H264`). Text tracks need
+    /// `text_burn` (their extracted file and fonts); picture tracks are overlaid as is.
     pub burn: Option<usize>,
+    pub text_burn: Option<TextBurn>,
+    /// Scale down to at most this many lines (needs `VideoMode::H264`).
+    pub height: Option<u32>,
     pub info: &'a MediaInfo,
+}
+
+/// What ffmpeg needs to draw a text subtitle track: paths relative to `cwd` (keeps
+/// drive letters out of the filter, where `:` needs escaping).
+pub struct TextBurn {
+    pub cwd: PathBuf,
+    pub ass: String,
+    pub fonts_dir: String,
 }
 
 /// Starts ffmpeg writing fragmented MP4 to its stdout. The process is killed when the
@@ -336,13 +369,29 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
         cmd.args(["-ss", &format!("{:.3}", req.start)]);
     }
     cmd.arg("-i").arg(req.path);
-    // The main picture (not cover art), with burned-in subtitles if asked for, and the
-    // chosen audio track.
-    let burn = req.burn.filter(|s| req.info.subtitles.get(*s).is_some_and(|s| s.image) && req.video == VideoMode::H264);
-    match burn {
-        Some(s) => cmd.args(["-filter_complex", &format!("[0:V:0][0:s:{s}]overlay=eof_action=pass,format=yuv420p[v]"), "-map", "[v]"]),
-        None => cmd.args(["-map", "0:V:0?"]),
-    };
+    // The main picture (not cover art), converted if asked: picture subtitles overlaid,
+    // text subtitles drawn by libass, scaled down; then the chosen audio track.
+    if req.video == VideoMode::H264 {
+        let picture_burn = req.burn.filter(|s| req.info.subtitles.get(*s).is_some_and(|s| s.image));
+        let mut graph = match picture_burn {
+            Some(s) => format!("[0:V:0][0:s:{s}]overlay=eof_action=pass"),
+            None => "[0:V:0]null".to_owned(),
+        };
+        if let Some(t) = req.text_burn.as_ref().filter(|_| picture_burn.is_none()) {
+            // Frames start at 0 after seeking; the subtitles use the file's own times.
+            let shift = format!("{:.3}", req.start);
+            graph.push_str(&format!(",setpts=PTS+{shift}/TB,subtitles=f={}:fontsdir={},setpts=PTS-{shift}/TB", t.ass, t.fonts_dir));
+            cmd.current_dir(&t.cwd);
+        }
+        let source_height = req.info.video.as_ref().map_or(0, |v| v.height);
+        if let Some(h) = req.height.filter(|h| *h < source_height) {
+            graph.push_str(&format!(",scale=-2:{h}"));
+        }
+        graph.push_str(",format=yuv420p[v]");
+        cmd.args(["-filter_complex", &graph, "-map", "[v]"]);
+    } else {
+        cmd.args(["-map", "0:V:0?"]);
+    }
     if let Some(a) = req.audio.filter(|a| *a < req.info.audio.len()) {
         cmd.args(["-map", &format!("0:a:{a}")]);
     } else if !req.info.audio.is_empty() {
@@ -358,11 +407,20 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
         }
         VideoMode::H264 => {
             let encoder = tools.encoder().await.context("no H.264 encoder works with this ffmpeg")?;
-            if burn.is_none() {
-                cmd.args(["-vf", "format=yuv420p"]);
-            }
             cmd.args(["-c:v", encoder.name()]);
             cmd.args(encoder.quality_args());
+            // Smaller pictures need less: cap the bitrate (later options win).
+            let cap = match req.height {
+                Some(h) if h <= 480 => Some(("2500k", "5M")),
+                Some(h) if h <= 720 => Some(("5M", "10M")),
+                _ => None,
+            };
+            if let Some((rate, buffer)) = cap {
+                if encoder == Encoder::VideoToolbox {
+                    cmd.args(["-b:v", rate]);
+                }
+                cmd.args(["-maxrate", rate, "-bufsize", buffer]);
+            }
             // A keyframe every 2s: playback starts quickly and fragments stay small.
             cmd.args(["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)", "-profile:v", "high"]);
         }
@@ -390,7 +448,12 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
             use tokio::io::AsyncBufReadExt;
             let mut lines = tokio::io::BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                log::warn!("ffmpeg: {line}");
+                // "Broken pipe": the browser stopped reading (seeked or left), as expected.
+                if line.contains("Broken pipe") || line.contains("Error writing trailer") {
+                    log::debug!("ffmpeg: {line}");
+                } else {
+                    log::warn!("ffmpeg: {line}");
+                }
             }
         });
     }
@@ -469,6 +532,37 @@ impl Tools {
             .kill_on_drop(true)
             .spawn()
             .context("starting ffmpeg")
+    }
+
+    /// The track's extracted ASS file and a folder with all the file's attached fonts,
+    /// for burning the subtitles in; None until the track is fully extracted.
+    pub async fn text_burn(self: &Arc<Self>, cache_dir: &Path, key: (i64, u64), path: &Path, index: usize) -> Result<Option<TextBurn>> {
+        if !self.can_burn_text().await || !self.subtitles(cache_dir, key, path, index)?.is_complete() {
+            return Ok(None);
+        }
+        let fonts_dir = format!("fonts/{}-{}/all", key.0, key.1);
+        let dir = cache_dir.join(&fonts_dir);
+        let lock = self.lock(&dir);
+        let _guard = lock.lock().await;
+        if !dir.join(".done").exists() {
+            let ffmpeg = self.ffmpeg.as_ref().context("ffmpeg isn't installed")?;
+            tokio::fs::create_dir_all(&dir).await?;
+            // Dumps every attachment under its own name (ffmpeg complains that there's no
+            // output, but does it).
+            let _ = command(ffmpeg)
+                .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-dump_attachment:t", "", "-i"])
+                .arg(path)
+                .current_dir(&dir)
+                .stdin(Stdio::null())
+                .output()
+                .await;
+            tokio::fs::write(dir.join(".done"), b"").await?;
+        }
+        Ok(Some(TextBurn {
+            cwd: cache_dir.to_path_buf(),
+            ass: format!("subs/{}-{}-{index}.ass", key.0, key.1),
+            fonts_dir,
+        }))
     }
 
     /// A font attached to the file, cached in `cache_dir`.

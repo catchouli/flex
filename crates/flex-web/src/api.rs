@@ -33,6 +33,7 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/media/{library}/{file}", get(crate::play::file))
         .route("/stream/{library}/{file}", get(crate::play::stream))
         .route("/api/start/{library}/{file}", get(crate::play::start))
+        .route("/api/subs-ready/{library}/{file}/{index}", get(crate::play::subs_ready))
         .route("/subs/{library}/{file}/{index}", get(crate::play::subtitles))
         .route("/fonts/fallback", get(crate::play::fallback_font))
         .route("/fonts/{library}/{file}/{index}", get(crate::play::font))

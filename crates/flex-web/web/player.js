@@ -32,24 +32,50 @@ const Player = (() => {
   }
   const AUDIO_CODECS = { aac: "mp4a.40.2", mp3: "mp4a.69", opus: "opus", flac: "flac", ac3: "ac-3", eac3: "ec-3" };
 
+  // ---- Options (per device, kept in this browser) ---------------------------------------
+
+  const QUALITIES = [["original", "Original"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"]];
+  const OPTIONS_KEY = "flex.player";
+
+  function loadOptions() {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) || "{}");
+    } catch (_) {}
+    return { quality: "original", convert: false, burn: false, ...saved };
+  }
+
+  function saveOptions(o) {
+    try {
+      localStorage.setItem(OPTIONS_KEY, JSON.stringify(o));
+    } catch (_) {}
+  }
+
   /**
-   * How to play: {direct} for the file itself, else what the stream does to video/audio
-   * (and which picture subtitles it burns in, which means converting the video).
+   * How to play: {direct} for the file itself, else what the stream does to the video
+   * and audio, which subtitles it burns in and what size it scales to. `s` is the
+   * player's state: {audio, subtitle, forceConvert, options, textBurnReady}.
    */
-  function plan(media, audioIndex, forceConvert, subtitle) {
-    const burn = subtitle !== null && media.subtitles[subtitle]?.image ? subtitle : null;
+  function plan(media, s) {
     const v = media.video;
-    const a = media.audio[audioIndex];
+    const sub = s.subtitle !== null ? media.subtitles[s.subtitle] : null;
+    // Picture subtitles are always burned in; text ones when asked and extracted.
+    const burn = sub && (sub.image || (s.options.burn && s.textBurnReady)) ? s.subtitle : null;
+    const height = s.options.quality === "original" ? null : Number(s.options.quality);
+    const scale = height !== null && v && v.height > height ? height : null;
+    const convert = s.forceConvert || s.options.convert;
+    const a = media.audio[s.audio];
     const vc = v && videoCodec(v);
-    const videoOk = !forceConvert && (!v || (vc && supports(`video/mp4; codecs="${vc}"`)));
+    const videoOk = !convert && scale === null && burn === null && (!v || (vc && supports(`video/mp4; codecs="${vc}"`)));
     const ac = a && AUDIO_CODECS[a.codec];
-    const audioOk = !forceConvert && (!a || (ac && supports(`audio/mp4; codecs="${ac}"`)));
+    const audioOk = !convert && (!a || (ac && supports(`audio/mp4; codecs="${ac}"`)));
     const mp4 = /(^|,)(mp4|mov)(,|$)/.test(media.container);
     return {
-      direct: mp4 && videoOk && audioOk && audioIndex === 0 && burn === null,
-      video: videoOk && burn === null ? "copy" : "h264",
+      direct: mp4 && videoOk && audioOk && s.audio === 0,
+      video: videoOk ? "copy" : "h264",
       audio: audioOk ? "copy" : "aac",
       burn,
+      height: scale,
     };
   }
 
@@ -98,7 +124,12 @@ const Player = (() => {
     let forceConvert = false;
     let subtitle = defaultSubtitle(media);
     let subs = null; // the text subtitles being drawn
-    let mode = plan(media, audio, forceConvert, subtitle);
+    const options = loadOptions();
+    let textBurnReady = false; // the chosen text track is extracted and ffmpeg can burn it
+    let burnPoll = null;
+    let optionsTimer;
+    const replan = () => plan(media, { audio, subtitle, forceConvert, options, textBurnReady });
+    let mode = replan();
     let loads = 0; // so a slow load doesn't override a newer one
     let offset = 0; // where the current stream started (streams begin at 0)
     let pendingSeek = null; // target while Left/Right are being pressed
@@ -127,6 +158,7 @@ const Player = (() => {
         h("option", { value: "", selected: subtitle === null }, "Subtitles off"),
         media.subtitles.map((t, i) => h("option", { value: i, selected: i === subtitle }, subtitleLabel(t, i))))
       : null;
+    const optionsButton = h("button", { class: "pbtn", "aria-label": "Playback options" }, "⚙");
     const fullButton = h("button", { class: "pbtn", "aria-label": "Full screen" }, "⛶");
     const message = h("div", { class: "pmsg", hidden: true });
     const overlay = h("div", { class: "poverlay", hidden: true });
@@ -136,7 +168,7 @@ const Player = (() => {
         h("div", { class: "ptitle" }, h("b", {}, info.title), info.episode ? h("span", {}, info.episode) : null)),
       h("div", { class: "pbottom" },
         range,
-        h("div", { class: "prow" }, playButton, time, h("span", { class: "spacer" }), subtitleSelect, audioSelect, fullButton)));
+        h("div", { class: "prow" }, playButton, time, h("span", { class: "spacer" }), subtitleSelect, audioSelect, optionsButton, fullButton)));
     // Focusable itself, so remote keys reach the player once a prompt closes.
     const root = h("div", { class: "player", tabindex: -1 }, video, message, controls, overlay);
 
@@ -164,12 +196,108 @@ const Player = (() => {
       subs?.destroy();
       subs = null;
       const t = subtitle !== null ? media.subtitles[subtitle] : null;
-      if (!t || t.image) return;
+      // Burned into the picture by Flex: nothing to draw here.
+      if (!t || t.image || mode.burn === subtitle) return;
       subs = new Subtitles.Track({
         video, library, file, index: t.index, fonts: info.fonts, cjkFont: info.cjk_font,
         timeOffset: mode.direct ? 0 : offset,
       });
       subs.need(position());
+    }
+
+    const sameStream = (a, b) => a.direct === b.direct && a.video === b.video && a.audio === b.audio && a.burn === b.burn && a.height === b.height;
+
+    /** Applies a new plan, restarting the stream where playback is if it changed. */
+    function restartIfChanged() {
+      const next = replan();
+      const changed = !sameStream(next, mode);
+      mode = next;
+      setupSubtitles();
+      if (changed && started) {
+        const at = position();
+        video.removeAttribute("src");
+        load(at);
+      }
+    }
+
+    /**
+     * "Burn in subtitles" with a text track: Flex can only burn it in once it's fully
+     * extracted (~30s the first time), so the browser draws it until then, then the
+     * stream restarts with it burned in.
+     */
+    async function checkTextBurn() {
+      clearInterval(burnPoll);
+      burnPoll = null;
+      textBurnReady = false;
+      const t = subtitle !== null ? media.subtitles[subtitle] : null;
+      if (!options.burn || !t || t.image) return;
+      const ready = async () => {
+        let r;
+        try {
+          r = await api(`/api/subs-ready/${library}/${file}/${t.index}`);
+        } catch (_) {
+          return false;
+        }
+        if (destroyed || subtitle !== t.index || !options.burn) return true;
+        if (!r.burnable) return true; // this ffmpeg can't; keep drawing them here
+        if (!r.complete) return false;
+        textBurnReady = true;
+        restartIfChanged();
+        return true;
+      };
+      if (!(await ready())) burnPoll = setInterval(async () => { if (await ready()) clearInterval(burnPoll); }, 5000);
+    }
+
+    /** Playback options for this device: quality, always convert, burn in subtitles. */
+    function showOptions() {
+      const quality = h("button", { class: "btn" });
+      const convert = h("button", { class: "btn" });
+      const burn = h("button", { class: "btn" });
+      const label = () => {
+        quality.textContent = `Quality: ${QUALITIES.find(([k]) => k === options.quality)?.[1] || "Original"}`;
+        convert.textContent = `Always convert: ${options.convert ? "on" : "off"}`;
+        burn.textContent = `Burn in subtitles: ${options.burn ? "on" : "off"}`;
+      };
+      const changed = () => {
+        saveOptions(options);
+        label();
+        // Stepping through the choices shouldn't restart the stream at each one.
+        clearTimeout(optionsTimer);
+        optionsTimer = setTimeout(restartIfChanged, 800);
+      };
+      quality.addEventListener("click", () => {
+        const i = QUALITIES.findIndex(([k]) => k === options.quality);
+        options.quality = QUALITIES[(i + 1) % QUALITIES.length][0];
+        changed();
+      });
+      convert.addEventListener("click", () => {
+        options.convert = !options.convert;
+        changed();
+      });
+      burn.addEventListener("click", () => {
+        options.burn = !options.burn;
+        textBurnReady = false;
+        changed();
+        checkTextBurn();
+      });
+      label();
+      overlay.replaceChildren(
+        h("div", { class: "pbox options" },
+          h("h2", {}, "Playback on this device"),
+          h("p", { class: "dim" }, "For slow devices or Wi-Fi: lower quality or always converting (to H.264) makes the video easier to play; burning in subtitles saves drawing them here."),
+          h("div", { class: "optlist" }, quality, convert, burn),
+          h("div", { class: "actions" }, h("button", { class: "btn primary", onclick: hideOptions }, "Done"))));
+      overlay.dataset.kind = "options";
+      overlay.hidden = false;
+      root.classList.remove("idle");
+      quality.focus();
+    }
+
+    function hideOptions() {
+      overlay.hidden = true;
+      delete overlay.dataset.kind;
+      root.focus({ preventScroll: true });
+      showControls();
     }
 
     /** Starts playing from `at` seconds (a new stream unless playing the file directly). */
@@ -203,7 +331,8 @@ const Player = (() => {
         subs?.need(at);
         const from = mode.video === "copy" && start > 0 ? start + 0.01 : start;
         const burn = mode.burn !== null ? `&burn=${mode.burn}` : "";
-        video.src = `/stream/${library}/${file}?start=${from.toFixed(3)}&video=${mode.video}&audiomode=${mode.audio}&audio=${audio}${burn}`;
+        const height = mode.height !== null ? `&height=${mode.height}` : "";
+        video.src = `/stream/${library}/${file}?start=${from.toFixed(3)}&video=${mode.video}&audiomode=${mode.audio}&audio=${audio}${burn}${height}`;
       }
       video.play().catch(() => {
         showMessage("");
@@ -237,7 +366,7 @@ const Player = (() => {
       const at = position();
       audio = i;
       if (audioSelect) audioSelect.value = String(i);
-      mode = plan(media, audio, forceConvert, subtitle);
+      mode = replan();
       video.removeAttribute("src");
       load(at);
       toast(`Audio: ${trackLabel(media.audio[i], i)}`);
@@ -248,15 +377,11 @@ const Player = (() => {
       const at = position();
       subtitle = i;
       if (subtitleSelect) subtitleSelect.value = i === null ? "" : String(i);
-      const next = plan(media, audio, forceConvert, subtitle);
-      // Burning in (or no longer burning in) picture subtitles needs a new stream.
-      const restart = next.direct !== mode.direct || next.video !== mode.video || next.burn !== mode.burn;
-      mode = next;
-      setupSubtitles();
-      if (restart) {
-        video.removeAttribute("src");
-        load(at);
-      }
+      textBurnReady = false;
+      clearInterval(burnPoll);
+      // Burning subtitles in (or no longer) needs a new stream.
+      restartIfChanged();
+      checkTextBurn();
       toast(i === null ? "Subtitles off" : `Subtitles: ${subtitleLabel(media.subtitles[i], i)}`);
     }
 
@@ -279,6 +404,7 @@ const Player = (() => {
 
     function upNext() {
       overlay.replaceChildren();
+      delete overlay.dataset.kind;
       if (!info.next) {
         history.back();
         return;
@@ -311,7 +437,7 @@ const Player = (() => {
         // The browser couldn't decode it after all: convert everything instead.
         const at = position();
         forceConvert = true;
-        mode = plan(media, audio, true, subtitle);
+        mode = replan();
         video.removeAttribute("src");
         load(at);
       } else {
@@ -320,6 +446,7 @@ const Player = (() => {
     });
     playButton.addEventListener("click", togglePause);
     fullButton.addEventListener("click", toggleFullscreen);
+    optionsButton.addEventListener("click", showOptions);
     range.addEventListener("change", () => {
       const target = Number(range.value);
       if (mode.direct) video.currentTime = target;
@@ -352,6 +479,7 @@ const Player = (() => {
         pendingSeek = at;
         setupSubtitles();
         load(at);
+        checkTextBurn();
       };
       const resume = h("button", { class: "btn primary", onclick: () => start(info.position) }, `Resume from ${clock(info.position)}`);
       overlay.append(
@@ -365,6 +493,7 @@ const Player = (() => {
       pendingSeek = startAt || 0;
       setupSubtitles();
       load(startAt || 0);
+      checkTextBurn();
     }
     updateTime();
 
@@ -374,7 +503,14 @@ const Player = (() => {
       content: [root],
       /** Keys while the player is showing; true if handled. */
       onKey(e) {
-        if (!overlay.hidden) return false; // arrow keys move between the overlay's buttons
+        if (!overlay.hidden) {
+          // Back closes the options rather than leaving the player.
+          if (overlay.dataset.kind === "options" && (e.key === "Escape" || e.key === "Backspace")) {
+            hideOptions();
+            return true;
+          }
+          return false; // arrow keys move between the overlay's buttons
+        }
         const onControl = document.activeElement && controls.contains(document.activeElement) && document.activeElement !== playButton;
         switch (e.key) {
           case "Enter":
@@ -412,6 +548,8 @@ const Player = (() => {
         destroyed = true;
         save(true);
         subs?.destroy();
+        clearInterval(burnPoll);
+        clearTimeout(optionsTimer);
         clearInterval(saveTimer);
         clearTimeout(seekTimer);
         clearTimeout(hideTimer);

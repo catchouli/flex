@@ -143,8 +143,10 @@ pub struct StreamQuery {
     video: VideoMode,
     #[serde(rename = "audiomode")]
     audio_mode: AudioMode,
-    /// A picture subtitle track to burn in.
+    /// A subtitle track to burn in (text tracks once extracted; see `subs_ready`).
     burn: Option<usize>,
+    /// Scale down to this many lines.
+    height: Option<u32>,
 }
 
 /// `/stream/{library}/{file}?start=…&audio=…&video=copy|h264&audiomode=copy|aac`: the file
@@ -162,6 +164,16 @@ pub async fn stream(
         Ok(info) => info,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
     };
+    let text_burn = match q.burn.filter(|b| info.subtitles.get(*b).is_some_and(|s| !s.image)) {
+        Some(index) => match state.tools.text_burn(&state.cache_dir, (file.id, file.size), &path, index).await {
+            Ok(burn) => burn,
+            Err(e) => {
+                log::warn!("web: preparing subtitles to burn in: {e:#}");
+                None
+            }
+        },
+        None => None,
+    };
     let req = StreamRequest {
         path: &path,
         start: q.start.max(0.0),
@@ -169,6 +181,8 @@ pub async fn stream(
         video: q.video,
         audio_mode: q.audio_mode,
         burn: q.burn,
+        text_burn,
+        height: q.height,
         info: &info,
     };
     let mut child = match crate::media::start_stream(&state.tools, req).await {
@@ -350,4 +364,19 @@ pub async fn jassub(Path(name): Path<String>) -> Response {
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "public, max-age=86400")], body).into_response()
+}
+
+#[derive(Serialize)]
+pub struct SubsReady {
+    complete: bool,
+    /// Whether text subtitles can be burned in at all (ffmpeg has libass).
+    burnable: bool,
+}
+
+/// `/api/subs-ready/{library}/{file}/{index}`: whether a text track is fully extracted
+/// (and so can be burned in). Starts extracting it if it isn't yet.
+pub async fn subs_ready(AxState(state): AxState<Arc<State>>, Path((library_id, file_id, index)): Path<(i64, i64, usize)>) -> Result<Json<SubsReady>, StatusCode> {
+    let (_, file, path) = locate(&state, library_id, file_id).ok_or(StatusCode::NOT_FOUND)?;
+    let growing = state.tools.subtitles(&state.cache_dir, (file.id, file.size), &path, index).map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(SubsReady { complete: growing.is_complete(), burnable: state.tools.can_burn_text().await }))
 }
