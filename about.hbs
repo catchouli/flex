@@ -1,0 +1,18 @@
+Licenses of the Rust crates compiled into flex.exe
+==================================================
+
+{{#each overview}}
+  - {{{name}}} ({{count}} crates)
+{{/each}}
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}}
+Used by:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
