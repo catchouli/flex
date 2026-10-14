@@ -1,8 +1,8 @@
-//! A music library: a grid of albums, each album's page (tracks and artists), the list of
-//! artists, and each artist's page (their albums and the ones they're on).
+//! A music library: a grid of albums (or artists), each album's page (tracks and
+//! artists), and each artist's page (their albums and the ones they're on).
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
-use flex_core::music::{Album, MusicCatalog};
+use flex_core::music::{Album, Artist, MusicCatalog};
 use flex_core::natural::natural_cmp;
 
 use super::library::LibraryView;
@@ -10,7 +10,7 @@ use super::{Nav, Screen};
 use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
 use crate::music_player::MusicPlayer;
-use crate::shared::{Shared, thousands};
+use crate::shared::{LibState, Shared};
 use crate::theme;
 use crate::widgets::{self, GridSpec, GridState, Icon, ListInput, ListState, Row};
 
@@ -76,6 +76,70 @@ fn paint_album(painter: &Painter, sh: &mut Shared, rect: Rect, album: &Album, su
     clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
 }
 
+/// When any of the album's tracks was last played (0 = never).
+fn album_played(state: &LibState, album: &Album) -> i64 {
+    album.tracks.iter().filter_map(|t| state.tree.file(t.file_id)?.progress.last_played).max().unwrap_or(0)
+}
+
+/// The newest of an artist's albums (their own first) that has a cover.
+fn artist_cover(music: &MusicCatalog, artist: &Artist) -> Option<String> {
+    artist.albums.iter().chain(&artist.appears_on).find_map(|&i| cover_path(&music.albums[i]))
+}
+
+/// An artist card: one of their covers (or their name on a tile), then name and summary.
+fn paint_artist(painter: &Painter, sh: &mut Shared, rect: Rect, music: &MusicCatalog, artist: &Artist, focused: bool, style: &egui::Style) {
+    let tile = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width()));
+    match artist_cover(music, artist).and_then(|c| sh.images.get(&c, Size::Poster)) {
+        Some(t) => paint_cover(painter, tile, &t),
+        None => {
+            painter.rect_filled(tile, CornerRadius::same(8), theme::ROW);
+            let galley = painter.layout(artist.name.clone(), TextStyle::Body.resolve(style), theme::DIM, tile.width() - 30.0);
+            painter.galley(tile.center() - galley.size() / 2.0, galley, theme::DIM);
+        }
+    }
+    if focused {
+        painter.rect_stroke(tile, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
+    }
+    let text = Rect::from_min_max(pos2(rect.left(), tile.bottom() + 8.0), rect.max);
+    let clip = painter.with_clip_rect(text);
+    let color = if focused { theme::FOCUS } else { theme::TEXT };
+    clip.text(text.left_top(), Align2::LEFT_TOP, &artist.name, TextStyle::Small.resolve(style), color);
+    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, artist_summary(music, artist), TextStyle::Small.resolve(style), theme::DIM);
+}
+
+/// A row of toolbar buttons; hovering one focuses it (`toolbar`). Returns whether the
+/// mouse is on one.
+fn draw_toolbar(ui: &Ui, rect: Rect, labels: &[String], toolbar: &mut Option<usize>, focused: bool) -> bool {
+    let font = TextStyle::Small.resolve(ui.style());
+    let mut x = rect.left();
+    let mut hovered = false;
+    for (i, label) in labels.iter().enumerate() {
+        let width = ui.painter().layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x + 44.0;
+        let r = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
+        if widgets::hit(ui, r).any() {
+            *toolbar = Some(i);
+            hovered = true;
+        }
+        let color = widgets::paint_focusable(ui.painter(), r, focused && *toolbar == Some(i), false);
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
+        x += width + 14.0;
+    }
+    hovered
+}
+
+/// Moves between toolbar buttons; `None` = not a toolbar press (or it left the toolbar).
+fn toolbar_press(press: Press, at: usize, count: usize, toolbar: &mut Option<usize>) -> Option<Nav> {
+    match press.action {
+        Action::Left => *toolbar = Some(at.saturating_sub(1)),
+        Action::Right => *toolbar = Some((at + 1).min(count - 1)),
+        Action::Down => *toolbar = None,
+        Action::Up if !press.repeat => return Some(Nav::FocusTopBar),
+        Action::Back if !press.repeat => return Some(Nav::Pop),
+        _ => return None,
+    }
+    Some(Nav::None)
+}
+
 fn artist_year(album: &Album) -> String {
     match album.year {
         Some(y) => format!("{} · {y}", album.artist),
@@ -105,80 +169,117 @@ fn album_grid(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sort {
     Added,
-    Title,
+    Played,
     Artist,
+    Title,
     Year,
 }
 
-const SORTS: [(Sort, &str, &str); 4] =
-    [(Sort::Added, "Recently added", "added"), (Sort::Artist, "Artist", "artist"), (Sort::Title, "A–Z", "title"), (Sort::Year, "Year", "year")];
+const SORTS: [(Sort, &str, &str); 5] = [
+    (Sort::Added, "Recently added", "added"),
+    (Sort::Played, "Recently played", "played"),
+    (Sort::Artist, "Artist", "artist"),
+    (Sort::Title, "A–Z", "title"),
+    (Sort::Year, "Year", "year"),
+];
+
+/// What the library grid shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Show {
+    Albums,
+    /// Albums and folders of loose singles.
+    Singles,
+    Artists,
+}
+
+const SHOWS: [(Show, &str, &str); 3] =
+    [(Show::Albums, "Albums", "albums"), (Show::Singles, "Albums & singles", "singles"), (Show::Artists, "Artists", "artists")];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tool {
     Sort,
-    /// Albums only, or singles too.
     Show,
-    Artists,
     Folders,
 }
 
-const TOOLS: [Tool; 4] = [Tool::Sort, Tool::Show, Tool::Artists, Tool::Folders];
+const TOOLS: [Tool; 3] = [Tool::Sort, Tool::Show, Tool::Folders];
 
-/// A music library's albums.
+/// A music library: albums, or artists.
 pub struct AlbumsView {
     library_id: i64,
     sort: Sort,
-    /// Loose singles too, not just albums.
-    singles: bool,
+    show: Show,
     /// `Some(i)` = toolbar button i has focus.
     toolbar: Option<usize>,
     grid: GridState,
-    albums: Vec<usize>,
-    built_for: Option<(u64, Sort, bool)>,
+    /// Indexes of albums, or of artists when showing artists.
+    items: Vec<usize>,
+    built_for: Option<(u64, Sort, Show)>,
 }
 
 impl AlbumsView {
     pub fn new(sh: &Shared, library_id: i64) -> Self {
-        let saved = sh.setting(&Self::sort_key(library_id)).unwrap_or_default();
-        let sort = SORTS.iter().find(|s| s.2 == saved).map_or(Sort::Added, |s| s.0);
-        let singles = sh.setting_bool(&Self::singles_key(library_id));
-        Self { library_id, sort, singles, toolbar: None, grid: GridState::default(), albums: Vec::new(), built_for: None }
-    }
-
-    fn sort_key(library_id: i64) -> String {
-        format!("music_sort:{library_id}")
-    }
-
-    fn singles_key(library_id: i64) -> String {
-        format!("music_singles:{library_id}")
+        let pick = |key: String| sh.setting(&key).unwrap_or_default();
+        let sort = SORTS.iter().find(|s| s.2 == pick(format!("music_sort:{library_id}"))).map_or(Sort::Added, |s| s.0);
+        let show = SHOWS.iter().find(|s| s.2 == pick(format!("music_show:{library_id}"))).map_or(Show::Albums, |s| s.0);
+        Self { library_id, sort, show, toolbar: None, grid: GridState::default(), items: Vec::new(), built_for: None }
     }
 
     fn refresh(&mut self, sh: &Shared) {
-        let version = sh.lib(self.library_id).map_or(0, |l| l.version);
-        if self.built_for == Some((version, self.sort, self.singles)) {
+        let Some(state) = sh.lib(self.library_id) else { return };
+        if self.built_for == Some((state.version, self.sort, self.show)) {
             return;
         }
-        let Some(music) = catalog(sh, self.library_id) else { return };
-        let selected = self.albums.get(self.grid.selected).map(|&i| music.albums.get(i).map(|a| a.key.clone()));
+        let Some(music) = state.music.clone() else { return };
+        // Keep the same thing selected across rebuilds.
+        let key = |show: Show, i: usize| match show {
+            Show::Artists => music.artists.get(i).map(|a| a.name.clone()),
+            _ => music.albums.get(i).map(|a| a.key.clone()),
+        };
+        let previous = self.built_for.map(|(_, _, show)| show);
+        let selected = previous.and_then(|show| self.items.get(self.grid.selected).and_then(|&i| key(show, i)));
         let a = &music.albums;
-        let mut order: Vec<usize> = (0..a.len()).filter(|&i| self.singles || !a[i].singles).collect();
-        match self.sort {
-            Sort::Added => order.sort_by(|&x, &y| a[y].added_at.cmp(&a[x].added_at).then_with(|| natural_cmp(&a[x].title, &a[y].title))),
-            Sort::Title => order.sort_by(|&x, &y| natural_cmp(&a[x].title, &a[y].title)),
-            Sort::Artist => {} // the catalog's own order: artist, year, title
-            Sort::Year => order.sort_by(|&x, &y| a[y].year.cmp(&a[x].year).then_with(|| natural_cmp(&a[x].artist, &a[y].artist))),
-        }
-        self.albums = order;
-        let at = selected.flatten().and_then(|key| self.albums.iter().position(|&i| a[i].key == key)).unwrap_or(0);
-        self.grid.select(at);
-        self.built_for = Some((version, self.sort, self.singles));
+        let played: Vec<i64> = a.iter().map(|album| album_played(state, album)).collect();
+        self.items = match self.show {
+            Show::Artists => {
+                let artists = &music.artists;
+                let newest = |list: &[usize], f: &dyn Fn(usize) -> i64| list.iter().map(|&i| f(i)).max().unwrap_or(0);
+                let by = |x: &Artist, f: &dyn Fn(usize) -> i64| newest(&x.albums, f).max(newest(&x.appears_on, f));
+                let mut order: Vec<usize> = (0..artists.len()).collect();
+                match self.sort {
+                    Sort::Added => order.sort_by_key(|&i| std::cmp::Reverse(by(&artists[i], &|j| a[j].added_at))),
+                    Sort::Played => order.sort_by_key(|&i| std::cmp::Reverse(by(&artists[i], &|j| played[j]))),
+                    Sort::Year => order.sort_by_key(|&i| std::cmp::Reverse(by(&artists[i], &|j| i64::from(a[j].year.unwrap_or(0))))),
+                    Sort::Artist | Sort::Title => {} // the catalog's own order: by name
+                }
+                order
+            }
+            show => {
+                let mut order: Vec<usize> = (0..a.len()).filter(|&i| show == Show::Singles || !a[i].singles).collect();
+                match self.sort {
+                    Sort::Added => order.sort_by(|&x, &y| a[y].added_at.cmp(&a[x].added_at).then_with(|| natural_cmp(&a[x].title, &a[y].title))),
+                    Sort::Played => order.sort_by(|&x, &y| played[y].cmp(&played[x]).then_with(|| natural_cmp(&a[x].title, &a[y].title))),
+                    Sort::Title => order.sort_by(|&x, &y| natural_cmp(&a[x].title, &a[y].title)),
+                    Sort::Artist => {} // the catalog's own order: artist, year, title
+                    Sort::Year => order.sort_by(|&x, &y| a[y].year.cmp(&a[x].year).then_with(|| natural_cmp(&a[x].artist, &a[y].artist))),
+                }
+                order
+            }
+        };
+        let at = selected.and_then(|k| self.items.iter().position(|&i| key(self.show, i).as_ref() == Some(&k)));
+        self.grid.select(at.unwrap_or(0));
+        self.built_for = Some((state.version, self.sort, self.show));
     }
 
     fn tool_label(&self, tool: Tool) -> String {
         match tool {
-            Tool::Sort => format!("Sort: {}", SORTS.iter().find(|s| s.0 == self.sort).map_or("", |s| s.1)),
-            Tool::Show => if self.singles { "Show: Albums & singles" } else { "Show: Albums" }.to_owned(),
-            Tool::Artists => "Artists".to_owned(),
+            Tool::Sort => {
+                // Sorting artists "A–Z" and by "Artist" is the same thing.
+                let label = SORTS.iter().find(|s| s.0 == self.sort).map_or("", |s| s.1);
+                let label = if self.show == Show::Artists && self.sort == Sort::Artist { "A–Z" } else { label };
+                format!("Sort: {label}")
+            }
+            Tool::Show => format!("Show: {}", SHOWS.iter().find(|s| s.0 == self.show).map_or("", |s| s.1)),
             Tool::Folders => "Browse folders".to_owned(),
         }
     }
@@ -187,17 +288,21 @@ impl AlbumsView {
         match tool {
             Tool::Sort => {
                 let i = SORTS.iter().position(|s| s.0 == self.sort).unwrap_or(0);
-                let next = SORTS[(i + 1) % SORTS.len()];
+                let mut next = SORTS[(i + 1) % SORTS.len()];
+                if self.show == Show::Artists && next.0 == Sort::Title {
+                    next = SORTS[(i + 2) % SORTS.len()]; // same as Artist there
+                }
                 self.sort = next.0;
-                sh.set_setting(&Self::sort_key(self.library_id), next.2);
+                sh.set_setting(&format!("music_sort:{}", self.library_id), next.2);
                 Nav::None
             }
             Tool::Show => {
-                self.singles = !self.singles;
-                sh.set_setting_bool(&Self::singles_key(self.library_id), self.singles);
+                let i = SHOWS.iter().position(|s| s.0 == self.show).unwrap_or(0);
+                let next = SHOWS[(i + 1) % SHOWS.len()];
+                self.show = next.0;
+                sh.set_setting(&format!("music_show:{}", self.library_id), next.2);
                 Nav::None
             }
-            Tool::Artists => Nav::push(ArtistsView::new(self.library_id)),
             Tool::Folders => Nav::push(LibraryView::new(self.library_id, String::new())),
         }
     }
@@ -207,29 +312,27 @@ impl Screen for AlbumsView {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
         self.refresh(sh);
         if let Some(at) = self.toolbar {
-            match press.action {
-                Action::Left => self.toolbar = Some(at.saturating_sub(1)),
-                Action::Right => self.toolbar = Some((at + 1).min(TOOLS.len() - 1)),
-                Action::Down => self.toolbar = None,
-                Action::Up if !press.repeat => return Nav::FocusTopBar,
-                Action::Back if !press.repeat => return Nav::Pop,
-                _ if press.is_activate() => return self.activate_tool(sh, TOOLS[at]),
-                _ => {}
+            if press.is_activate() {
+                return self.activate_tool(sh, TOOLS[at]);
             }
-            return Nav::None;
+            return toolbar_press(press, at, TOOLS.len(), &mut self.toolbar).unwrap_or(Nav::None);
         }
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        match self.grid.handle(press, self.albums.len()) {
+        match self.grid.handle(press, self.items.len()) {
             ListInput::AtTop => {
                 self.toolbar = Some(0);
                 Nav::None
             }
-            ListInput::Activate(i) => match catalog(sh, self.library_id).and_then(|m| m.albums.get(self.albums[i]).map(|a| a.key.clone())) {
-                Some(key) => Nav::push(AlbumPage::new(self.library_id, key)),
-                None => Nav::None,
-            },
+            ListInput::Activate(i) => {
+                let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
+                let item = self.items[i];
+                match self.show {
+                    Show::Artists => music.artists.get(item).map_or(Nav::None, |a| Nav::push(ArtistPage::new(sh, self.library_id, a.name.clone()))),
+                    _ => music.albums.get(item).map_or(Nav::None, |a| Nav::push(AlbumPage::new(self.library_id, a.key.clone()))),
+                }
+            }
             ListInput::None => Nav::None,
         }
     }
@@ -241,30 +344,26 @@ impl Screen for AlbumsView {
         let style = ui.style().clone();
         let body = widgets::header(ui.painter(), rect, &name, &status, &style);
         let toolbar = Rect::from_min_size(body.min, vec2(body.width(), TOOLBAR_H));
-        let mut x = toolbar.left();
-        let font = TextStyle::Small.resolve(&style);
-        for (i, tool) in TOOLS.iter().enumerate() {
-            let label = self.tool_label(*tool);
-            let width = ui.painter().layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x + 44.0;
-            let r = Rect::from_min_size(pos2(x, toolbar.top()), vec2(width, toolbar.height()));
-            if widgets::hit(ui, r).any() {
-                self.toolbar = Some(i);
-            }
-            let color = widgets::paint_focusable(ui.painter(), r, focused && self.toolbar == Some(i), false);
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
-            x += width + 14.0;
-        }
+        let labels: Vec<String> = TOOLS.iter().map(|t| self.tool_label(*t)).collect();
+        draw_toolbar(ui, toolbar, &labels, &mut self.toolbar, focused);
         let content = Rect::from_min_max(pos2(body.left(), toolbar.bottom() + 24.0), body.max);
         let Some(music) = catalog(sh, self.library_id) else {
             widgets::message(ui.painter(), content, "Reading the music… albums will appear shortly", &style);
             return Nav::None;
         };
-        if self.albums.is_empty() {
+        if self.items.is_empty() {
             widgets::message(ui.painter(), content, "No music here", &style);
             return Nav::None;
         }
-        let albums = self.albums.clone();
-        if album_grid(ui, sh, content, &music, &albums, &mut self.grid, focused && self.toolbar.is_none(), |_, a| artist_year(a)).any() {
+        let items = self.items.clone();
+        let grid_focused = focused && self.toolbar.is_none();
+        let hit = match self.show {
+            Show::Artists => widgets::grid(ui, content, items.len(), GRID, &mut self.grid, grid_focused, |painter, i, r, f| {
+                paint_artist(painter, sh, r, &music, &music.artists[items[i]], f, &style);
+            }),
+            _ => album_grid(ui, sh, content, &music, &items, &mut self.grid, grid_focused, |_, a| artist_year(a)),
+        };
+        if hit.any() {
             self.toolbar = None;
         }
         Nav::None
@@ -316,7 +415,7 @@ impl Screen for AlbumPage {
         match self.actions.handle(press, 2 + album.artists.len()) {
             ListInput::Activate(0) => play_album(sh, self.library_id, &self.key, 0, false),
             ListInput::Activate(1) => play_album(sh, self.library_id, &self.key, 0, true),
-            ListInput::Activate(i) => Nav::push(ArtistPage::new(self.library_id, album.artists[i - 2].clone())),
+            ListInput::Activate(i) => Nav::push(ArtistPage::new(sh, self.library_id, album.artists[i - 2].clone())),
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::None => Nav::None,
         }
@@ -400,88 +499,116 @@ fn artist_summary(music: &MusicCatalog, artist: &flex_core::music::Artist) -> St
     parts.join(" · ")
 }
 
-/// Everyone in a music library.
-pub struct ArtistsView {
-    library_id: i64,
-    list: ListState,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArtistSort {
+    Newest,
+    Oldest,
+    Title,
+    Played,
 }
 
-impl ArtistsView {
-    pub fn new(library_id: i64) -> Self {
-        Self { library_id, list: ListState::default() }
-    }
-}
-
-impl Screen for ArtistsView {
-    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
-        if press.is(Action::Back) {
-            return Nav::Pop;
-        }
-        let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        match self.list.handle(press, music.artists.len()) {
-            ListInput::Activate(i) => Nav::push(ArtistPage::new(self.library_id, music.artists[i].name.clone())),
-            ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::None => Nav::None,
-        }
-    }
-
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        let subtitle = format!("{} artists", thousands(music.artists.len()));
-        let body = widgets::header(ui.painter(), rect, "Artists", &subtitle, ui.style());
-        let rows: Vec<Row> = music
-            .artists
-            .iter()
-            .map(|a| Row::new(Icon::None, &a.name).detail(artist_summary(&music, a)))
-            .collect();
-        widgets::list(ui, body, &rows, &mut self.list, focused);
-        Nav::None
-    }
-}
+const ARTIST_SORTS: [(ArtistSort, &str, &str); 4] = [
+    (ArtistSort::Newest, "Newest first", "newest"),
+    (ArtistSort::Oldest, "Oldest first", "oldest"),
+    (ArtistSort::Title, "A–Z", "title"),
+    (ArtistSort::Played, "Recently played", "played"),
+];
+const ARTIST_SORT_SETTING: &str = "artist_sort";
 
 /// An artist: their albums, then albums by others that they're on.
 pub struct ArtistPage {
     library_id: i64,
     name: String,
+    sort: ArtistSort,
+    /// The Sort button has focus.
+    on_toolbar: bool,
     grid: GridState,
 }
 
 impl ArtistPage {
-    pub fn new(library_id: i64, name: String) -> Self {
-        Self { library_id, name, grid: GridState::default() }
+    pub fn new(sh: &Shared, library_id: i64, name: String) -> Self {
+        let saved = sh.setting(ARTIST_SORT_SETTING).unwrap_or_default();
+        let sort = ARTIST_SORTS.iter().find(|s| s.2 == saved).map_or(ArtistSort::Newest, |s| s.0);
+        Self { library_id, name, sort, on_toolbar: false, grid: GridState::default() }
     }
 
-    fn albums(&self, music: &MusicCatalog) -> (Vec<usize>, usize) {
-        let Some(artist) = music.artist(&self.name) else { return (Vec::new(), 0) };
-        let own = artist.albums.len();
-        (artist.albums.iter().chain(&artist.appears_on).copied().collect(), own)
+    /// Their albums then the ones they're on, each in the chosen order; and how many are
+    /// their own.
+    fn albums(&self, sh: &Shared, music: &MusicCatalog) -> (Vec<usize>, usize) {
+        let (Some(artist), Some(state)) = (music.artist(&self.name), sh.lib(self.library_id)) else { return (Vec::new(), 0) };
+        let a = &music.albums;
+        let sorted = |list: &[usize]| {
+            let mut list = list.to_vec();
+            match self.sort {
+                ArtistSort::Newest => list.sort_by(|&x, &y| a[y].year.cmp(&a[x].year).then_with(|| natural_cmp(&a[x].title, &a[y].title))),
+                ArtistSort::Oldest => list.sort_by(|&x, &y| {
+                    // Undated last.
+                    a[x].year.is_none().cmp(&a[y].year.is_none()).then_with(|| a[x].year.cmp(&a[y].year)).then_with(|| natural_cmp(&a[x].title, &a[y].title))
+                }),
+                ArtistSort::Title => list.sort_by(|&x, &y| natural_cmp(&a[x].title, &a[y].title)),
+                ArtistSort::Played => list.sort_by_key(|&i| std::cmp::Reverse(album_played(state, &a[i]))),
+            }
+            list
+        };
+        let own = sorted(&artist.albums);
+        let count = own.len();
+        (own.into_iter().chain(sorted(&artist.appears_on)).collect(), count)
+    }
+
+    fn sort_label(&self) -> String {
+        format!("Sort: {}", ARTIST_SORTS.iter().find(|s| s.0 == self.sort).map_or("", |s| s.1))
     }
 }
 
 impl Screen for ArtistPage {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if self.on_toolbar {
+            if press.is_activate() {
+                let i = ARTIST_SORTS.iter().position(|s| s.0 == self.sort).unwrap_or(0);
+                let next = ARTIST_SORTS[(i + 1) % ARTIST_SORTS.len()];
+                self.sort = next.0;
+                self.grid.select(0);
+                sh.set_setting(ARTIST_SORT_SETTING, next.2);
+                return Nav::None;
+            }
+            let mut toolbar = Some(0);
+            let nav = toolbar_press(press, 0, 1, &mut toolbar).unwrap_or(Nav::None);
+            self.on_toolbar = toolbar.is_some();
+            return nav;
+        }
         if press.is(Action::Back) {
             return Nav::Pop;
         }
         let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        let (albums, _) = self.albums(&music);
+        let (albums, _) = self.albums(sh, &music);
         match self.grid.handle(press, albums.len()) {
             ListInput::Activate(i) => Nav::push(AlbumPage::new(self.library_id, music.albums[albums[i]].key.clone())),
-            ListInput::AtTop => Nav::FocusTopBar,
+            ListInput::AtTop => {
+                self.on_toolbar = true;
+                Nav::None
+            }
             ListInput::None => Nav::None,
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        let (albums, own) = self.albums(&music);
+        let (albums, own) = self.albums(sh, &music);
         let subtitle = music.artist(&self.name).map(|a| artist_summary(&music, a)).unwrap_or_default();
         let style = ui.style().clone();
         let name = music.artist(&self.name).map_or(self.name.clone(), |a| a.name.clone());
         let body = widgets::header(ui.painter(), rect, &name, &subtitle, &style);
-        album_grid(ui, sh, body, &music, &albums, &mut self.grid, focused, |i, a| {
+        let toolbar = Rect::from_min_size(body.min, vec2(body.width(), TOOLBAR_H));
+        let mut at = self.on_toolbar.then_some(0);
+        draw_toolbar(ui, toolbar, &[self.sort_label()], &mut at, focused);
+        self.on_toolbar = at.is_some();
+        let content = Rect::from_min_max(pos2(body.left(), toolbar.bottom() + 24.0), body.max);
+        let hit = album_grid(ui, sh, content, &music, &albums, &mut self.grid, focused && !self.on_toolbar, |i, a| {
             if i < own { a.year.map(|y| y.to_string()).unwrap_or_default() } else { format!("On: {}", artist_year(a)) }
         });
+        if hit.any() {
+            self.on_toolbar = false;
+        }
         Nav::None
     }
 }

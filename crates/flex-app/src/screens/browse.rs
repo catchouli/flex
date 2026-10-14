@@ -25,6 +25,7 @@ enum Layout {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sort {
     Added,
+    Played,
     Title,
     Released,
 }
@@ -39,8 +40,9 @@ enum Filter {
 }
 
 const LAYOUTS: [(Layout, &str, &str); 2] = [(Layout::Posters, "Posters", "posters"), (Layout::List, "List", "list")];
-const SORTS: [(Sort, &str, &str); 3] = [
+const SORTS: [(Sort, &str, &str); 4] = [
     (Sort::Added, "Recently added", "added"),
+    (Sort::Played, "Recently played", "played"),
     (Sort::Title, "A–Z", "title"),
     (Sort::Released, "Release date", "released"),
 ];
@@ -172,7 +174,8 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
             })
             .collect(),
     };
-    let mut items: Vec<(Item, i64, String)> = entries
+    // (item, added, released, last played)
+    let mut items: Vec<(Item, i64, String, i64)> = entries
         .into_iter()
         .filter_map(|(state, entry, listed)| {
             let files: Vec<_> = entry.episodes.iter().filter_map(|e| state.tree.file(e.file_id)).collect();
@@ -191,6 +194,7 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
             let released = entry.show.release_date.clone().or_else(|| entry.show.year.map(|y| format!("{y:04}"))).unwrap_or_default();
             let series = entry.is_series();
             let progress = if series { None } else { files.first().and_then(|f| f.progress.fraction()) };
+            let played = files.iter().filter_map(|f| f.progress.last_played).max().unwrap_or(0);
             Some((
                 Item {
                     library_id: state.lib.id,
@@ -206,18 +210,20 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
                 },
                 added,
                 released,
+                played,
             ))
         })
         .collect();
     match prefs.sort {
         Sort::Added => items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
+        Sort::Played => items.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
         Sort::Title => items.sort_by(|a, b| natural_cmp(&a.0.title, &b.0.title)),
         // Newest first; undated last.
         Sort::Released => items.sort_by(|a, b| {
             a.2.is_empty().cmp(&b.2.is_empty()).then_with(|| b.2.cmp(&a.2)).then_with(|| natural_cmp(&a.0.title, &b.0.title))
         }),
     }
-    items.into_iter().map(|(item, _, _)| item).collect()
+    items.into_iter().map(|(item, ..)| item).collect()
 }
 
 /// Poster card size (2:3 poster plus two lines of text).

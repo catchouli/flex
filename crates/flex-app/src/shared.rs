@@ -483,6 +483,18 @@ impl Shared {
     }
 
     /// Updates watched state in memory (the database is already up to date).
+    /// Notes that a file started playing now (music: for "Recently played").
+    pub fn mark_played(&mut self, library_id: i64, file_id: i64) {
+        let Some(state) = self.lib_mut(library_id) else { return };
+        let Some(file) = Arc::make_mut(&mut state.tree).file_mut(file_id) else { return };
+        file.progress.last_played = Some(now_unix());
+        let progress = file.progress;
+        state.version += 1;
+        if let Err(e) = self.db.set_progress(file_id, &progress) {
+            log::warn!("saving play time: {e:#}");
+        }
+    }
+
     fn apply_watched(&mut self, library_id: i64, ids: &[i64], watched: bool) {
         if let Some(state) = self.lib_mut(library_id) {
             for id in ids {

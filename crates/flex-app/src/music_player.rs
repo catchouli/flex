@@ -24,6 +24,7 @@ const SEEK_STEP: i64 = 10;
 const BAR_GRAB: f32 = 20.0;
 
 struct Entry {
+    file_id: i64,
     path: PathBuf,
     title: String,
     artists: String,
@@ -31,6 +32,7 @@ struct Entry {
 }
 
 pub struct MusicPlayer {
+    library_id: i64,
     mpv: Arc<Mpv>,
     album: String,
     album_artist: String,
@@ -69,7 +71,13 @@ impl MusicPlayer {
                 } else {
                     track.artists.join(", ")
                 };
-                Some(Entry { path: file.abs_path(&state.lib.root), title: track.title.clone(), artists, duration: track.duration })
+                Some(Entry {
+                    file_id: track.file_id,
+                    path: file.abs_path(&state.lib.root),
+                    title: track.title.clone(),
+                    artists,
+                    duration: track.duration,
+                })
             })
             .collect();
         // Audio only: embedded cover art would otherwise count as a video to show.
@@ -84,6 +92,7 @@ impl MusicPlayer {
         let mut list = ListState::default();
         list.select(first);
         Ok(Self {
+            library_id,
             mpv,
             album: album.title.clone(),
             album_artist: album.artist.clone(),
@@ -250,6 +259,9 @@ impl Screen for MusicPlayer {
                 self.list.select(position.unwrap_or(0));
             }
             self.current = position;
+            if let Some(entry) = position.and_then(|i| self.entries.get(i)) {
+                sh.mark_played(self.library_id, entry.file_id);
+            }
         }
 
         let left = Rect::from_min_size(rect.min, vec2(COVER, rect.height()));
