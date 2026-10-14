@@ -176,6 +176,7 @@ pub struct Shared {
     toasts: Vec<String>,
     /// Closing the window hides Flex in the system tray instead of quitting.
     pub close_to_tray: bool,
+    pub updater: crate::update::Updater,
     /// The web UI, while switched on.
     web: Option<flex_web::Server>,
     /// What the web UI was last given: (library id, version, name) per library.
@@ -211,12 +212,16 @@ impl Shared {
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
             close_to_tray: false,
+            updater: crate::update::Updater::default(),
             web: None,
             web_published: Vec::new(),
             web_tx,
             web_rx,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
+        if shared.auto_update() {
+            shared.updater.set_enabled(true, ctx);
+        }
         shared.series = Arc::new(shared.db.series_meta()?);
         shared.alt_titles = shared.db.alt_titles()?;
         shared.watchlist = shared.db.watchlist()?;
@@ -358,6 +363,16 @@ impl Shared {
                 self.web_published = key;
             }
         }
+    }
+
+    /// Whether "Update automatically" is on (it's only offered in installed copies).
+    pub fn auto_update(&self) -> bool {
+        crate::update::installed() && self.setting_bool(crate::update::SETTING)
+    }
+
+    pub fn set_auto_update(&mut self, on: bool) {
+        self.set_setting_bool(crate::update::SETTING, on);
+        self.updater.set_enabled(on, &self.ctx);
     }
 
     pub fn set_close_to_tray(&mut self, on: bool) {

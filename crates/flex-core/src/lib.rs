@@ -13,6 +13,7 @@ pub mod scan;
 pub mod search;
 pub mod titles;
 pub mod tree;
+pub mod update;
 
 pub use db::Db;
 pub use library::{Library, LibraryKind, MediaFile};

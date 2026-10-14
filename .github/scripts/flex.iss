@@ -53,8 +53,9 @@ Name: "{autodesktop}\Flex"; Filename: "{app}\flex.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\flex.exe"; Description: "Start Flex"; Flags: nowait postinstall skipifsilent
-; A silent update (/SILENT or /VERYSILENT) puts back a Flex that was running.
-Filename: "{app}\flex.exe"; Flags: nowait; Check: RestartAfterSilentInstall
+; A silent update (/SILENT or /VERYSILENT) puts back a Flex that was running, with any
+; /flexargs=... (Flex's own updater passes --tray when it was hidden in the tray).
+Filename: "{app}\flex.exe"; Parameters: "{param:flexargs|}"; Flags: nowait; Check: RestartAfterSilentInstall
 
 [Code]
 var

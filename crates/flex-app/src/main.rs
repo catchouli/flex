@@ -16,6 +16,7 @@ mod shots;
 mod theme;
 mod topbar;
 mod tray;
+mod update;
 mod widgets;
 
 use std::path::PathBuf;

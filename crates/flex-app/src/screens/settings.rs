@@ -23,9 +23,12 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        // Web access, "Close to system tray" where there's a tray, then "Start with Windows".
+        // Web access, "Close to system tray" where there's a tray, "Start with Windows",
+        // then "Update automatically" in installed copies.
         let tray_row = libs + 7;
-        let rows = libs + 7 + usize::from(TRAY) + usize::from(cfg!(windows));
+        let autostart_row = tray_row + usize::from(TRAY);
+        let update = crate::update::installed();
+        let rows = autostart_row + usize::from(cfg!(windows)) + usize::from(update);
         match self.list.handle(press, rows) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) if i < libs => Nav::push(LibraryOptions::new(sh.libs[i].lib.id)),
@@ -59,14 +62,19 @@ impl Screen for Settings {
                 sh.set_close_to_tray(!sh.close_to_tray);
                 Nav::None
             }
-            ListInput::Activate(_) => {
+            ListInput::Activate(i) if update && i == rows - 1 => {
+                let on = !sh.auto_update();
+                sh.set_auto_update(on);
+                Nav::None
+            }
+            ListInput::Activate(i) if cfg!(windows) && i == autostart_row => {
                 #[cfg(windows)]
                 if let Err(e) = crate::autostart::set_enabled(!crate::autostart::is_enabled()) {
                     sh.toast(format!("Couldn't change the startup setting: {e:#}"));
                 }
                 Nav::None
             }
-            ListInput::None => Nav::None,
+            ListInput::Activate(_) | ListInput::None => Nav::None,
         }
     }
 
@@ -101,6 +109,14 @@ impl Screen for Settings {
             let on = if crate::autostart::is_enabled() { "on" } else { "off" };
             let detail = if sh.close_to_tray { "Starts hidden in the tray" } else { "Opens Flex when you sign in" };
             rows.push(Row::new(Icon::None, format!("Start with Windows: {on}")).detail(detail));
+        }
+        if crate::update::installed() {
+            let on = if sh.auto_update() { "on" } else { "off" };
+            let version = crate::update::current_version();
+            rows.push(
+                Row::new(Icon::None, format!("Update automatically: {on}"))
+                    .detail(format!("Version {version} · new versions install while nothing is playing")),
+            );
         }
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

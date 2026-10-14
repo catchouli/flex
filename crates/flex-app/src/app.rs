@@ -47,6 +47,8 @@ pub struct FlexApp {
     tray: Option<crate::tray::Tray>,
     /// Hide the window on the next frame (closed, or started with `--tray`).
     hide_pending: bool,
+    /// The window is hidden in the tray.
+    hidden: bool,
     /// Quit was chosen from the tray: let the window close for real.
     quitting: bool,
 }
@@ -79,6 +81,7 @@ impl FlexApp {
             toasts: VecDeque::new(),
             last_pointer_move: 0.0,
             hide_pending: hidden && tray.is_some(),
+            hidden: false,
             commands,
             command_tx,
             tray,
@@ -169,6 +172,18 @@ impl FlexApp {
         }
     }
 
+    /// Runs a downloaded update once nothing is loaded in the player (playing or paused).
+    fn install_update(&mut self) {
+        let Some(installer) = self.sh.updater.ready() else { return };
+        if self.stack.iter().any(|s| s.is_player()) {
+            return; // checked again when playback ends (the screen changes)
+        }
+        if let Err(e) = self.sh.updater.install(&installer, self.hidden) {
+            log::warn!("{e:#}");
+            self.sh.toast(format!("Couldn't install the update: {e:#}"));
+        }
+    }
+
     /// Stops playback (saving progress) and hides the window; Flex stays in the tray.
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
         while self.top().is_player() {
@@ -176,6 +191,7 @@ impl FlexApp {
         }
         self.back_hold_since = None;
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        self.hidden = true;
         log::info!("hidden in the tray");
     }
 
@@ -186,6 +202,7 @@ impl FlexApp {
             match command {
                 Command::Show => {
                     self.hide_pending = false;
+                    self.hidden = false;
                     ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
@@ -386,6 +403,7 @@ impl eframe::App for FlexApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
         self.handle_commands(ctx);
+        self.install_update();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
