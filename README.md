@@ -5,9 +5,12 @@
 <a href="screenshots/show.jpg"><img src="screenshots/show-thumb.jpg" width="32%"></a>
 
 A media player and organiser that scans your local libraries (local folders or mounted
-drives) and sorts everything into Movies, Shows and Anime collections. It runs entirely
-locally, so there's no server to set up, and it can import an existing Plex database to
-bring your watch history across.
+drives) and sorts everything into Movies, Shows, Anime and Music collections. It runs
+entirely locally, so there's no server to set up, and it can import an existing Plex
+database to bring your watch history across.
+
+Music libraries are sorted into albums and artists using your files' tags, with album
+covers, artist photos and discographies pulled in from MusicBrainz.
 
 It's also really fast. I got fed up with how sluggish Plex is on my TV PC, and this
 opens instantly and stays snappy even with tens of thousands of videos.
@@ -29,14 +32,16 @@ or you can point `FLEX_LIBMPV` at a `libmpv.2.dylib`.
 
 Then:
 
-1. Open Settings and add your libraries, picking whether each is Movies, TV or Anime.
+1. Open Settings and add your libraries, picking whether each is Movies, TV, Anime or
+   Music.
 2. If you want posters, descriptions and episode names, get a free API read access token
    from [TMDB](https://www.themoviedb.org/settings/api) and paste it into Settings.
+   Music is matched on [MusicBrainz](https://musicbrainz.org), which doesn't need a key.
 3. If you're coming from Plex, use "Import from Plex…" and point it at your
    `com.plexapp.plugins.library.db`.
 
-If something gets matched to the wrong show, open it and pick "Match online…" or
-"Folders & seasons…" to fix it.
+If something gets matched to the wrong show or album, open it and pick "Match online…"
+(or "Folders & seasons…" for shows) to fix it.
 
 ## Remote controls
 
