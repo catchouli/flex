@@ -20,7 +20,7 @@ pub mod settings;
 pub mod shows;
 pub mod up_next;
 
-use eframe::egui::{Rect, Ui};
+use eframe::egui::{Pos2, Rect, Ui};
 
 use crate::input::Press;
 use crate::shared::{PlayRequest, Shared};
@@ -69,6 +69,12 @@ pub trait Screen {
     }
 
     fn is_player(&self) -> bool {
+        false
+    }
+
+    /// For the player: whether `pos` is on its on-screen controls, where a click
+    /// shouldn't pause or play.
+    fn on_controls(&self, _pos: Pos2) -> bool {
         false
     }
 

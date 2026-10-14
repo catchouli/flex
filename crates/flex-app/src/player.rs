@@ -3,6 +3,7 @@
 //! OK / Play-Pause: pause/play · Left/Right: seek (hold to go faster) · Up: subtitles ·
 //! Down: audio · Back: hide the OSD, or stop if it's already hidden · Stop: stop.
 //! F2: playback stats (dropped frames, decoder, refresh rate).
+//! Mouse: moving it shows the OSD; click or drag the seek bar to seek.
 //!
 //! The subtitle track chosen with Up is remembered (by name and language, or "off") and
 //! picked again in later files that have a track like it.
@@ -24,6 +25,10 @@ const OSD_SECS: f64 = 3.0;
 /// How often the playback position is saved while playing.
 const SAVE_EVERY_SECS: f64 = 10.0;
 const MESSAGE_SECS: f64 = 2.5;
+/// While dragging the seek bar, how often to seek to where the mouse is.
+const DRAG_SEEK_SECS: f64 = 0.1;
+/// How far above and below the seek bar it still takes the mouse.
+const BAR_GRAB: f32 = 20.0;
 /// Extra mpv options for testing, e.g. `FLEX_MPV_OPTS="hwdec=no,profile=fast"`.
 const OPTS_ENV: &str = "FLEX_MPV_OPTS";
 const SUBTITLE_SETTING: &str = "last_subtitle";
@@ -60,6 +65,10 @@ pub struct Player {
     /// Display refresh rate last passed to mpv.
     display_fps: Option<f64>,
     show_stats: bool,
+    /// Where the OSD panel was last drawn, if it's showing (clicks there don't pause).
+    osd_panel: Option<Rect>,
+    /// While the seek bar is held: the position under the mouse, and when it last seeked.
+    drag: Option<(f64, f64)>,
 }
 
 impl Player {
@@ -91,6 +100,8 @@ impl Player {
             sub_changed: false,
             display_fps: None,
             show_stats: false,
+            osd_panel: None,
+            drag: None,
         })
     }
 
@@ -337,15 +348,20 @@ impl Player {
             self.draw_stats(ui, safe);
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
+        if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
+            self.osd_until = now + OSD_SECS;
+        }
         let paused = self.paused();
         if self.loaded && !paused {
             // With display-synced timing mpv decides per refresh which frame to show, so it
             // must be asked every refresh while playing, not only when it signals an update.
             ctx.request_repaint();
         }
-        if paused || now < self.osd_until {
-            self.draw_osd(ui, safe, paused);
+        if paused || now < self.osd_until || self.drag.is_some() {
+            self.draw_osd(ui, safe, now, paused);
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        } else {
+            self.osd_panel = None;
         }
         if let Some((track, until)) = self.message {
             if now < until {
@@ -366,15 +382,43 @@ impl Player {
         Nav::None
     }
 
-    fn draw_osd(&self, ui: &egui::Ui, safe: Rect, paused: bool) {
-        let painter = ui.painter();
-        let pos = self.mpv.get_f64("time-pos").unwrap_or(0.0);
+    fn draw_osd(&mut self, ui: &egui::Ui, safe: Rect, now: f64, paused: bool) {
         let duration = self.mpv.get_f64("duration").unwrap_or(0.0);
-
         let panel = Rect::from_min_max(pos2(safe.left(), safe.bottom() - 150.0), safe.right_bottom());
-        painter.rect_filled(panel, CornerRadius::same(14), theme::OSD_BG);
+        self.osd_panel = Some(panel);
         let inner = panel.shrink2(vec2(32.0, 24.0));
+        let bar = Rect::from_min_size(pos2(inner.left(), inner.bottom() - 26.0), vec2(inner.width() - 300.0, 10.0));
 
+        // Seek bar: pressing seeks to the mouse, dragging follows it (on keyframes, so it
+        // keeps up), and letting go seeks there exactly.
+        let grab = bar.expand2(vec2(0.0, BAR_GRAB));
+        let response = ui.interact(grab, egui::Id::new("flex-seek-bar"), egui::Sense::click_and_drag());
+        let at = |x: f32| duration * ((x - bar.left()) / bar.width()).clamp(0.0, 1.0) as f64;
+        if duration > 0.0
+            && response.is_pointer_button_down_on()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let target = at(p.x);
+            let last = self.drag.map_or(f64::NEG_INFINITY, |(_, t)| t);
+            if now - last >= DRAG_SEEK_SECS {
+                self.command(&["seek", &format!("{target:.3}"), "absolute+keyframes"]);
+                self.drag = Some((target, now));
+            } else {
+                self.drag = Some((target, last));
+            }
+            self.osd_until = now + OSD_SECS;
+            ui.ctx().request_repaint();
+        } else if let Some((target, _)) = self.drag.take() {
+            // Where it was let go: the last move can arrive in the same frame as the release.
+            let target = ui.input(|i| i.pointer.latest_pos()).map_or(target, |p| at(p.x));
+            self.command(&["seek", &format!("{target:.3}"), "absolute+exact"]);
+            self.osd_until = now + OSD_SECS;
+        }
+        // Until mpv catches up, show where the bar is being dragged to.
+        let pos = self.drag.map(|(t, _)| t).or_else(|| self.mpv.get_f64("time-pos")).unwrap_or(0.0);
+
+        let painter = ui.painter();
+        painter.rect_filled(panel, CornerRadius::same(14), theme::OSD_BG);
         let mut title_pos = inner.left_top();
         if paused {
             // Pause symbol drawn as two bars: fonts don't reliably have a glyph for it.
@@ -388,12 +432,23 @@ impl Player {
         let time = format!("{} / {}", theme::format_time(pos), theme::format_time(duration));
         painter.text(inner.right_bottom(), Align2::RIGHT_BOTTOM, &time, TextStyle::Body.resolve(ui.style()), theme::TEXT);
 
-        let bar = Rect::from_min_size(pos2(inner.left(), inner.bottom() - 26.0), vec2(inner.width() - 300.0, 10.0));
         painter.rect_filled(bar, CornerRadius::same(5), Color32::from_white_alpha(50));
         if duration > 0.0 {
             let mut done = bar;
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
             painter.rect_filled(done, CornerRadius::same(5), theme::FOCUS);
+            if response.hovered() || self.drag.is_some() {
+                painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::FOCUS);
+            }
+            // The time under the mouse, above the bar.
+            if let Some(p) = response.hover_pos().filter(|_| self.drag.is_none()) {
+                let font = TextStyle::Body.resolve(ui.style());
+                let galley = painter.layout_no_wrap(theme::format_time(at(p.x)), font, theme::TEXT);
+                let x = p.x.clamp(bar.left(), bar.right());
+                let label = Rect::from_center_size(pos2(x, panel.top() - 32.0), galley.size() + vec2(24.0, 12.0));
+                painter.rect_filled(label, CornerRadius::same(8), theme::OSD_BG);
+                painter.galley(label.center() - galley.size() / 2.0, galley, theme::TEXT);
+            }
         }
     }
 }
@@ -430,6 +485,10 @@ impl Screen for Player {
 
     fn is_player(&self) -> bool {
         true
+    }
+
+    fn on_controls(&self, pos: egui::Pos2) -> bool {
+        self.osd_panel.is_some_and(|panel| panel.contains(pos))
     }
 
     fn on_leave(&mut self, sh: &mut Shared) {

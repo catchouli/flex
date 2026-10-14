@@ -177,6 +177,10 @@ fn modal_id() -> egui::Id {
     egui::Id::new("flex-pointer-modal")
 }
 
+fn blocked_id() -> egui::Id {
+    egui::Id::new("flex-pointer-blocked")
+}
+
 /// While a dropdown is open, only things inside `rect` respond to the mouse this frame.
 pub fn modal(ctx: &egui::Context, rect: Rect) {
     ctx.data_mut(|d| d.insert_temp(modal_id(), Some(rect)));
@@ -187,15 +191,12 @@ pub fn modal(ctx: &egui::Context, rect: Rect) {
 /// A click is remembered for [`take_click`]: the screen selects the item here, then the app
 /// activates it with an OK press.
 pub fn hit(ui: &Ui, rect: Rect) -> Hit {
-    let visible = rect.intersect(ui.clip_rect());
-    let (pos, moved, clicked) =
-        ui.input(|i| (i.pointer.hover_pos(), i.pointer.delta() != egui::Vec2::ZERO, i.pointer.primary_clicked()));
-    let Some(pos) = pos.filter(|p| visible.contains(*p)) else { return Hit::None };
-    if ui.ctx().data(|d| d.get_temp::<Option<Rect>>(modal_id())).flatten().is_some_and(|m| !m.contains(pos)) {
+    if !pointer_over(ui, rect) {
         return Hit::None;
     }
-    if ui.ctx().layer_id_at(pos).is_some_and(|l| l != ui.layer_id()) {
-        return Hit::None; // under something drawn on top
+    let (moved, clicked) = ui.input(|i| (i.pointer.delta() != egui::Vec2::ZERO, i.pointer.primary_clicked()));
+    if ui.ctx().data(|d| d.get_temp::<Vec<Rect>>(blocked_id())).unwrap_or_default().iter().any(|b| pointer_over(ui, *b)) {
+        return Hit::None; // on a scroll arrow
     }
     if clicked {
         ui.ctx().data_mut(|d| d.insert_temp(click_id(), true));
@@ -208,10 +209,79 @@ pub fn hit(ui: &Ui, rect: Rect) -> Hit {
     }
 }
 
+/// Whether the mouse is on the part of `rect` visible in `ui`, and not under a dropdown
+/// or something drawn on top.
+fn pointer_over(ui: &Ui, rect: Rect) -> bool {
+    let visible = rect.intersect(ui.clip_rect());
+    let Some(pos) = ui.input(|i| i.pointer.hover_pos()).filter(|p| visible.contains(*p)) else { return false };
+    if ui.ctx().data(|d| d.get_temp::<Option<Rect>>(modal_id())).flatten().is_some_and(|m| !m.contains(pos)) {
+        return false;
+    }
+    ui.ctx().layer_id_at(pos).is_none_or(|l| l == ui.layer_id())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+const HINT_RADIUS: f32 = 26.0;
+/// Room for a [`ScrollHints`] arrow beside a row that the arrow shouldn't cover.
+pub const HINT_SPACE: f32 = 2.0 * HINT_RADIUS + 12.0;
+
+/// Arrows on the ends of a sideways row where more items are hidden. Clicking one asks
+/// the row to scroll that way.
+///
+/// Make it before checking the items' [`hit`]s, so items under an arrow ignore the mouse,
+/// and paint it after drawing them.
+pub struct ScrollHints {
+    arrows: Vec<(Side, Rect, bool)>,
+    pub clicked: Option<Side>,
+}
+
+impl ScrollHints {
+    /// `row` spans the visible items.
+    pub fn new(ui: &Ui, row: Rect, more_left: bool, more_right: bool) -> Self {
+        let y = row.center().y;
+        let size = vec2(2.0 * HINT_RADIUS, 2.0 * HINT_RADIUS);
+        let mut arrows = Vec::new();
+        let mut clicked = None;
+        let inset = HINT_RADIUS + 6.0;
+        for (side, more, x) in [(Side::Left, more_left, row.left() + inset), (Side::Right, more_right, row.right() - inset)] {
+            if !more {
+                continue;
+            }
+            let rect = Rect::from_center_size(egui::pos2(x, y), size);
+            let over = pointer_over(ui, rect);
+            if over {
+                ui.ctx().data_mut(|d| d.get_temp_mut_or_default::<Vec<Rect>>(blocked_id()).push(rect));
+                if ui.input(|i| i.pointer.primary_clicked()) {
+                    clicked = Some(side);
+                }
+            }
+            arrows.push((side, rect, over));
+        }
+        Self { arrows, clicked }
+    }
+
+    pub fn paint(&self, painter: &Painter) {
+        for &(side, rect, over) in &self.arrows {
+            let c = rect.center();
+            painter.circle_filled(c, HINT_RADIUS, theme::OSD_BG);
+            let dir = if side == Side::Left { -1.0 } else { 1.0 };
+            let points = vec![c + vec2(-5.0 * dir, -11.0), c + vec2(6.0 * dir, 0.0), c + vec2(-5.0 * dir, 11.0)];
+            let color = if over { theme::FOCUS } else { theme::TEXT };
+            painter.add(egui::Shape::line(points, Stroke::new(4.0, color)));
+        }
+    }
+}
+
 /// What the mouse did to the screen's items this frame (see [`hit`]); clears it.
 pub fn take_hit(ctx: &egui::Context) -> Hit {
     ctx.data_mut(|d| {
         d.remove_temp::<Option<Rect>>(modal_id());
+        d.remove_temp::<Vec<Rect>>(blocked_id());
         let clicked = d.remove_temp::<bool>(click_id()).unwrap_or(false);
         let hovered = d.remove_temp::<bool>(hover_id()).unwrap_or(false);
         if clicked { Hit::Click } else if hovered { Hit::Hover } else { Hit::None }

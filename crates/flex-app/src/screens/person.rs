@@ -229,8 +229,10 @@ impl Screen for PersonPage {
             widgets::text_block(&painter, r, bio, TextStyle::Body.resolve(&style), theme::TEXT);
         }
 
-        // Rows of cards. `hovered` = (row, item) under the mouse.
+        // Rows of cards. `hovered` = (row, item) under the mouse; `arrow_row` = row whose
+        // scroll arrow was clicked.
         let mut hovered = None;
+        let mut arrow_row = None;
         for (index, (kind, label, cards)) in self.rows.iter().enumerate() {
             let top = tops[index];
             painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, *label, TextStyle::Body.resolve(&style), theme::TEXT);
@@ -238,7 +240,7 @@ impl Screen for PersonPage {
             let row_focus = focus.filter(|(k, _)| k == kind).map(|(_, i)| i);
             let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
             let images = &mut sh.images;
-            hrow(&painter, area, CARD, cards.len(), self.nav.col[slot], &mut self.nav.offset[slot], |p, i, r, _| {
+            let arrow = hrow(ui, &painter, area, CARD, cards.len(), &mut self.nav.col[slot], &mut self.nav.offset[slot], |p, i, r, _| {
                 if widgets::hit(ui, r.intersect(rect)).any() {
                     hovered = Some((index, i));
                 }
@@ -246,6 +248,9 @@ impl Screen for PersonPage {
                 let image = card.image.as_deref().and_then(|img| images.get(img, Size::Poster));
                 paint_card(p, r, &card.title, &card.sub, image.as_ref(), row_focus == Some(i), &style);
             });
+            if arrow {
+                arrow_row = Some(index);
+            }
         }
         if let Some(status) = self.status() {
             let top = tops.last().map_or(header_h + SECTION_GAP, |t| t + ROW_LABEL_H + CARD.y + SECTION_GAP);
@@ -254,6 +259,9 @@ impl Screen for PersonPage {
         if let Some((row, i)) = hovered {
             self.nav.row = row;
             self.nav.col[PageNav::kind_index(self.rows[row].0)] = i;
+        }
+        if let Some(row) = arrow_row {
+            self.nav.row = row;
         }
         if ui.rect_contains_pointer(rect) {
             self.nav.scroll -= ui.input(|i| i.smooth_scroll_delta.y);

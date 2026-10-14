@@ -285,6 +285,10 @@ impl Screen for Home {
             } else if self.cont >= self.cont_offset + visible {
                 self.cont_offset = self.cont + 1 - visible;
             }
+            let count = self.items.len();
+            let shown = (count - self.cont_offset).min(visible);
+            let row = Rect::from_min_size(body.min, vec2(shown as f32 * (CONTINUE_CARD[0] + GAP) - GAP, CONTINUE_CARD[1]));
+            let hints = widgets::ScrollHints::new(ui, row, self.cont_offset > 0, self.cont_offset + visible < count);
             for (slot, i) in (self.cont_offset..self.items.len()).take(visible).enumerate() {
                 let Some(text) = describe(sh, &self.items[i]) else { continue };
                 let min = Pos2::new(body.left() + slot as f32 * (CONTINUE_CARD[0] + GAP), body.top());
@@ -294,6 +298,21 @@ impl Screen for Home {
                 let selected = focused && self.section == Section::Continue && i == self.cont;
                 let image = card_image(sh, &self.items[i]);
                 continue_card(ui, Rect::from_min_size(min, CONTINUE_CARD.into()), &text, image.as_ref(), selected, &style);
+            }
+            hints.paint(ui.painter());
+            // An arrow selects the first hidden card that way and scrolls a page.
+            match hints.clicked {
+                Some(widgets::Side::Left) => {
+                    self.cont = self.cont_offset - 1;
+                    self.cont_offset = self.cont_offset.saturating_sub(visible);
+                    self.section = Section::Continue;
+                }
+                Some(widgets::Side::Right) => {
+                    self.cont = self.cont_offset + visible;
+                    self.cont_offset = (self.cont_offset + visible).min(count - visible);
+                    self.section = Section::Continue;
+                }
+                None => {}
             }
             top = body.top() + CONTINUE_CARD[1] + SECTION_GAP;
         }

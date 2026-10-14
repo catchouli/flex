@@ -18,6 +18,7 @@ use super::{Nav, Screen};
 use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
 use crate::shared::{PlayRequest, Shared, thousands};
+use crate::widgets::{ScrollHints, Side};
 use crate::{theme, widgets};
 
 const POSTER: egui::Vec2 = egui::vec2(320.0, 480.0);
@@ -90,28 +91,104 @@ fn play_buttons(sh: &Shared, library_id: i64, file_id: i64) -> Vec<Button> {
     }
 }
 
-/// A horizontal row that scrolls to keep the selected item in view.
+/// A horizontal row that scrolls to keep the selected item in view, with arrows on the
+/// ends where items are hidden. Returns true if an arrow was clicked: that selects the
+/// first hidden item that way and scrolls a page.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn hrow(
+    ui: &Ui,
     painter: &Painter,
     // Top-left corner and available width (the height is unused).
     area: Rect,
     item: egui::Vec2,
     count: usize,
-    selected: usize,
+    selected: &mut usize,
     offset: &mut usize,
     mut draw: impl FnMut(&Painter, usize, Rect, bool),
-) {
+) -> bool {
     let (origin, width) = (area.min, area.width());
     let visible = (((width + GAP) / (item.x + GAP)) as usize).max(1);
-    if selected < *offset {
-        *offset = selected;
-    } else if selected >= *offset + visible {
-        *offset = selected + 1 - visible;
+    if *selected < *offset {
+        *offset = *selected;
+    } else if *selected >= *offset + visible {
+        *offset = *selected + 1 - visible;
     }
+    let shown = count.saturating_sub(*offset).min(visible);
+    let row = Rect::from_min_size(origin, vec2(shown as f32 * (item.x + GAP) - GAP, item.y));
+    let hints = ScrollHints::new(ui, row, *offset > 0, *offset + visible < count);
     for (slot, i) in (*offset..count).take(visible).enumerate() {
         let r = Rect::from_min_size(origin + vec2(slot as f32 * (item.x + GAP), 0.0), item);
-        draw(painter, i, r, i == selected);
+        draw(painter, i, r, i == *selected);
     }
+    hints.paint(painter);
+    match hints.clicked {
+        Some(Side::Left) => {
+            *selected = *offset - 1;
+            *offset = offset.saturating_sub(visible);
+        }
+        Some(Side::Right) => {
+            *selected = *offset + visible;
+            *offset = (*offset + visible).min(count - visible);
+        }
+        None => return false,
+    }
+    true
+}
+
+/// A row of buttons in `row`, scrolled so the selected one fits, with arrows (in gutters
+/// at the ends) where buttons are hidden. Returns true if an arrow was clicked: that
+/// selects the next hidden button that way.
+#[allow(clippy::too_many_arguments)]
+fn button_row(
+    ui: &Ui,
+    painter: &Painter,
+    row: Rect,
+    labels: &[String],
+    selected: &mut usize,
+    offset: &mut usize,
+    style: &egui::Style,
+    mut draw: impl FnMut(usize, Rect, bool),
+) -> bool {
+    const SPACING: f32 = 16.0;
+    let widths: Vec<f32> = labels.iter().map(|l| button_width(painter, l, style)).collect();
+    let span = |range: std::ops::Range<usize>| widths[range.clone()].iter().sum::<f32>() + SPACING * range.len().saturating_sub(1) as f32;
+    let overflows = span(0..widths.len()) > row.width();
+    // Where buttons go when the row starts at `from`: gutters for the arrows if it overflows.
+    let bounds = |from: usize| {
+        let left = if from > 0 { row.left() + widgets::HINT_SPACE } else { row.left() };
+        let right = if overflows { row.right() - widgets::HINT_SPACE } else { row.right() };
+        (left, right)
+    };
+    *selected = (*selected).min(widths.len().saturating_sub(1));
+    *offset = (*offset).min(*selected);
+    while *offset < *selected && {
+        let (left, right) = bounds(*offset);
+        span(*offset..*selected + 1) > right - left
+    } {
+        *offset += 1;
+    }
+    let (left, right) = bounds(*offset);
+    let mut rects = Vec::new();
+    let mut x = left;
+    for (i, w) in widths.iter().enumerate().skip(*offset) {
+        if i > *offset && x + w > right {
+            break;
+        }
+        rects.push((i, Rect::from_min_size(pos2(x, row.top()), vec2(*w, row.height()))));
+        x += w + SPACING;
+    }
+    let last = rects.last().map_or(*offset, |(i, _)| *i);
+    let hints = ScrollHints::new(ui, row, *offset > 0, last + 1 < widths.len());
+    for (i, r) in rects {
+        draw(i, r, i == *selected);
+    }
+    hints.paint(painter);
+    match hints.clicked {
+        Some(Side::Left) => *selected = *offset - 1,
+        Some(Side::Right) => *selected = last + 1,
+        None => return false,
+    }
+    true
 }
 
 /// A portrait card (actor photo or poster) with two lines of text under it.
@@ -450,8 +527,10 @@ impl Screen for TitlePage {
             widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::TEXT);
         }
 
-        // Rows. `hovered` = (row, item) under the mouse.
+        // Rows. `hovered` = (row, item) under the mouse; `arrow_row` = row whose scroll
+        // arrow was clicked.
         let mut hovered = None;
+        let mut arrow_row = None;
         let mut hit = |row: usize, i: usize, r: Rect| {
             if widgets::hit(ui, r.intersect(rect)).any() {
                 hovered = Some((row, i));
@@ -462,39 +541,45 @@ impl Screen for TitlePage {
             let row_focus = focus.filter(|(k, _)| k == kind).map(|(_, i)| i);
             match kind {
                 RowKind::Buttons => {
-                    let mut x = text_left;
-                    for (i, b) in buttons.iter().enumerate() {
-                        let label = b.label();
-                        let w = button_width(&painter, &label, &style);
-                        let r = Rect::from_min_size(pos2(x, origin.y + top), vec2(w, BUTTON_H));
+                    let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
+                    let row = Rect::from_min_max(pos2(text_left, origin.y + top), pos2(rect.right(), origin.y + top + BUTTON_H));
+                    let arrow = button_row(ui, &painter, row, &labels, &mut self.nav.col[0], &mut self.nav.offset[0], &style, |i, r, _| {
                         hit(index, i, r);
-                        paint_button(&painter, r, &label, row_focus == Some(i), i == 0 && matches!(b, Button::Play { .. }), &style);
-                        x += w + 16.0;
+                        paint_button(&painter, r, &labels[i], row_focus == Some(i), i == 0 && matches!(buttons[i], Button::Play { .. }), &style);
+                    });
+                    if arrow {
+                        arrow_row = Some(index);
                     }
                 }
                 RowKind::Seasons => {
                     painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, "Seasons", TextStyle::Body.resolve(&style), theme::TEXT);
-                    let sel = self.nav.col[1];
-                    hrow(&painter, Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0)), SEASON_CARD, *count, sel, &mut self.nav.offset[1], |p, i, r, _| {
+                    let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
+                    let arrow = hrow(ui, &painter, area, SEASON_CARD, *count, &mut self.nav.col[1], &mut self.nav.offset[1], |p, i, r, _| {
                         hit(index, i, r);
                         let (name, sub) = &season_cards[i];
                         let color = widgets::paint_focusable(p, r, row_focus == Some(i), false);
                         p.text(r.left_top() + vec2(20.0, 16.0), Align2::LEFT_TOP, name, TextStyle::Body.resolve(&style), color);
                         p.text(r.left_bottom() + vec2(20.0, -14.0), Align2::LEFT_BOTTOM, sub, TextStyle::Small.resolve(&style), color);
                     });
+                    if arrow {
+                        arrow_row = Some(index);
+                    }
                 }
                 RowKind::Cast => {
                     let label = if self.voice { "Voice cast (Japanese)" } else { "Cast" };
                     painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, label, TextStyle::Body.resolve(&style), theme::TEXT);
                     let cast = self.cast.as_ref().map(|(_, c)| c.clone()).unwrap_or_default();
-                    let sel = self.nav.col[2];
                     let images = &mut sh.images;
-                    hrow(&painter, Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0)), CAST_CARD, *count, sel, &mut self.nav.offset[2], |p, i, r, _| {
+                    let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
+                    let arrow = hrow(ui, &painter, area, CAST_CARD, *count, &mut self.nav.col[2], &mut self.nav.offset[2], |p, i, r, _| {
                         hit(index, i, r);
                         let member = &cast[i];
                         let photo = member.image.as_deref().and_then(|img| images.get(img, Size::Profile));
                         paint_card(p, r, &member.name, &member.role, photo.as_ref(), row_focus == Some(i), &style);
                     });
+                    if arrow {
+                        arrow_row = Some(index);
+                    }
                 }
                 // Only on a person's page.
                 RowKind::InLibrary | RowKind::Films | RowKind::Shows => {}
@@ -503,6 +588,9 @@ impl Screen for TitlePage {
         if let Some((row, i)) = hovered {
             self.nav.row = row;
             self.nav.col[PageNav::kind_index(rows[row].0)] = i;
+        }
+        if let Some(row) = arrow_row {
+            self.nav.row = row;
         }
         if ui.rect_contains_pointer(rect) {
             self.nav.scroll -= ui.input(|i| i.smooth_scroll_delta.y);
@@ -612,17 +700,17 @@ impl Screen for EpisodePage {
             let r = r.with_max_x(r.left() + r.width().min(1000.0));
             widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::TEXT);
         }
-        let mut x = rect.left();
-        let y = still_rect.bottom() + 40.0;
-        for (i, b) in buttons.iter().enumerate() {
-            let label = b.label();
-            let w = button_width(&painter, &label, &style);
-            let r = Rect::from_min_size(pos2(x, y), vec2(w, BUTTON_H));
+        let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
+        let row = Rect::from_min_size(pos2(rect.left(), still_rect.bottom() + 40.0), vec2(rect.width(), BUTTON_H));
+        let mut hovered = None;
+        button_row(ui, &painter, row, &labels, &mut self.nav.col[0], &mut self.nav.offset[0], &style, |i, r, selected| {
             if widgets::hit(ui, r.intersect(rect)).any() {
-                self.nav.col[0] = i;
+                hovered = Some(i);
             }
-            paint_button(&painter, r, &label, focused && self.nav.col[0] == i, i == 0, &style);
-            x += w + 16.0;
+            paint_button(&painter, r, &labels[i], focused && selected, i == 0, &style);
+        });
+        if let Some(i) = hovered {
+            self.nav.col[0] = i;
         }
         Nav::None
     }

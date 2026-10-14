@@ -232,6 +232,12 @@ impl FlexApp {
             match self.top_bar.handle(ctx, press) {
                 topbar::Event::OpenSettings => self.open_settings(),
                 topbar::Event::ToggleFullscreen => self.toggle_fullscreen(ctx),
+                topbar::Event::Back => {
+                    self.top_bar.focus = None;
+                    let sh = &mut self.sh;
+                    let back = Press { action: Action::Back, repeat: false };
+                    return self.stack.last_mut().expect("never empty").handle(sh, back);
+                }
                 _ => {}
             }
             Nav::None
@@ -274,17 +280,20 @@ impl FlexApp {
         }
     }
 
-    /// Double-clicking the video toggles fullscreen. Elsewhere the mouse is left free
-    /// for normal clicking.
     /// On the video a click pauses or plays, and a double-click toggles fullscreen (its two
-    /// clicks pause and unpause, so playback carries on).
+    /// clicks pause and unpause, so playback carries on). Elsewhere the mouse is left free
+    /// for normal clicking.
     fn player_clicks(&mut self, ctx: &egui::Context) {
         if !self.top().is_player() {
             return;
         }
-        let (click, double) = ctx.input(|i| {
-            (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary))
+        let (click, double, origin) = ctx.input(|i| {
+            (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.press_origin())
         });
+        // Clicks on the seek bar seek instead (the player handles them).
+        if origin.is_some_and(|pos| self.top().on_controls(pos)) {
+            return;
+        }
         if click {
             let nav = self.route(ctx, Press { action: Action::PlayPause, repeat: false });
             self.apply(ctx, nav);

@@ -2,8 +2,8 @@
 //!
 //! With the remote: Up from the top of a screen focuses it, Left/Right moves between items,
 //! OK on the search box starts typing (needs a keyboard), Down returns to the screen.
-//! With a keyboard: just start typing anywhere to search. With a mouse there's also a Back
-//! button (the remote and keyboard have their own Back).
+//! With a keyboard: just start typing anywhere to search. There's also a Back button on
+//! screens that have somewhere to go back to.
 
 use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
 
@@ -16,11 +16,10 @@ pub const HEIGHT: f32 = 72.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     Search,
+    Back,
     Fullscreen,
     Settings,
 }
-
-const ITEMS: [Item; 3] = [Item::Search, Item::Fullscreen, Item::Settings];
 
 pub enum Event {
     None,
@@ -32,7 +31,7 @@ pub enum Event {
     Cancel,
     OpenSettings,
     ToggleFullscreen,
-    /// The Back button was clicked.
+    /// The Back button was clicked or pressed.
     Back,
 }
 
@@ -43,6 +42,8 @@ pub struct TopBar {
     /// Whether the search box had keyboard focus last frame (egui drops it on Esc before
     /// we get to look, so this is how Esc in the box is recognised).
     text_focused_last: bool,
+    /// Whether the Back button is showing.
+    can_go_back: bool,
 }
 
 fn search_id() -> egui::Id {
@@ -62,11 +63,18 @@ pub fn typed_text(ctx: &egui::Context) -> bool {
 }
 
 impl TopBar {
+    /// The items in d-pad order (left to right).
+    fn items(&self) -> Vec<Item> {
+        let back = self.can_go_back.then_some(Item::Back);
+        [Some(Item::Search), back, Some(Item::Fullscreen), Some(Item::Settings)].into_iter().flatten().collect()
+    }
+
     pub fn handle(&mut self, ctx: &egui::Context, press: Press) -> Event {
-        let i = ITEMS.iter().position(|it| Some(*it) == self.focus).unwrap_or(0);
+        let items = self.items();
+        let i = items.iter().position(|it| Some(*it) == self.focus).unwrap_or(0);
         match press.action {
-            Action::Left => self.focus = Some(ITEMS[i.saturating_sub(1)]),
-            Action::Right => self.focus = Some(ITEMS[(i + 1).min(ITEMS.len() - 1)]),
+            Action::Left => self.focus = Some(items[i.saturating_sub(1)]),
+            Action::Right => self.focus = Some(items[(i + 1).min(items.len() - 1)]),
             Action::Down | Action::Back => {
                 self.focus = None;
                 return Event::FocusContent;
@@ -74,6 +82,7 @@ impl TopBar {
             _ if press.is_activate() => match self.focus {
                 Some(Item::Settings) => return Event::OpenSettings,
                 Some(Item::Fullscreen) => return Event::ToggleFullscreen,
+                Some(Item::Back) => return Event::Back,
                 _ => focus_text(ctx),
             },
             _ => {}
@@ -83,6 +92,10 @@ impl TopBar {
 
     /// `can_go_back`: there's a screen to go back to, so show the Back button.
     pub fn ui(&mut self, ui: &mut Ui, rect: Rect, sh: &mut Shared, can_go_back: bool) -> Event {
+        self.can_go_back = can_go_back;
+        if !can_go_back && self.focus == Some(Item::Back) {
+            self.focus = Some(Item::Fullscreen);
+        }
         let painter = ui.painter().clone();
         painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", TextStyle::Heading.resolve(ui.style()), theme::FOCUS);
 
@@ -134,7 +147,7 @@ impl TopBar {
         if can_go_back {
             let back_rect = Rect::from_min_size(fs_rect.min - vec2(160.0 + 20.0, 0.0), vec2(160.0, fs_rect.height()));
             let back = ui.interact(back_rect, egui::Id::new("flex-back"), Sense::click());
-            widgets::button(&painter, back_rect, "‹ Back", back.hovered(), ui.style());
+            widgets::button(&painter, back_rect, "‹ Back", back.hovered() || self.focus == Some(Item::Back), ui.style());
             if back.clicked() {
                 event = Event::Back;
             }
