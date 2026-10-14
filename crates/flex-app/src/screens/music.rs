@@ -3,6 +3,7 @@
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
 use flex_core::music::{Album, Artist, MusicCatalog};
+use flex_core::musicbrainz::ReleaseGroup;
 use flex_core::natural::natural_cmp;
 
 use super::library::LibraryView;
@@ -46,8 +47,9 @@ fn catalog(sh: &Shared, library_id: i64) -> Option<std::sync::Arc<MusicCatalog>>
     sh.lib(library_id)?.music.clone()
 }
 
-fn cover_path(album: &Album) -> Option<String> {
-    album.cover.as_ref().map(|c| format!("file:{c}"))
+/// An album's cover: its own art, else MusicBrainz's.
+fn cover_path(sh: &Shared, library_id: i64, album: &Album) -> Option<String> {
+    sh.lib(library_id)?.album_cover(album)
 }
 
 fn duration_text(secs: f64) -> String {
@@ -55,45 +57,15 @@ fn duration_text(secs: f64) -> String {
     if mins >= 60 { format!("{} h {} min", mins / 60, mins % 60) } else { format!("{mins} min") }
 }
 
-/// An album card: square cover, then the title and artist · year.
-fn paint_album(painter: &Painter, sh: &mut Shared, rect: Rect, album: &Album, sub: &str, focused: bool, style: &egui::Style) {
-    let cover = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width()));
-    match cover_path(album).and_then(|c| sh.images.get(&c, Size::Poster)) {
-        Some(t) => paint_cover(painter, cover, &t),
-        None => {
-            painter.rect_filled(cover, CornerRadius::same(8), theme::ROW);
-            let galley = painter.layout(album.title.clone(), TextStyle::Body.resolve(style), theme::DIM, cover.width() - 30.0);
-            painter.galley(cover.center() - galley.size() / 2.0, galley, theme::DIM);
-        }
-    }
-    if focused {
-        painter.rect_stroke(cover, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-    }
-    let text = Rect::from_min_max(pos2(rect.left(), cover.bottom() + 8.0), rect.max);
-    let clip = painter.with_clip_rect(text);
-    let color = if focused { theme::FOCUS } else { theme::TEXT };
-    clip.text(text.left_top(), Align2::LEFT_TOP, &album.title, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
-}
-
-/// When any of the album's tracks was last played (0 = never).
-fn album_played(state: &LibState, album: &Album) -> i64 {
-    album.tracks.iter().filter_map(|t| state.tree.file(t.file_id)?.progress.last_played).max().unwrap_or(0)
-}
-
-/// The newest of an artist's albums (their own first) that has a cover.
-fn artist_cover(music: &MusicCatalog, artist: &Artist) -> Option<String> {
-    artist.albums.iter().chain(&artist.appears_on).find_map(|&i| cover_path(&music.albums[i]))
-}
-
-/// An artist card: one of their covers (or their name on a tile), then name and summary.
-fn paint_artist(painter: &Painter, sh: &mut Shared, rect: Rect, music: &MusicCatalog, artist: &Artist, focused: bool, style: &egui::Style) {
+/// An album card: square cover (or the title on a tile), then the title and a second line.
+#[allow(clippy::too_many_arguments)]
+fn paint_card(painter: &Painter, sh: &mut Shared, rect: Rect, title: &str, cover: Option<&str>, sub: &str, focused: bool, style: &egui::Style) {
     let tile = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width()));
-    match artist_cover(music, artist).and_then(|c| sh.images.get(&c, Size::Poster)) {
+    match cover.and_then(|c| sh.images.get(c, Size::Poster)) {
         Some(t) => paint_cover(painter, tile, &t),
         None => {
             painter.rect_filled(tile, CornerRadius::same(8), theme::ROW);
-            let galley = painter.layout(artist.name.clone(), TextStyle::Body.resolve(style), theme::DIM, tile.width() - 30.0);
+            let galley = painter.layout(title.to_owned(), TextStyle::Body.resolve(style), theme::DIM, tile.width() - 30.0);
             painter.galley(tile.center() - galley.size() / 2.0, galley, theme::DIM);
         }
     }
@@ -103,8 +75,30 @@ fn paint_artist(painter: &Painter, sh: &mut Shared, rect: Rect, music: &MusicCat
     let text = Rect::from_min_max(pos2(rect.left(), tile.bottom() + 8.0), rect.max);
     let clip = painter.with_clip_rect(text);
     let color = if focused { theme::FOCUS } else { theme::TEXT };
-    clip.text(text.left_top(), Align2::LEFT_TOP, &artist.name, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, artist_summary(music, artist), TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Small.resolve(style), color);
+    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
+}
+
+/// When any of the album's tracks was last played (0 = never).
+fn album_played(state: &LibState, album: &Album) -> i64 {
+    album.tracks.iter().filter_map(|t| state.tree.file(t.file_id)?.progress.last_played).max().unwrap_or(0)
+}
+
+/// The newest of an artist's albums (their own first) that has a cover.
+fn artist_cover(sh: &Shared, library_id: i64, music: &MusicCatalog, artist: &Artist) -> Option<String> {
+    artist.albums.iter().chain(&artist.appears_on).find_map(|&i| cover_path(sh, library_id, &music.albums[i]))
+}
+
+/// An artist's photo (from Wikimedia), else one of their covers.
+fn artist_image(sh: &Shared, library_id: i64, music: &MusicCatalog, artist: &Artist) -> Option<String> {
+    sh.artist_info(library_id, &artist.name).and_then(|i| i.image.clone()).or_else(|| artist_cover(sh, library_id, music, artist))
+}
+
+/// An artist card: their photo or one of their covers, then name and summary.
+#[allow(clippy::too_many_arguments)]
+fn paint_artist(painter: &Painter, sh: &mut Shared, library_id: i64, rect: Rect, music: &MusicCatalog, artist: &Artist, focused: bool, style: &egui::Style) {
+    let image = artist_image(sh, library_id, music, artist);
+    paint_card(painter, sh, rect, &artist.name, image.as_deref(), &artist_summary(music, artist), focused, style);
 }
 
 /// A row of toolbar buttons; hovering one focuses it (`toolbar`). Returns whether the
@@ -152,6 +146,7 @@ fn artist_year(album: &Album) -> String {
 fn album_grid(
     ui: &mut Ui,
     sh: &mut Shared,
+    library_id: i64,
     rect: Rect,
     music: &MusicCatalog,
     albums: &[usize],
@@ -162,7 +157,8 @@ fn album_grid(
     let style = ui.style().clone();
     widgets::grid(ui, rect, albums.len(), GRID, grid, focused, |painter, i, r, f| {
         let album = &music.albums[albums[i]];
-        paint_album(painter, sh, r, album, &sub(i, album), f, &style);
+        let cover = cover_path(sh, library_id, album);
+        paint_card(painter, sh, r, &album.title, cover.as_deref(), &sub(i, album), f, &style);
     })
 }
 
@@ -359,9 +355,9 @@ impl Screen for AlbumsView {
         let grid_focused = focused && self.toolbar.is_none();
         let hit = match self.show {
             Show::Artists => widgets::grid(ui, content, items.len(), GRID, &mut self.grid, grid_focused, |painter, i, r, f| {
-                paint_artist(painter, sh, r, &music, &music.artists[items[i]], f, &style);
+                paint_artist(painter, sh, self.library_id, r, &music, &music.artists[items[i]], f, &style);
             }),
-            _ => album_grid(ui, sh, content, &music, &items, &mut self.grid, grid_focused, |_, a| artist_year(a)),
+            _ => album_grid(ui, sh, self.library_id, content, &music, &items, &mut self.grid, grid_focused, |_, a| artist_year(a)),
         };
         if hit.any() {
             self.toolbar = None;
@@ -412,10 +408,12 @@ impl Screen for AlbumPage {
                 ListInput::None => Nav::None,
             };
         }
-        match self.actions.handle(press, 2 + album.artists.len()) {
+        let artists = album.artists.len();
+        match self.actions.handle(press, 3 + artists) {
             ListInput::Activate(0) => play_album(sh, self.library_id, &self.key, 0, false),
             ListInput::Activate(1) => play_album(sh, self.library_id, &self.key, 0, true),
-            ListInput::Activate(i) => Nav::push(ArtistPage::new(sh, self.library_id, album.artists[i - 2].clone())),
+            ListInput::Activate(i) if i < 2 + artists => Nav::push(ArtistPage::new(sh, self.library_id, album.artists[i - 2].clone())),
+            ListInput::Activate(_) => Nav::push(MatchAlbum::new(sh, self.library_id, album)),
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::None => Nav::None,
         }
@@ -427,7 +425,7 @@ impl Screen for AlbumPage {
         let style = ui.style().clone();
         let left = Rect::from_min_size(rect.min, vec2(PAGE_COVER, rect.height()));
         let cover = Rect::from_min_size(left.min, vec2(PAGE_COVER, PAGE_COVER));
-        match cover_path(album).and_then(|c| sh.images.get(&c, Size::Poster)) {
+        match cover_path(sh, self.library_id, album).and_then(|c| sh.images.get(&c, Size::Poster)) {
             Some(t) => paint_cover(ui.painter(), cover, &t),
             None => {
                 ui.painter().rect_filled(cover, CornerRadius::same(8), theme::ROW);
@@ -449,6 +447,15 @@ impl Screen for AlbumPage {
 
         let mut rows = vec![Row::new(Icon::Video, "Play"), Row::new(Icon::Refresh, "Shuffle")];
         rows.extend(album.artists.iter().map(|a| Row::new(Icon::None, a).detail("Artist")));
+        let matched = sh.lib(self.library_id).and_then(|l| l.music_matches.get(&self.key).cloned());
+        let status = match matched {
+            Some(m) => match m.release_group {
+                Some(rg) => format!("Matched: {}", [rg.kind_label(), rg.year.map(|y| y.to_string()).unwrap_or_default()].join(" ").trim()),
+                None => "Not found".to_owned(),
+            },
+            None => String::new(),
+        };
+        rows.push(Row::new(Icon::Refresh, "Match online…").detail(status));
         let actions = Rect::from_min_max(pos2(left.left(), y), left.max);
         // Two lists on one page: each needs its own scroll ID.
         let hit = ui.push_id("actions", |ui| widgets::list(ui, actions, &rows, &mut self.actions, focused && !self.on_tracks)).inner;
@@ -514,8 +521,18 @@ const ARTIST_SORTS: [(ArtistSort, &str, &str); 4] = [
     (ArtistSort::Played, "Recently played", "played"),
 ];
 const ARTIST_SORT_SETTING: &str = "artist_sort";
+const PHOTO: f32 = 220.0;
 
-/// An artist: their albums, then albums by others that they're on.
+/// A card on an artist's page.
+enum Tile {
+    /// One of the library's albums (index into the catalog).
+    Local(usize),
+    /// One of their albums that isn't in the library (from MusicBrainz).
+    Remote(ReleaseGroup),
+}
+
+/// An artist: their albums, the ones they're on, then (from MusicBrainz) the rest of
+/// their albums.
 pub struct ArtistPage {
     library_id: i64,
     name: String,
@@ -532,10 +549,10 @@ impl ArtistPage {
         Self { library_id, name, sort, on_toolbar: false, grid: GridState::default() }
     }
 
-    /// Their albums then the ones they're on, each in the chosen order; and how many are
-    /// their own.
-    fn albums(&self, sh: &Shared, music: &MusicCatalog) -> (Vec<usize>, usize) {
-        let (Some(artist), Some(state)) = (music.artist(&self.name), sh.lib(self.library_id)) else { return (Vec::new(), 0) };
+    /// Their albums, the ones they're on, then the rest of their discography, each in the
+    /// chosen order; and how many of the first two kinds there are.
+    fn tiles(&self, sh: &Shared, music: &MusicCatalog) -> (Vec<Tile>, usize, usize) {
+        let (Some(artist), Some(state)) = (music.artist(&self.name), sh.lib(self.library_id)) else { return (Vec::new(), 0, 0) };
         let a = &music.albums;
         let sorted = |list: &[usize]| {
             let mut list = list.to_vec();
@@ -551,8 +568,22 @@ impl ArtistPage {
             list
         };
         let own = sorted(&artist.albums);
-        let count = own.len();
-        (own.into_iter().chain(sorted(&artist.appears_on)).collect(), count)
+        let on = sorted(&artist.appears_on);
+        let (own_count, local_count) = (own.len(), own.len() + on.len());
+        let mut tiles: Vec<Tile> = own.into_iter().chain(on).map(Tile::Local).collect();
+        // The rest of their albums, from MusicBrainz.
+        if let Some(info) = sh.artist_info(self.library_id, &artist.name) {
+            let have: std::collections::HashSet<&str> =
+                state.music_matches.values().filter_map(|m| m.release_group.as_ref()).map(|rg| rg.id.as_str()).collect();
+            let mut rest: Vec<&ReleaseGroup> = info.discography.iter().filter(|rg| !have.contains(rg.id.as_str())).collect();
+            match self.sort {
+                ArtistSort::Oldest => {} // already oldest first
+                ArtistSort::Title => rest.sort_by(|x, y| natural_cmp(&x.title, &y.title)),
+                ArtistSort::Newest | ArtistSort::Played => rest.reverse(),
+            }
+            tiles.extend(rest.into_iter().cloned().map(Tile::Remote));
+        }
+        (tiles, own_count, local_count)
     }
 
     fn sort_label(&self) -> String {
@@ -580,9 +611,15 @@ impl Screen for ArtistPage {
             return Nav::Pop;
         }
         let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        let (albums, _) = self.albums(sh, &music);
-        match self.grid.handle(press, albums.len()) {
-            ListInput::Activate(i) => Nav::push(AlbumPage::new(self.library_id, music.albums[albums[i]].key.clone())),
+        let (tiles, _, _) = self.tiles(sh, &music);
+        match self.grid.handle(press, tiles.len()) {
+            ListInput::Activate(i) => match &tiles[i] {
+                Tile::Local(album) => Nav::push(AlbumPage::new(self.library_id, music.albums[*album].key.clone())),
+                Tile::Remote(rg) => {
+                    sh.toast(format!("{} isn't in your library", rg.title));
+                    Nav::None
+                }
+            },
             ListInput::AtTop => {
                 self.on_toolbar = true;
                 Nav::None
@@ -593,22 +630,150 @@ impl Screen for ArtistPage {
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let Some(music) = catalog(sh, self.library_id) else { return Nav::None };
-        let (albums, own) = self.albums(sh, &music);
-        let subtitle = music.artist(&self.name).map(|a| artist_summary(&music, a)).unwrap_or_default();
+        let (tiles, own, local) = self.tiles(sh, &music);
+        let mut subtitle = music.artist(&self.name).map(|a| artist_summary(&music, a)).unwrap_or_default();
+        if tiles.len() > local {
+            subtitle.push_str(&format!(" · {} more not in your library", tiles.len() - local));
+        }
         let style = ui.style().clone();
         let name = music.artist(&self.name).map_or(self.name.clone(), |a| a.name.clone());
-        let body = widgets::header(ui.painter(), rect, &name, &subtitle, &style);
+        // Their photo, if Wikimedia has one, beside the name.
+        let photo = sh.artist_info(self.library_id, &self.name).and_then(|i| i.image.clone());
+        let texture = photo.and_then(|p| sh.images.get(&p, Size::Profile));
+        let text_left = if let Some(t) = &texture {
+            paint_cover(ui.painter(), Rect::from_min_size(rect.min, vec2(PHOTO, PHOTO)), t);
+            rect.left() + PHOTO + 36.0
+        } else {
+            rect.left()
+        };
+        let body = widgets::header(ui.painter(), Rect::from_min_max(pos2(text_left, rect.top()), rect.max), &name, &subtitle, &style);
         let toolbar = Rect::from_min_size(body.min, vec2(body.width(), TOOLBAR_H));
         let mut at = self.on_toolbar.then_some(0);
         draw_toolbar(ui, toolbar, &[self.sort_label()], &mut at, focused);
         self.on_toolbar = at.is_some();
-        let content = Rect::from_min_max(pos2(body.left(), toolbar.bottom() + 24.0), body.max);
-        let hit = album_grid(ui, sh, content, &music, &albums, &mut self.grid, focused && !self.on_toolbar, |i, a| {
-            if i < own { a.year.map(|y| y.to_string()).unwrap_or_default() } else { format!("On: {}", artist_year(a)) }
+        let top = if texture.is_some() { toolbar.bottom().max(rect.top() + PHOTO) } else { toolbar.bottom() };
+        let content = Rect::from_min_max(pos2(rect.left(), top + 24.0), rect.max);
+        let library_id = self.library_id;
+        let hit = widgets::grid(ui, content, tiles.len(), GRID, &mut self.grid, focused && !self.on_toolbar, |painter, i, r, f| match &tiles[i] {
+            Tile::Local(index) => {
+                let album = &music.albums[*index];
+                let cover = cover_path(sh, library_id, album);
+                let sub = if i < own { album.year.map(|y| y.to_string()).unwrap_or_default() } else { format!("On: {}", artist_year(album)) };
+                paint_card(painter, sh, r, &album.title, cover.as_deref(), &sub, f, &style);
+            }
+            Tile::Remote(rg) => {
+                let cover = flex_core::musicbrainz::cover_url(&rg.id);
+                let year = rg.year.map(|y| format!(" · {y}")).unwrap_or_default();
+                let sub = format!("Not in your library{year}");
+                paint_card(painter, sh, r, &rg.title, Some(&cover), &sub, f, &style);
+            }
         });
         if hit.any() {
             self.on_toolbar = false;
         }
+        Nav::None
+    }
+}
+
+/// What a background search found (or why it failed), once it's done.
+type SearchResults = std::sync::Arc<std::sync::Mutex<Option<Result<Vec<ReleaseGroup>, String>>>>;
+
+/// Searching MusicBrainz for an album, to pick its match by hand.
+pub struct MatchAlbum {
+    library_id: i64,
+    key: String,
+    title: String,
+    artist: String,
+    /// Filled in by the search thread.
+    results: SearchResults,
+    list: ListState,
+}
+
+impl MatchAlbum {
+    pub fn new(sh: &Shared, library_id: i64, album: &Album) -> Self {
+        let results = SearchResults::default();
+        let (out, ctx) = (std::sync::Arc::clone(&results), sh.ctx.clone());
+        let (title, artist) = (album.title.clone(), album.artist.clone());
+        let (t, a) = (title.clone(), (artist != "Various Artists").then(|| artist.clone()));
+        std::thread::spawn(move || {
+            let mb = flex_core::musicbrainz::MusicBrainz::new();
+            let found = (|| -> anyhow::Result<Vec<ReleaseGroup>> {
+                let mut found: Vec<ReleaseGroup> = mb.search(&t, a.as_deref())?.into_iter().map(|(rg, _)| rg).collect();
+                // Few hits: the artist may be spelled differently there, so try the title alone.
+                if found.len() < 5 {
+                    for (rg, _) in mb.search(&t, None)? {
+                        if !found.iter().any(|f| f.id == rg.id) {
+                            found.push(rg);
+                        }
+                    }
+                }
+                Ok(found)
+            })();
+            if let Ok(mut r) = out.lock() {
+                *r = Some(found.map_err(|e| format!("{e:#}")));
+            }
+            ctx.request_repaint();
+        });
+        let mut list = ListState::default();
+        list.select(1); // the first result, not "Not on MusicBrainz"
+        Self { library_id, key: album.key.clone(), title, artist, results, list }
+    }
+
+    fn found(&self) -> Vec<ReleaseGroup> {
+        match self.results.lock().ok().as_deref() {
+            Some(Some(Ok(found))) => found.clone(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+impl Screen for MatchAlbum {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        let found = self.found();
+        match self.list.handle(press, 1 + found.len()) {
+            ListInput::Activate(0) => {
+                sh.set_album_match(self.library_id, &self.key, None);
+                sh.toast(format!("{}: not matched", self.title));
+                Nav::Pop
+            }
+            ListInput::Activate(i) => {
+                sh.set_album_match(self.library_id, &self.key, Some(&found[i - 1]));
+                Nav::Pop
+            }
+            ListInput::AtTop => Nav::FocusTopBar,
+            ListInput::None => Nav::None,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        let subtitle = format!("{} · {}", self.title, self.artist);
+        let body = widgets::header(ui.painter(), rect, "Match on MusicBrainz", &subtitle, ui.style());
+        let results = self.results.lock().ok().and_then(|r| r.clone());
+        let found = match results {
+            Some(Ok(found)) => found,
+            waiting_or_failed => {
+                let message = match waiting_or_failed {
+                    Some(Err(e)) => format!("Couldn't search: {e}"),
+                    _ => "Searching…".to_owned(),
+                };
+                widgets::message(ui.painter(), body, &message, ui.style());
+                return Nav::None;
+            }
+        };
+        let current = sh.lib(self.library_id).and_then(|l| l.music_matches.get(&self.key)?.release_group.as_ref().map(|rg| rg.id.clone()));
+        let mut rows = vec![Row::new(Icon::Remove, "Not on MusicBrainz").detail("Don't match")];
+        rows.extend(found.iter().map(|rg| {
+            let artists: Vec<&str> = rg.artists.iter().map(|(n, _)| n.as_str()).collect();
+            let mut detail = [rg.kind_label(), rg.year.map(|y| y.to_string()).unwrap_or_default()].join(" ").trim().to_owned();
+            if current.as_deref() == Some(rg.id.as_str()) {
+                detail = format!("current · {detail}");
+            }
+            Row::new(Icon::None, format!("{} — {}", rg.title, artists.join(", "))).detail(detail)
+        }));
+        widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }
 }

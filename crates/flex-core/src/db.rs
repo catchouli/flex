@@ -144,7 +144,32 @@ const MIGRATIONS: &[&str] = &[
         data        TEXT NOT NULL, -- JSON [[file id, parse::Parsed], ...]
         PRIMARY KEY (library_id, dir)
     );",
+    // 10: music albums matched on MusicBrainz, and what's known about their artists
+    "CREATE TABLE music_matches (
+        library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        album_key  TEXT NOT NULL,   -- music::Album::key
+        data       TEXT,            -- JSON musicbrainz::ReleaseGroup; NULL = not found
+        manual     INTEGER NOT NULL DEFAULT 0,
+        checked_at INTEGER NOT NULL,
+        PRIMARY KEY (library_id, album_key)
+    );
+    CREATE TABLE music_artists (
+        artist     TEXT PRIMARY KEY, -- MusicBrainz id
+        fetched_at INTEGER NOT NULL,
+        data       TEXT NOT NULL     -- JSON musicbrainz::ArtistInfo
+    );",
 ];
+
+/// What MusicBrainz said about one album.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MusicMatch {
+    /// `None` = looked up, nothing close enough (or unmatched by hand).
+    pub release_group: Option<crate::musicbrainz::ReleaseGroup>,
+    /// Chosen by hand: never redone automatically.
+    pub manual: bool,
+    /// Unix seconds.
+    pub checked_at: i64,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryEntry {
@@ -711,6 +736,54 @@ impl Db {
 
     /// Stores new folder parses (dir, fingerprint, JSON data) and forgets folders that
     /// no longer exist.
+    /// Every album of a library that's been looked up, by album key.
+    pub fn music_matches(&self, library_id: i64) -> Result<HashMap<String, MusicMatch>> {
+        let mut stmt = self.conn.prepare("SELECT album_key, data, manual, checked_at FROM music_matches WHERE library_id = ?1")?;
+        let rows = stmt.query_map([library_id], |r| {
+            let data: Option<String> = r.get(1)?;
+            Ok((r.get::<_, String>(0)?, data, r.get::<_, bool>(2)?, r.get::<_, i64>(3)?))
+        })?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (key, data, manual, checked_at) = row?;
+            let release_group = data.and_then(|d| serde_json::from_str(&d).ok());
+            out.insert(key, MusicMatch { release_group, manual, checked_at });
+        }
+        Ok(out)
+    }
+
+    pub fn set_music_match(&self, library_id: i64, album_key: &str, release_group: Option<&crate::musicbrainz::ReleaseGroup>, manual: bool) -> Result<()> {
+        let data = release_group.map(serde_json::to_string).transpose()?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO music_matches (library_id, album_key, data, manual, checked_at)
+             VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))",
+            params![library_id, album_key, data, manual],
+        )?;
+        Ok(())
+    }
+
+    /// Artist info fetched within `max_age_secs`, by MusicBrainz id.
+    pub fn music_artists(&self, max_age_secs: i64) -> Result<HashMap<String, crate::musicbrainz::ArtistInfo>> {
+        let mut stmt = self.conn.prepare("SELECT artist, data FROM music_artists WHERE fetched_at >= strftime('%s', 'now') - ?1")?;
+        let rows = stmt.query_map([max_age_secs], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (id, data) = row?;
+            if let Ok(info) = serde_json::from_str(&data) {
+                out.insert(id, info);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn set_music_artist(&self, artist: &str, info: &crate::musicbrainz::ArtistInfo) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO music_artists (artist, fetched_at, data) VALUES (?1, strftime('%s', 'now'), ?2)",
+            params![artist, serde_json::to_string(info)?],
+        )?;
+        Ok(())
+    }
+
     pub fn save_parse_cache(&mut self, library_id: i64, fresh: &[(String, String, String)], gone: &[String]) -> Result<()> {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
@@ -874,6 +947,27 @@ impl Db {
         }
         tx.commit()?;
         Ok(summary)
+    }
+}
+
+#[cfg(test)]
+mod music_tests {
+    use super::*;
+    use crate::musicbrainz::{ArtistInfo, ReleaseGroup};
+
+    #[test]
+    fn stores_music_matches_and_artists() {
+        let db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Music", Path::new("/m"), LibraryKind::Music).unwrap();
+        let rg = ReleaseGroup { id: "rg".into(), title: "T".into(), kind: Some("Album".into()), secondary: vec![], year: Some(2005), artists: vec![("A".into(), "a1".into())] };
+        db.set_music_match(lib, "dir\u{1f}t", Some(&rg), false).unwrap();
+        db.set_music_match(lib, "other\u{1f}", None, false).unwrap();
+        let matches = db.music_matches(lib).unwrap();
+        assert_eq!(matches["dir\u{1f}t"].release_group.as_ref(), Some(&rg));
+        assert_eq!(matches["other\u{1f}"].release_group, None);
+        let info = ArtistInfo { name: "A".into(), image: None, discography: vec![rg] };
+        db.set_music_artist("a1", &info).unwrap();
+        assert_eq!(db.music_artists(3600).unwrap()["a1"], info);
     }
 }
 

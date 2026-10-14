@@ -106,8 +106,12 @@ impl Images {
         for _ in 0..WORKERS {
             let (job_rx, result_tx, ctx) = (job_rx.clone(), result_tx.clone(), ctx.clone());
             std::thread::spawn(move || {
-                let agent: ureq::Agent =
-                    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
+                // Wikimedia turns away requests that don't say who's asking.
+                let agent: ureq::Agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(30)))
+                    .user_agent(flex_core::musicbrainz::USER_AGENT)
+                    .build()
+                    .into();
                 loop {
                     let job = match job_rx.lock().unwrap_or_else(|e| e.into_inner()).recv() {
                         Ok(job) => job,

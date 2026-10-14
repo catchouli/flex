@@ -10,7 +10,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use anyhow::Result;
 use eframe::egui;
 use flex_core::catalog::{self, Catalog, Group};
-use flex_core::music::MusicCatalog;
+use flex_core::db::MusicMatch;
+use flex_core::music::{Album, MusicCatalog};
+use flex_core::musicbrainz::{ArtistInfo, ReleaseGroup};
 use flex_core::parse::Parsed;
 use flex_core::progress::{self, ContinueItem, Progress};
 use flex_core::search::{Item, SearchIndex};
@@ -38,6 +40,10 @@ pub struct LibState {
     pub music: Option<Arc<MusicCatalog>>,
     /// Folders read / to read, while reading tags.
     pub reading_tags: Option<(usize, usize)>,
+    /// Music: albums looked up on MusicBrainz, by album key.
+    pub music_matches: Arc<HashMap<String, MusicMatch>>,
+    /// Music: MusicBrainz artist ids by lowercased name, from the matches.
+    pub music_artist_ids: Arc<HashMap<String, String>>,
 }
 
 pub use flex_core::titles::Titles;
@@ -71,7 +77,30 @@ impl LibState {
             fetching: None,
             music: None,
             reading_tags: None,
+            music_matches: Arc::default(),
+            music_artist_ids: Arc::default(),
         }
+    }
+
+    /// An album's cover: art next to its tracks, else MusicBrainz's (Cover Art Archive).
+    pub fn album_cover(&self, album: &Album) -> Option<String> {
+        if let Some(local) = &album.cover {
+            return Some(format!("file:{local}"));
+        }
+        let rg = self.music_matches.get(&album.key)?.release_group.as_ref()?;
+        Some(flex_core::musicbrainz::cover_url(&rg.id))
+    }
+
+    fn set_music_matches(&mut self, matches: HashMap<String, MusicMatch>) {
+        let mut ids = HashMap::new();
+        for rg in matches.values().filter_map(|m| m.release_group.as_ref()) {
+            for (name, id) in &rg.artists {
+                ids.entry(name.to_lowercase()).or_insert_with(|| id.clone());
+            }
+        }
+        self.music_matches = Arc::new(matches);
+        self.music_artist_ids = Arc::new(ids);
+        self.version += 1;
     }
 
     pub fn is_music(&self) -> bool {
@@ -150,7 +179,22 @@ enum ScanMsg {
     /// Music: tags read in (done, total) folders, and the finished albums.
     ReadingTags(i64, usize, usize),
     Music(i64, Result<MusicCatalog, String>),
+    /// MusicBrainz: albums looked up (done, total), and the end of that pass.
+    MusicMatching(i64, usize, usize),
+    MusicMatchDone(i64, Result<String, String>),
+    /// Artist details fetched (done, total), and the end of that pass.
+    MusicArtists(i64, usize, usize),
+    MusicArtistsDone(i64, Result<usize, String>),
+    /// An artist fetched on its own (after a match by hand).
+    MusicArtistReady(i64),
 }
+
+/// Look again for albums MusicBrainz didn't have after this long.
+const MUSIC_RETRY_SECS: i64 = 30 * 24 * 3600;
+/// Re-fetch artists' details (new albums, photos) after this long.
+const MUSIC_ARTIST_MAX_AGE_SECS: i64 = 90 * 24 * 3600;
+/// Give up on a matching pass after this many failures in a row (offline, say).
+const MUSIC_MAX_FAILURES: usize = 5;
 
 /// Re-fetch details this often, so new episodes of running series get their titles.
 const DETAILS_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
@@ -195,6 +239,8 @@ pub struct Shared {
     /// Cancel flags for running scans, by library id.
     scan_cancel: HashMap<i64, Arc<AtomicBool>>,
     toasts: Vec<String>,
+    /// Music artists' details from MusicBrainz (photo, discography), by MusicBrainz id.
+    pub music_artists: Arc<HashMap<String, ArtistInfo>>,
     /// Closing the window hides Flex in the system tray instead of quitting.
     pub close_to_tray: bool,
     pub updater: crate::update::Updater,
@@ -232,6 +278,7 @@ impl Shared {
             scan_rx,
             scan_cancel: HashMap::new(),
             toasts: Vec::new(),
+            music_artists: Arc::default(),
             close_to_tray: false,
             updater: crate::update::Updater::default(),
             web: None,
@@ -240,6 +287,7 @@ impl Shared {
             web_rx,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
+        shared.music_artists = Arc::new(shared.db.music_artists(i64::MAX).unwrap_or_default());
         if shared.auto_update() {
             shared.updater.set_enabled(true, ctx);
         }
@@ -591,6 +639,159 @@ impl Shared {
             let _ = tx.send(ScanMsg::Music(id, result.map_err(|e| format!("{e:#}"))));
             ctx.request_repaint();
         });
+    }
+
+    /// Looks up albums on MusicBrainz that haven't been (or weren't found a while ago),
+    /// in the background, one a second.
+    pub fn start_music_matching(&mut self, id: i64) {
+        let Some(state) = self.lib(id) else { return };
+        let Some(music) = state.music.clone() else { return };
+        if state.matching.is_some() {
+            return;
+        }
+        let now = now_unix();
+        // (album key, title, artist, tracks, year)
+        type Lookup = (String, String, Option<String>, usize, Option<i32>);
+        let todo: Vec<Lookup> = music
+            .albums
+            .iter()
+            .filter(|a| !a.singles)
+            .filter(|a| match state.music_matches.get(&a.key) {
+                None => true,
+                Some(m) => !m.manual && m.release_group.is_none() && now - m.checked_at > MUSIC_RETRY_SECS,
+            })
+            .map(|a| {
+                let artist = (a.artist != "Various Artists" && a.artist != "Unknown artist").then(|| a.artist.clone());
+                (a.key.clone(), a.title.clone(), artist, a.tracks.len(), a.year)
+            })
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        let total = todo.len();
+        if let Some(l) = self.lib_mut(id) {
+            l.matching = Some((0, total));
+        }
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        std::thread::spawn(move || {
+            let result = (|| -> Result<String> {
+                let mb = flex_core::musicbrainz::MusicBrainz::new();
+                let db = Db::open(&db_path)?;
+                let (mut matched, mut missed, mut failures) = (0, 0, 0);
+                for (i, (key, title, artist, tracks, year)) in todo.iter().enumerate() {
+                    match mb.find_album(title, artist.as_deref(), *tracks, *year) {
+                        Ok(found) => {
+                            failures = 0;
+                            if found.is_some() { matched += 1 } else { missed += 1 }
+                            db.set_music_match(id, key, found.as_ref(), false)?;
+                        }
+                        Err(e) => {
+                            log::warn!("MusicBrainz {title:?}: {e:#}");
+                            failures += 1;
+                            if failures >= MUSIC_MAX_FAILURES {
+                                anyhow::bail!("stopped after {failures} failures in a row ({e:#})");
+                            }
+                        }
+                    }
+                    if (i + 1) % 10 == 0 || i + 1 == total {
+                        let _ = tx.send(ScanMsg::MusicMatching(id, i + 1, total));
+                        ctx.request_repaint();
+                    }
+                }
+                Ok(format!("{matched} albums found on MusicBrainz, {missed} not found"))
+            })();
+            let _ = tx.send(ScanMsg::MusicMatchDone(id, result.map_err(|e| format!("{e:#}"))));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Fetches details (photo, discography) for the artists of matched albums, in the
+    /// background.
+    pub fn start_music_artists(&mut self, id: i64) {
+        let Some(state) = self.lib(id) else { return };
+        if state.fetching.is_some() {
+            return;
+        }
+        let fresh = self.db.music_artists(MUSIC_ARTIST_MAX_AGE_SECS).unwrap_or_default();
+        let mut todo: Vec<String> = state.music_artist_ids.values().filter(|a| !fresh.contains_key(*a)).cloned().collect();
+        todo.sort();
+        todo.dedup();
+        if todo.is_empty() {
+            return;
+        }
+        let total = todo.len();
+        if let Some(l) = self.lib_mut(id) {
+            l.fetching = Some((0, total));
+        }
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        std::thread::spawn(move || {
+            let result = (|| -> Result<usize> {
+                let mb = flex_core::musicbrainz::MusicBrainz::new();
+                let db = Db::open(&db_path)?;
+                let (mut done, mut failures) = (0, 0);
+                for (i, artist) in todo.iter().enumerate() {
+                    match mb.artist(artist) {
+                        Ok(info) => {
+                            failures = 0;
+                            done += 1;
+                            db.set_music_artist(artist, &info)?;
+                        }
+                        Err(e) => {
+                            log::warn!("MusicBrainz artist {artist}: {e:#}");
+                            failures += 1;
+                            if failures >= MUSIC_MAX_FAILURES {
+                                anyhow::bail!("stopped after {failures} failures in a row ({e:#})");
+                            }
+                        }
+                    }
+                    if (i + 1) % 10 == 0 || i + 1 == total {
+                        let _ = tx.send(ScanMsg::MusicArtists(id, i + 1, total));
+                        ctx.request_repaint();
+                    }
+                }
+                Ok(done)
+            })();
+            let _ = tx.send(ScanMsg::MusicArtistsDone(id, result.map_err(|e| format!("{e:#}"))));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Sets (or clears) an album's MusicBrainz match by hand.
+    pub fn set_album_match(&mut self, library_id: i64, album_key: &str, release_group: Option<&ReleaseGroup>) {
+        if let Err(e) = self.db.set_music_match(library_id, album_key, release_group, true) {
+            self.toast(format!("Couldn't save the match: {e:#}"));
+            return;
+        }
+        let matches = self.db.music_matches(library_id).unwrap_or_default();
+        if let Some(l) = self.lib_mut(library_id) {
+            l.set_music_matches(matches);
+        }
+        // Its artists straight away, rather than after everyone else's.
+        let todo: Vec<String> = release_group.map(|rg| rg.artists.iter().map(|(_, id)| id.clone()).collect()).unwrap_or_default();
+        let todo: Vec<String> = todo.into_iter().filter(|a| !self.music_artists.contains_key(a)).collect();
+        if todo.is_empty() {
+            return;
+        }
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        std::thread::spawn(move || {
+            let mb = flex_core::musicbrainz::MusicBrainz::new();
+            let Ok(db) = Db::open(&db_path) else { return };
+            for artist in todo {
+                match mb.artist(&artist).and_then(|info| db.set_music_artist(&artist, &info)) {
+                    Ok(()) => {
+                        let _ = tx.send(ScanMsg::MusicArtistReady(library_id));
+                        ctx.request_repaint();
+                    }
+                    Err(e) => log::warn!("MusicBrainz artist {artist}: {e:#}"),
+                }
+            }
+        });
+    }
+
+    /// What MusicBrainz knows about an artist (by name, as tagged), once fetched.
+    pub fn artist_info(&self, library_id: i64, name: &str) -> Option<&ArtistInfo> {
+        let id = self.lib(library_id)?.music_artist_ids.get(&name.to_lowercase())?;
+        self.music_artists.get(id)
     }
 
     /// The TMDB "API Read Access Token": from Settings, or a `tmdb_token` file in the data
@@ -1055,6 +1256,8 @@ impl Shared {
         let mut reorganise = Vec::new();
         let mut rematch = Vec::new();
         let mut fetch = Vec::new();
+        let mut match_music = Vec::new();
+        let mut music_artists = Vec::new();
         while let Ok(msg) = self.scan_rx.try_recv() {
             match msg {
                 ScanMsg::Progress(id, n) => {
@@ -1096,18 +1299,67 @@ impl Shared {
                     }
                 }
                 ScanMsg::DetailsReady(id) => self.reload_details(id),
+                ScanMsg::MusicMatching(id, done, total) => {
+                    let matches = self.db.music_matches(id).unwrap_or_default();
+                    if let Some(l) = self.lib_mut(id) {
+                        l.matching = Some((done, total));
+                        l.set_music_matches(matches);
+                    }
+                }
+                ScanMsg::MusicMatchDone(id, result) => {
+                    let matches = self.db.music_matches(id).unwrap_or_default();
+                    let Some(l) = self.lib_mut(id) else { continue };
+                    l.matching = None;
+                    l.set_music_matches(matches);
+                    match result {
+                        Ok(summary) => {
+                            let msg = format!("{}: {summary}", l.lib.name);
+                            self.toast(msg);
+                        }
+                        Err(e) => {
+                            let msg = format!("{}: MusicBrainz: {e}", l.lib.name);
+                            self.toast(msg);
+                        }
+                    }
+                    music_artists.push(id);
+                }
+                ScanMsg::MusicArtists(id, done, total) => {
+                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    if let Some(l) = self.lib_mut(id) {
+                        l.fetching = Some((done, total));
+                        l.version += 1;
+                    }
+                }
+                ScanMsg::MusicArtistReady(id) => {
+                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    if let Some(l) = self.lib_mut(id) {
+                        l.version += 1;
+                    }
+                }
+                ScanMsg::MusicArtistsDone(id, result) => {
+                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    let Some(l) = self.lib_mut(id) else { continue };
+                    l.fetching = None;
+                    l.version += 1;
+                    if let Err(e) = result {
+                        let msg = format!("{}: couldn't fetch artists: {e}", l.lib.name);
+                        self.toast(msg);
+                    }
+                }
                 ScanMsg::ReadingTags(id, done, total) => {
                     if let Some(l) = self.lib_mut(id) {
                         l.reading_tags = (done < total).then_some((done, total));
                     }
                 }
                 ScanMsg::Music(id, result) => {
+                    let matches = self.db.music_matches(id).unwrap_or_default();
                     let Some(l) = self.lib_mut(id) else { continue };
                     (l.organising, l.reading_tags) = (false, None);
                     match result {
                         Ok(music) => {
                             l.music = Some(Arc::new(music));
-                            l.version += 1;
+                            l.set_music_matches(matches);
+                            match_music.push(id);
                         }
                         Err(e) => {
                             let msg = format!("{}: couldn't read the music: {e}", l.lib.name);
@@ -1155,6 +1407,16 @@ impl Shared {
         }
         for id in reorganise {
             self.organise(id);
+        }
+        for id in match_music {
+            self.start_music_matching(id);
+            // Nothing to look up: go straight on to the artists.
+            if self.lib(id).is_some_and(|l| l.matching.is_none()) {
+                music_artists.push(id);
+            }
+        }
+        for id in music_artists {
+            self.start_music_artists(id);
         }
         for id in rematch {
             self.start_matching(id);
