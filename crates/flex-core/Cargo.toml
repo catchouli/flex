@@ -8,6 +8,7 @@ publish = false
 anyhow = "1.0.104"
 directories = "6.0.0"
 hunch = "2"
+lofty = "0.25.4"
 log = "0.4.34"
 nucleo-matcher = "0.3.1"
 regex = "1.13.1"

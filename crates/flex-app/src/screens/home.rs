@@ -213,6 +213,7 @@ impl Home {
             }
             _ if press.is_activate() => {
                 return match sh.libs.get(self.lib - 1) {
+                    Some(l) if l.is_music() => Nav::push(super::music::AlbumsView::new(sh, l.lib.id)),
                     Some(l) => match sh.library_view(l.lib.id) {
                         crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(sh, l.lib.id)),
                         crate::shared::LibraryView::Folders => Nav::push(LibraryView::new(l.lib.id, String::new())),

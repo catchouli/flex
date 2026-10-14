@@ -87,7 +87,9 @@ impl Mpv {
             mpv.set_option(k, v)?;
         }
         mpv.check(unsafe { (api.mpv_initialize)(handle) }, "initialize")?;
-        unsafe { (api.mpv_request_log_messages)(handle, c"warn".as_ptr()) };
+        // FLEX_MPV_LOG=v (or debug, ...) shows more of mpv's log, for debugging.
+        let level = cstr(&std::env::var("FLEX_MPV_LOG").unwrap_or_else(|_| "warn".to_owned()));
+        unsafe { (api.mpv_request_log_messages)(handle, level.as_ptr()) };
         Ok(mpv)
     }
 

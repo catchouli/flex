@@ -10,6 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use anyhow::Result;
 use eframe::egui;
 use flex_core::catalog::{self, Catalog, Group};
+use flex_core::music::MusicCatalog;
 use flex_core::parse::Parsed;
 use flex_core::progress::{self, ContinueItem, Progress};
 use flex_core::search::{Item, SearchIndex};
@@ -33,6 +34,10 @@ pub struct LibState {
     pub matching: Option<(usize, usize)>,
     /// Done / to do, while fetching details (cast, episode titles) for matched shows.
     pub fetching: Option<(usize, usize)>,
+    /// Music libraries: albums and artists, once the tags are read.
+    pub music: Option<Arc<MusicCatalog>>,
+    /// Folders read / to read, while reading tags.
+    pub reading_tags: Option<(usize, usize)>,
 }
 
 pub use flex_core::titles::Titles;
@@ -64,7 +69,13 @@ impl LibState {
             organising: false,
             matching: None,
             fetching: None,
+            music: None,
+            reading_tags: None,
         }
+    }
+
+    pub fn is_music(&self) -> bool {
+        self.lib.kind == LibraryKind::Music
     }
 
     pub fn catalog(&self) -> Option<&Catalog> {
@@ -79,8 +90,15 @@ impl LibState {
             format!("Matching… {done}/{total}")
         } else if let Some((done, total)) = self.fetching {
             format!("Fetching details… {done}/{total}")
+        } else if let Some((done, total)) = self.reading_tags {
+            format!("Reading tags… {}/{} folders", thousands(done), thousands(total))
         } else if let Some(e) = &self.error {
             e.clone()
+        } else if let Some(music) = &self.music {
+            let albums = music.albums.iter().filter(|a| !a.singles).count();
+            format!("{} albums · {} tracks", thousands(albums), thousands(music.tracks))
+        } else if self.is_music() {
+            format!("{} tracks", thousands(self.tree.len()))
         } else {
             format!("{} videos", thousands(self.tree.len()))
         }
@@ -129,6 +147,9 @@ enum ScanMsg {
     /// TMDB details are in (the slower AniList voice-cast pass may still be running).
     DetailsReady(i64),
     FetchDone(i64, Result<usize, String>),
+    /// Music: tags read in (done, total) folders, and the finished albums.
+    ReadingTags(i64, usize, usize),
+    Music(i64, Result<MusicCatalog, String>),
 }
 
 /// Re-fetch details this often, so new episodes of running series get their titles.
@@ -323,9 +344,11 @@ impl Shared {
 
     fn web_snapshot(&self) -> flex_web::Snapshot {
         flex_web::Snapshot {
+            // The web UI doesn't do music yet.
             libraries: self
                 .libs
                 .iter()
+                .filter(|l| !l.is_music())
                 .map(|l| flex_web::LibrarySnapshot {
                     lib: l.lib.clone(),
                     tree: l.tree.clone(),
@@ -478,7 +501,7 @@ impl Shared {
     pub fn continue_watching(&self, limit: usize) -> Vec<ContinueItem> {
         let organised = self.libs.iter().filter_map(|l| l.catalog().map(|c| (&l.lib, &*l.tree, c)));
         let mut items = progress::continue_watching_shows(organised, limit);
-        let pending = self.libs.iter().filter(|l| l.organised.is_none()).map(|l| (&l.lib, &*l.tree));
+        let pending = self.libs.iter().filter(|l| l.organised.is_none() && !l.is_music()).map(|l| (&l.lib, &*l.tree));
         items.extend(progress::continue_watching(pending, limit));
         items.truncate(limit);
         items
@@ -501,6 +524,10 @@ impl Shared {
     /// Sorts a library into shows on a background thread. Parsed names are cached per
     /// folder, so only new or changed folders are parsed (13k anime names took ~8s).
     pub fn organise(&mut self, id: i64) {
+        if self.lib(id).is_some_and(LibState::is_music) {
+            self.organise_music(id);
+            return;
+        }
         let Some(state) = self.lib_mut(id) else { return };
         state.organising = true;
         let kind = state.lib.kind;
@@ -525,6 +552,31 @@ impl Shared {
                 Ok(Organised { parsed: Arc::new(parsed), groups: Arc::new(groups), catalog: Arc::new(catalog) })
             })();
             let _ = tx.send(ScanMsg::Organised(id, result.map_err(|e| format!("{e:#}"))));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Reads a music library's tags (new or changed folders only) and sorts its tracks
+    /// into albums, on a background thread.
+    fn organise_music(&mut self, id: i64) {
+        let Some(state) = self.lib_mut(id) else { return };
+        state.organising = true;
+        let (root, files) = (state.lib.root.clone(), state.tree.files().to_vec());
+        let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
+        let covers = flex_core::data_dir().join("covers");
+        std::thread::spawn(move || {
+            let result = (|| -> Result<MusicCatalog> {
+                let started = std::time::Instant::now();
+                let mut db = Db::open(&db_path)?;
+                let folders = flex_core::music::read_library_cached(&mut db, id, &root, &files, &covers, |done, total| {
+                    let _ = tx.send(ScanMsg::ReadingTags(id, done, total));
+                    ctx.request_repaint();
+                })?;
+                let music = flex_core::music::build(&files, &folders);
+                log::info!("organised music library {id}: {} albums, {} artists in {:?}", music.albums.len(), music.artists.len(), started.elapsed());
+                Ok(music)
+            })();
+            let _ = tx.send(ScanMsg::Music(id, result.map_err(|e| format!("{e:#}"))));
             ctx.request_repaint();
         });
     }
@@ -921,9 +973,18 @@ impl Shared {
 
     pub fn set_kind(&mut self, id: i64, kind: LibraryKind) -> Result<()> {
         self.db.set_library_kind(id, kind)?;
+        let mut rescan = false;
         if let Some(l) = self.lib_mut(id) {
+            // Music and video libraries look for different files.
+            rescan = (l.lib.kind == LibraryKind::Music) != (kind == LibraryKind::Music);
             l.lib.kind = kind;
             l.version += 1;
+            if rescan {
+                (l.organised, l.music) = (None, None);
+            }
+        }
+        if rescan {
+            self.start_scan(id);
         }
         Ok(())
     }
@@ -935,13 +996,13 @@ impl Shared {
         }
         state.scanning = Some(0);
         state.error = None;
-        let root = state.lib.root.clone();
+        let (root, kind) = (state.lib.root.clone(), state.lib.kind);
         let cancel = Arc::new(AtomicBool::new(false));
         self.scan_cancel.insert(id, cancel.clone());
         let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
         std::thread::spawn(move || {
             let result = (|| -> Result<String> {
-                let scan = flex_core::scan::scan(&root, &cancel, |n| {
+                let scan = flex_core::scan::scan(&root, kind, &cancel, |n| {
                     let _ = tx.send(ScanMsg::Progress(id, n));
                     ctx.request_repaint();
                 })?;
@@ -950,8 +1011,9 @@ impl Shared {
                 }
                 // A separate connection: SQLite (WAL) handles the concurrent reader on the UI thread.
                 let summary = Db::open(&db_path)?.apply_scan(id, &scan.files)?;
+                let what = if kind == LibraryKind::Music { "tracks" } else { "videos" };
                 let mut msg = format!(
-                    "{} videos ({} new, {} removed)",
+                    "{} {what} ({} new, {} removed)",
                     thousands(summary.total),
                     summary.added,
                     summary.removed
@@ -1022,6 +1084,25 @@ impl Shared {
                     }
                 }
                 ScanMsg::DetailsReady(id) => self.reload_details(id),
+                ScanMsg::ReadingTags(id, done, total) => {
+                    if let Some(l) = self.lib_mut(id) {
+                        l.reading_tags = (done < total).then_some((done, total));
+                    }
+                }
+                ScanMsg::Music(id, result) => {
+                    let Some(l) = self.lib_mut(id) else { continue };
+                    (l.organising, l.reading_tags) = (false, None);
+                    match result {
+                        Ok(music) => {
+                            l.music = Some(Arc::new(music));
+                            l.version += 1;
+                        }
+                        Err(e) => {
+                            let msg = format!("{}: couldn't read the music: {e}", l.lib.name);
+                            self.toast(msg);
+                        }
+                    }
+                }
                 ScanMsg::FetchDone(id, result) => {
                     let Some(l) = self.lib_mut(id) else { continue };
                     l.fetching = None;
@@ -1090,7 +1171,8 @@ impl Shared {
     fn search_items(&self) -> Vec<Item> {
         use flex_core::search::{Target, path_items};
         let mut items = Vec::new();
-        for l in &self.libs {
+        // Music isn't searchable yet.
+        for l in self.libs.iter().filter(|l| !l.is_music()) {
             if let Some(catalog) = l.catalog() {
                 for entry in &catalog.shows {
                     let mut also: Vec<String> = entry.groups.iter().map(|g| g.title.clone()).collect();

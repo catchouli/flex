@@ -304,11 +304,13 @@ impl FlexApp {
         if !self.top().is_player() {
             return;
         }
-        let (click, double, origin) = ctx.input(|i| {
-            (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.press_origin())
+        // Where the click happened: egui forgets the press origin on release, which is
+        // when the click registers, but the pointer is still there.
+        let (click, double, at) = ctx.input(|i| {
+            (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.latest_pos())
         });
         // Clicks on the seek bar seek instead (the player handles them).
-        if origin.is_some_and(|pos| self.top().on_controls(pos)) {
+        if at.is_some_and(|pos| self.top().on_controls(pos)) {
             return;
         }
         if click {

@@ -1,4 +1,4 @@
-//! Walks a library folder and collects its video files.
+//! Walks a library folder and collects its video (or, for music, audio) files.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,7 +7,7 @@ use std::time::UNIX_EPOCH;
 use anyhow::{Result, bail};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::library::is_video;
+use crate::LibraryKind;
 
 #[derive(Clone, Debug)]
 pub struct ScannedFile {
@@ -33,12 +33,13 @@ fn is_ignored(entry: &DirEntry) -> bool {
         || name.eq_ignore_ascii_case("System Volume Information")
 }
 
-/// Scans `root` recursively. `progress` is called periodically with the number of videos found.
+/// Scans `root` recursively for the files `kind` wants. `progress` is called periodically
+/// with the number found.
 /// Setting `cancel` stops the scan with an error.
 ///
 /// Fails if `root` isn't an accessible folder, so an unmounted share is never mistaken for
 /// an empty library.
-pub fn scan(root: &Path, cancel: &AtomicBool, mut progress: impl FnMut(usize)) -> Result<ScanResult> {
+pub fn scan(root: &Path, kind: LibraryKind, cancel: &AtomicBool, mut progress: impl FnMut(usize)) -> Result<ScanResult> {
     if !root.is_dir() {
         bail!("{} isn't available. Is the drive or share connected?", root.display());
     }
@@ -55,7 +56,7 @@ pub fn scan(root: &Path, cancel: &AtomicBool, mut progress: impl FnMut(usize)) -
                 continue;
             }
         };
-        if !entry.file_type().is_file() || !is_video(entry.path()) {
+        if !entry.file_type().is_file() || !kind.wants(entry.path()) {
             continue;
         }
         let meta = match entry.metadata() {
@@ -94,20 +95,23 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, b"x").unwrap();
         }
-        let mut found: Vec<_> = scan(&dir, &AtomicBool::new(false), |_| {}).unwrap().files.into_iter().map(|f| f.rel_path).collect();
+        let mut found: Vec<_> = scan(&dir, LibraryKind::Tv, &AtomicBool::new(false), |_| {}).unwrap().files.into_iter().map(|f| f.rel_path).collect();
         found.sort();
         assert_eq!(found, ["Show/Season 1/ep1.mkv", "movie.MP4"]);
+        std::fs::write(dir.join("song.opus"), b"x").unwrap();
+        let music: Vec<_> = scan(&dir, LibraryKind::Music, &AtomicBool::new(false), |_| {}).unwrap().files.into_iter().map(|f| f.rel_path).collect();
+        assert_eq!(music, ["song.opus"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn cancel_stops_the_scan() {
         let dir = std::env::temp_dir();
-        assert!(scan(&dir, &AtomicBool::new(true), |_| {}).is_err());
+        assert!(scan(&dir, LibraryKind::Tv, &AtomicBool::new(true), |_| {}).is_err());
     }
 
     #[test]
     fn missing_root_is_an_error() {
-        assert!(scan(Path::new("/definitely/not/here"), &AtomicBool::new(false), |_| {}).is_err());
+        assert!(scan(Path::new("/definitely/not/here"), LibraryKind::Tv, &AtomicBool::new(false), |_| {}).is_err());
     }
 }

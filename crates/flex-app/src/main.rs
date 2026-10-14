@@ -9,6 +9,7 @@ mod input;
 mod instance;
 mod logging;
 mod mpv;
+mod music_player;
 mod player;
 mod screens;
 mod shared;

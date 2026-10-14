@@ -4,6 +4,7 @@
 pub mod browse;
 pub mod details;
 pub mod history;
+pub mod music;
 pub mod home;
 pub mod inspector;
 pub mod library;

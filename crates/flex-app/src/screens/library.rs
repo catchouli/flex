@@ -37,7 +37,7 @@ impl LibraryView {
 
 /// Opens a folder: plays it directly if it holds a single video (a movie in its own folder).
 pub fn open_folder(sh: &Shared, library_id: i64, rel: &str) -> Nav {
-    let single = sh.lib(library_id).and_then(|l| l.tree.single_video_in(rel)).map(|f| f.id);
+    let single = sh.lib(library_id).filter(|l| !l.is_music()).and_then(|l| l.tree.single_video_in(rel)).map(|f| f.id);
     match single {
         Some(file_id) => Nav::play(sh.play_request(library_id, file_id)),
         None => Nav::push(LibraryView::new(library_id, rel.to_owned())),
@@ -74,6 +74,9 @@ impl Screen for LibraryView {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(i) => match &self.nodes[i] {
                 Node::Dir { rel, .. } => open_folder(sh, self.library_id, rel),
+                Node::File(f) if sh.lib(self.library_id).is_some_and(|l| l.is_music()) => {
+                    super::music::play_file(sh, self.library_id, f.id)
+                }
                 Node::File(f) => Nav::play(sh.play_request(self.library_id, f.id)),
             },
             ListInput::None => Nav::None,

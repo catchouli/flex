@@ -243,6 +243,7 @@ fn kind_hint(kind: LibraryKind) -> &'static str {
         LibraryKind::Movies => "One film per file or folder",
         LibraryKind::Tv => "Shows with seasons and episodes",
         LibraryKind::Anime => "Anime, matched on TMDB with help from AniList",
+        LibraryKind::Music => "Albums and artists, from the tracks' tags",
     }
 }
 

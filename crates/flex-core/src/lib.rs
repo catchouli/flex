@@ -5,6 +5,7 @@ pub mod db;
 pub mod disc;
 pub mod library;
 pub mod metadata;
+pub mod music;
 pub mod natural;
 pub mod parse;
 pub mod plex;

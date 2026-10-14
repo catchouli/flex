@@ -6,16 +6,19 @@ pub enum LibraryKind {
     Movies,
     Tv,
     Anime,
+    /// Albums and artists, from the tracks' tags (see [`crate::music`]).
+    Music,
 }
 
 impl LibraryKind {
-    pub const ALL: [Self; 3] = [Self::Movies, Self::Tv, Self::Anime];
+    pub const ALL: [Self; 4] = [Self::Movies, Self::Tv, Self::Anime, Self::Music];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Movies => "movies",
             Self::Tv => "tv",
             Self::Anime => "anime",
+            Self::Music => "music",
         }
     }
 
@@ -28,12 +31,21 @@ impl LibraryKind {
             Self::Movies => "Movies",
             Self::Tv => "TV",
             Self::Anime => "Anime",
+            Self::Music => "Music",
         }
     }
 
     /// Whether files play in sequence (offering "next episode").
     pub fn is_episodic(self) -> bool {
-        self != Self::Movies
+        matches!(self, Self::Tv | Self::Anime)
+    }
+
+    /// Whether a file belongs in this kind of library.
+    pub fn wants(self, path: &Path) -> bool {
+        match self {
+            Self::Music => crate::music::is_audio(path),
+            _ => is_video(path),
+        }
     }
 }
 
