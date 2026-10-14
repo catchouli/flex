@@ -97,9 +97,21 @@ impl TopBar {
             self.focus = Some(Item::Fullscreen);
         }
         let painter = ui.painter().clone();
-        painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", TextStyle::Heading.resolve(ui.style()), theme::FOCUS);
+        let (heading, small) = (TextStyle::Heading.resolve(ui.style()), TextStyle::Small.resolve(ui.style()));
+        let name = painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", heading.clone(), theme::FOCUS);
+        // The version beside the name, smaller and dimmer, on the same baseline (fonts
+        // descend about a fifth of their size below it).
+        let baseline = name.bottom() - heading.size * 0.2;
+        let version = painter.text(
+            pos2(name.right() + 12.0, baseline + small.size * 0.2 - 2.0),
+            Align2::LEFT_BOTTOM,
+            concat!("v", env!("CARGO_PKG_VERSION")),
+            small,
+            theme::DIM,
+        );
 
-        let search_rect = Rect::from_min_size(pos2(rect.left() + 170.0, rect.center().y - 30.0), vec2(700.0, 60.0));
+        let search_left = (rect.left() + 170.0).max(version.right() + 36.0);
+        let search_rect = Rect::from_min_size(pos2(search_left, rect.center().y - 30.0), vec2(700.0, 60.0));
         let edit = egui::TextEdit::singleline(&mut sh.search_query)
             .id(search_id())
             .hint_text("Search")
