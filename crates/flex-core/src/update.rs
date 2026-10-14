@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+const LATEST_PAGE: &str = "https://github.com/catchouli/flex/releases/latest";
 const LATEST_RELEASE: &str = "https://api.github.com/repos/catchouli/flex/releases/latest";
 const USER_AGENT: &str = concat!("flex/", env!("CARGO_PKG_VERSION"));
 
@@ -68,15 +69,34 @@ struct Asset {
     digest: Option<String>,
 }
 
+/// The latest release's version, from where GitHub's "latest release" page redirects
+/// (".../releases/tag/v0.3.2"). Unlike the API (60 requests an hour per address without
+/// a login), this page is fine to ask every few minutes.
+pub fn latest_version() -> Result<Version> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .build()
+        .into();
+    let response = agent.head(LATEST_PAGE).header("User-Agent", USER_AGENT).call().context("asking GitHub for the latest release")?;
+    let location = response.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    let tag = location.rsplit('/').next().unwrap_or_default();
+    Version::parse(tag).with_context(|| format!("GitHub's latest release isn't a version (it points to {location:?})"))
+}
+
 /// The latest release's installer, if that release is newer than `current`.
 pub fn newer_installer(current: Version) -> Result<Option<Installer>> {
+    if latest_version()? <= current {
+        return Ok(None);
+    }
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
     let release: Release = agent
         .get(LATEST_RELEASE)
         .header("User-Agent", USER_AGENT)
         .header("Accept", "application/vnd.github+json")
         .call()
-        .context("asking GitHub for the latest release")?
+        .context("asking GitHub about the latest release")?
         .body_mut()
         .read_json()
         .context("reading GitHub's answer")?;
@@ -215,6 +235,14 @@ mod tests {
         let mut asset = setup_asset("0.4.0");
         asset["digest"] = serde_json::Value::Null;
         assert!(pick(release("v0.4.0", serde_json::json!([asset])), Version(0, 3, 0)).is_err());
+    }
+
+    /// Asks GitHub's "latest release" page which version that is.
+    #[test]
+    #[ignore]
+    fn finds_the_latest_version() {
+        assert!(latest_version().unwrap() >= Version(0, 3, 1));
+        assert_eq!(newer_installer(Version(999, 0, 0)).unwrap(), None);
     }
 
     /// Downloads the real latest installer (about 100 MB): `cargo test -p flex-core -- --ignored`.

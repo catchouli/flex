@@ -21,8 +21,8 @@ const PRETEND_ENV: &str = "FLEX_UPDATE_AS";
 /// The first check comes a little after starting (or switching updates on), so it
 /// doesn't compete with startup.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
-const RETRY_AFTER: Duration = Duration::from_secs(60 * 60);
+/// A check is one small request (see [`update::latest_version`]).
+const CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
 const TICK: Duration = Duration::from_secs(15);
 
 /// The version to compare releases against.
@@ -116,7 +116,7 @@ fn check_loop(enabled: &AtomicBool, ready: &Mutex<Option<PathBuf>>, ctx: &egui::
             Ok(None) => next = Instant::now() + CHECK_EVERY,
             Err(e) => {
                 log::warn!("update check failed: {e:#}");
-                next = Instant::now() + RETRY_AFTER;
+                next = Instant::now() + CHECK_EVERY;
             }
         }
     }
@@ -125,7 +125,7 @@ fn check_loop(enabled: &AtomicBool, ready: &Mutex<Option<PathBuf>>, ctx: &egui::
 /// Downloads a newer release's installer, if there is one.
 fn fetch(current: Version) -> Result<Option<PathBuf>> {
     let Some(installer) = update::newer_installer(current)? else {
-        log::info!("no update: {current} is the latest");
+        log::debug!("no update: {current} is the latest");
         return Ok(None);
     };
     log::info!("update found: Flex {} ({} bytes)", installer.version, installer.size);
