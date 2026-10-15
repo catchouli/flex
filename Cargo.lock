@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "flex"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1086,7 +1086,7 @@ dependencies = [
 
 [[package]]
 name = "flex-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "directories",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "flex-web"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "axum",
