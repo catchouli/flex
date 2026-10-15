@@ -5,14 +5,14 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let (root, scratch) = (std::path::Path::new(&args[1]), std::path::Path::new(&args[2]));
     let started = std::time::Instant::now();
-    let scan = flex_core::scan::scan(root, flex_core::LibraryKind::Music, &AtomicBool::new(false), |_| {})?;
+    let scan = flex_core::scan::scan(root, flex_core::LibraryKind::Music, &Default::default(), &AtomicBool::new(false), |_| {})?;
     println!("scan: {} files in {:?}", scan.files.len(), started.elapsed());
     let mut db = flex_core::Db::open(&scratch.join("music.db"))?;
     let id = match db.libraries()?.first() {
         Some(l) => l.id,
         None => db.add_library("music", root, flex_core::LibraryKind::Music)?,
     };
-    db.apply_scan(id, &scan.files)?;
+    db.apply_scan(id, &scan)?;
     let files = db.files(id)?;
     let t = std::time::Instant::now();
     let folders = flex_core::music::read_library_cached(&mut db, id, root, &files, &scratch.join("covers"), |_, _| {})?;

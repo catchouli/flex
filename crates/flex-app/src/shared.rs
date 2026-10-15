@@ -166,7 +166,8 @@ pub fn now_unix() -> i64 {
 
 enum ScanMsg {
     Progress(i64, usize),
-    Done(i64, Result<String, String>),
+    /// A scan finished: library id, whether it was an automatic one, and the outcome.
+    Done(i64, bool, Result<ScanDone, String>),
     Organised(i64, Result<Organised, String>),
     /// Online matching progress (done, total); the catalog is reloaded on these.
     Matching(i64, usize, usize),
@@ -187,6 +188,18 @@ enum ScanMsg {
     MusicArtistsDone(i64, Result<usize, String>),
     /// An artist fetched on its own (after a match by hand).
     MusicArtistReady(i64),
+}
+
+/// Look again for albums MusicBrainz didn't have after this long.
+/// How often libraries are scanned for changes automatically (and at startup). Unchanged
+/// folders aren't read again, so this is cheap.
+const AUTO_SCAN_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+struct ScanDone {
+    /// What was found, for a toast.
+    msg: String,
+    /// Whether files came or went.
+    changed: bool,
 }
 
 /// Look again for albums MusicBrainz didn't have after this long.
@@ -238,6 +251,8 @@ pub struct Shared {
     scan_rx: Receiver<ScanMsg>,
     /// Cancel flags for running scans, by library id.
     scan_cancel: HashMap<i64, Arc<AtomicBool>>,
+    /// When libraries were last scanned for changes automatically.
+    last_auto_scan: Option<std::time::Instant>,
     toasts: Vec<String>,
     /// Music artists' details from MusicBrainz (photo, discography), by MusicBrainz id.
     pub music_artists: Arc<HashMap<String, ArtistInfo>>,
@@ -277,6 +292,7 @@ impl Shared {
             scan_tx,
             scan_rx,
             scan_cancel: HashMap::new(),
+            last_auto_scan: None,
             toasts: Vec::new(),
             music_artists: Arc::default(),
             close_to_tray: false,
@@ -306,7 +322,7 @@ impl Shared {
             let id = lib.id;
             shared.libs.push(LibState::new(lib, tree));
             if never_scanned {
-                shared.start_scan(id);
+                shared.start_scan(id, true);
             } else {
                 shared.organise(id);
             }
@@ -1155,7 +1171,7 @@ impl Shared {
         let lib = Library { id, name, root: root.to_path_buf(), kind };
         self.libs.push(LibState::new(lib, Tree::new(Vec::new())));
         self.libs.sort_by_key(|l| l.lib.name.to_lowercase());
-        self.start_scan(id);
+        self.start_scan(id, true);
         Ok(id)
     }
 
@@ -1197,12 +1213,18 @@ impl Shared {
             }
         }
         if rescan {
-            self.start_scan(id);
+            self.start_scan(id, true);
         }
         Ok(())
     }
 
-    pub fn start_scan(&mut self, id: i64) {
+    /// Scans a library for changes, or with `full`, looks at every file again.
+    pub fn start_scan(&mut self, id: i64, full: bool) {
+        self.scan(id, full, false);
+    }
+
+    /// `quiet` scans (the automatic ones) only say something if files came or went.
+    fn scan(&mut self, id: i64, full: bool, quiet: bool) {
         let Some(state) = self.lib_mut(id) else { return };
         if state.scanning.is_some() {
             return;
@@ -1214,16 +1236,27 @@ impl Shared {
         self.scan_cancel.insert(id, cancel.clone());
         let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
         std::thread::spawn(move || {
-            let result = (|| -> Result<String> {
-                let scan = flex_core::scan::scan(&root, kind, &cancel, |n| {
+            let started = std::time::Instant::now();
+            let result = (|| -> Result<ScanDone> {
+                // A separate connection: SQLite (WAL) handles the concurrent reader on the UI thread.
+                let mut db = Db::open(&db_path)?;
+                let previous = db.previous_scan(id, full)?;
+                let scan = flex_core::scan::scan(&root, kind, &previous, &cancel, |n| {
                     let _ = tx.send(ScanMsg::Progress(id, n));
                     ctx.request_repaint();
                 })?;
                 for e in &scan.errors {
                     log::warn!("scan: {e}");
                 }
-                // A separate connection: SQLite (WAL) handles the concurrent reader on the UI thread.
-                let summary = Db::open(&db_path)?.apply_scan(id, &scan.files)?;
+                let summary = db.apply_scan(id, &scan)?;
+                log::info!(
+                    "scan of {}: {} files, {} of {} folders read, {:?}",
+                    root.display(),
+                    summary.total,
+                    scan.dirs_read,
+                    scan.dirs.len(),
+                    started.elapsed()
+                );
                 let what = if kind == LibraryKind::Music { "tracks" } else { "videos" };
                 let mut msg = format!(
                     "{} {what} ({} new, {} removed)",
@@ -1234,22 +1267,37 @@ impl Shared {
                 if !scan.errors.is_empty() {
                     msg += &format!(", {} unreadable", scan.errors.len());
                 }
-                Ok(msg)
+                Ok(ScanDone { msg, changed: summary.added + summary.removed > 0 })
             })();
-            let _ = tx.send(ScanMsg::Done(id, result.map_err(|e| format!("{e:#}"))));
+            let _ = tx.send(ScanMsg::Done(id, quiet, result.map_err(|e| format!("{e:#}"))));
             ctx.request_repaint();
         });
     }
 
-    pub fn scan_all(&mut self) {
+    /// Quietly scans every library for changes now and then, so new episodes turn up by
+    /// themselves.
+    fn auto_scan(&mut self) {
+        if self.last_auto_scan.is_some_and(|t| t.elapsed() < AUTO_SCAN_EVERY) {
+            return;
+        }
+        self.last_auto_scan = Some(std::time::Instant::now());
         let ids: Vec<i64> = self.libs.iter().map(|l| l.lib.id).collect();
         for id in ids {
-            self.start_scan(id);
+            self.scan(id, false, true);
+        }
+        self.ctx.request_repaint_after(AUTO_SCAN_EVERY);
+    }
+
+    pub fn scan_all(&mut self, full: bool) {
+        let ids: Vec<i64> = self.libs.iter().map(|l| l.lib.id).collect();
+        for id in ids {
+            self.start_scan(id, full);
         }
     }
 
     /// Applies finished/progressing scans. Call once per frame.
     pub fn poll_scans(&mut self) {
+        self.auto_scan();
         self.poll_web();
         self.images.poll();
         self.shots.poll();
@@ -1265,27 +1313,36 @@ impl Shared {
                         l.scanning = Some(n);
                     }
                 }
-                ScanMsg::Done(id, result) => {
+                ScanMsg::Done(id, quiet, result) => {
                     self.scan_cancel.remove(&id);
-                    let outcome = result.and_then(|summary| {
-                        self.db.files(id).map(|files| (summary, files)).map_err(|e| format!("{e:#}"))
+                    // Nothing to redo if no files came or went (tree, search, organising).
+                    let outcome = result.and_then(|done| match done.changed {
+                        true => self.db.files(id).map(|files| (done, Some(files))).map_err(|e| format!("{e:#}")),
+                        false => Ok((done, None)),
                     });
                     let Some(l) = self.lib_mut(id) else { continue };
                     l.scanning = None;
                     let toast = match outcome {
-                        Ok((summary, files)) => {
-                            l.tree = Arc::new(Tree::new(files));
-                            l.version += 1;
-                            reorganise.push(id);
-                            format!("{}: {summary}", l.lib.name)
+                        Ok((done, files)) => {
+                            if let Some(files) = files {
+                                l.tree = Arc::new(Tree::new(files));
+                                l.version += 1;
+                                reorganise.push(id);
+                            }
+                            (!quiet || done.changed).then(|| format!("{}: {}", l.lib.name, done.msg))
                         }
                         Err(e) => {
+                            log::warn!("scan of {} failed: {e}", l.lib.name);
                             l.error = Some(e.clone());
-                            format!("{}: scan failed: {e}", l.lib.name)
+                            (!quiet).then(|| format!("{}: scan failed: {e}", l.lib.name))
                         }
                     };
-                    self.search = None;
-                    self.toast(toast);
+                    if !reorganise.is_empty() {
+                        self.search = None;
+                    }
+                    if let Some(toast) = toast {
+                        self.toast(toast);
+                    }
                 }
                 ScanMsg::Matching(id, done, total) => {
                     if let Some(l) = self.lib_mut(id) {

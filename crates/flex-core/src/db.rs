@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::library::{Library, LibraryKind, MediaFile};
 use crate::progress::Progress;
-use crate::scan::ScannedFile;
+use crate::scan::{Previous, ScanResult, ScannedFile};
 
 const SCHEMA: &str = "
 CREATE TABLE libraries (
@@ -158,6 +158,13 @@ const MIGRATIONS: &[&str] = &[
         fetched_at INTEGER NOT NULL,
         data       TEXT NOT NULL     -- JSON musicbrainz::ArtistInfo
     );",
+    // 11: folders' modified times from the last scan, so rescans skip unchanged folders
+    "CREATE TABLE scan_dirs (
+        library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        rel_path   TEXT NOT NULL,
+        mtime      INTEGER NOT NULL, -- nanoseconds; 0 = read it again
+        PRIMARY KEY (library_id, rel_path)
+    ) WITHOUT ROWID;"
 ];
 
 /// What MusicBrainz said about one album.
@@ -910,8 +917,34 @@ impl Db {
     }
 
     /// Records a scan: inserts new files, updates changed ones and marks vanished ones missing.
-    pub fn apply_scan(&mut self, library_id: i64, files: &[ScannedFile]) -> Result<ScanSummary> {
+    /// What the last scan found, for the next one. `full` leaves out the folder times, so
+    /// every folder is read again.
+    pub fn previous_scan(&self, library_id: i64, full: bool) -> Result<Previous> {
+        let files = self
+            .files(library_id)?
+            .into_iter()
+            .map(|f| ScannedFile { rel_path: f.rel_path, size: f.size, mtime: f.mtime })
+            .collect();
+        let dirs = if full {
+            HashMap::new()
+        } else {
+            let mut stmt = self.conn.prepare("SELECT rel_path, mtime FROM scan_dirs WHERE library_id = ?1")?;
+            let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        Ok(Previous { files, dirs })
+    }
+
+    pub fn apply_scan(&mut self, library_id: i64, scan: &ScanResult) -> Result<ScanSummary> {
+        let files = &scan.files;
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM scan_dirs WHERE library_id = ?1", [library_id])?;
+        {
+            let mut insert = tx.prepare("INSERT INTO scan_dirs (library_id, rel_path, mtime) VALUES (?1, ?2, ?3)")?;
+            for (rel, mtime) in &scan.dirs {
+                insert.execute(params![library_id, rel, mtime])?;
+            }
+        }
         let mut existing: HashMap<String, (i64, bool)> = {
             let mut stmt = tx.prepare("SELECT id, rel_path, missing FROM media_files WHERE library_id = ?1")?;
             let rows = stmt.query_map([library_id], |r| Ok((r.get::<_, String>(1)?, (r.get(0)?, r.get(2)?))))?;
@@ -977,6 +1010,10 @@ mod tests {
 
     fn file(p: &str) -> ScannedFile {
         ScannedFile { rel_path: p.into(), size: 1, mtime: 0 }
+    }
+
+    fn found(files: &[ScannedFile]) -> ScanResult {
+        ScanResult { files: files.to_vec(), dirs: vec![("".into(), 5), ("a".into(), 7)], ..Default::default() }
     }
 
     #[test]
@@ -1048,7 +1085,7 @@ mod tests {
         use crate::plex::{ImportPlan, PlexItem};
         let mut db = Db::open_in_memory().unwrap();
         let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
-        db.apply_scan(lib, &[file("a/1.mkv")]).unwrap();
+        db.apply_scan(lib, &found(&[file("a/1.mkv")])).unwrap();
         let id = db.files(lib).unwrap()[0].id;
         let item = PlexItem { file: String::new(), watched: true, offset_secs: None, duration_secs: Some(1400.0), last_viewed: Some(500) };
         let plan = ImportPlan {
@@ -1125,17 +1162,23 @@ mod tests {
         let lib = db.add_library("Anime", Path::new("/media/anime"), LibraryKind::Anime).unwrap();
         assert!(db.add_library("Dup", Path::new("/media/anime"), LibraryKind::Tv).is_err());
 
-        let s = db.apply_scan(lib, &[file("a/1.mkv"), file("a/2.mkv")]).unwrap();
+        let s = db.apply_scan(lib, &found(&[file("a/1.mkv"), file("a/2.mkv")])).unwrap();
         assert_eq!((s.added, s.removed, s.total), (2, 0, 2));
 
-        let s = db.apply_scan(lib, &[file("a/2.mkv"), file("a/3.mkv")]).unwrap();
+        let s = db.apply_scan(lib, &found(&[file("a/2.mkv"), file("a/3.mkv")])).unwrap();
         assert_eq!((s.added, s.removed), (1, 1));
+        let previous = db.previous_scan(lib, false).unwrap();
+        let mut files: Vec<_> = previous.files.iter().map(|f| f.rel_path.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["a/2.mkv", "a/3.mkv"], "missing files aren't carried over");
+        assert_eq!(previous.dirs, HashMap::from([("".into(), 5), ("a".into(), 7)]));
+        assert!(db.previous_scan(lib, true).unwrap().dirs.is_empty());
         let mut names: Vec<_> = db.files(lib).unwrap().into_iter().map(|f| f.rel_path).collect();
         names.sort();
         assert_eq!(names, ["a/2.mkv", "a/3.mkv"]);
 
         // A file coming back keeps its row (and so its watch history).
-        let s = db.apply_scan(lib, &[file("a/1.mkv"), file("a/2.mkv"), file("a/3.mkv")]).unwrap();
+        let s = db.apply_scan(lib, &found(&[file("a/1.mkv"), file("a/2.mkv"), file("a/3.mkv")])).unwrap();
         assert_eq!((s.added, s.removed), (1, 0));
 
         let id = db.files(lib).unwrap()[0].id;

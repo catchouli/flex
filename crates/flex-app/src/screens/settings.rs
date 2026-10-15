@@ -25,7 +25,7 @@ impl Screen for Settings {
         let libs = sh.libs.len();
         // Web access, "Close to system tray" where there's a tray, "Start with Windows",
         // then "Update automatically" in installed copies.
-        let tray_row = libs + 7;
+        let tray_row = libs + 8;
         let autostart_row = tray_row + usize::from(TRAY);
         let update = crate::update::installed();
         let rows = autostart_row + usize::from(cfg!(windows)) + usize::from(update);
@@ -42,15 +42,20 @@ impl Screen for Settings {
             ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
             ListInput::Activate(i) if i == libs + 3 => Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase)),
             ListInput::Activate(i) if i == libs + 4 => {
-                sh.scan_all();
-                sh.toast("Rescanning all libraries…");
+                sh.scan_all(false);
+                sh.toast("Scanning all libraries for changes…");
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 5 => {
-                crate::logging::open_logs_folder();
+                sh.scan_all(true);
+                sh.toast("Rescanning all libraries from scratch…");
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 6 => {
+                crate::logging::open_logs_folder();
+                Nav::None
+            }
+            ListInput::Activate(i) if i == libs + 7 => {
                 let on = !sh.web_enabled();
                 sh.set_web_enabled(on);
                 if let Some(url) = sh.web_url().filter(|_| on) {
@@ -94,7 +99,8 @@ impl Screen for Settings {
         let tmdb = if sh.tmdb_token().is_some() { "connected" } else { "not set up" };
         rows.push(Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}")).detail("OK to enter a token"));
         rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
-        rows.push(Row::new(Icon::Refresh, "Rescan all libraries"));
+        rows.push(Row::new(Icon::Refresh, "Scan all libraries for changes").detail("New, moved and deleted files"));
+        rows.push(Row::new(Icon::Refresh, "Rescan all libraries from scratch").detail("Slower: looks at every file again"));
         rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
         rows.push(match sh.web_url() {
             Some(url) => Row::new(Icon::None, "Web access: on").detail(format!("Open {url} on phones and PCs at home")),
@@ -142,17 +148,21 @@ impl Screen for LibraryOptions {
         }
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let kind = state.lib.kind;
-        let input = self.list.handle(press, 6);
+        let input = self.list.handle(press, 7);
         // Moving off "Remove" cancels a pending confirmation.
-        self.confirm_remove &= self.list.selected == 5;
+        self.confirm_remove &= self.list.selected == 6;
         match input {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
-                sh.start_scan(self.library_id);
+                sh.start_scan(self.library_id, false);
                 Nav::None
             }
-            ListInput::Activate(1) => Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
-            ListInput::Activate(2) => {
+            ListInput::Activate(1) => {
+                sh.start_scan(self.library_id, true);
+                Nav::None
+            }
+            ListInput::Activate(2) => Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
+            ListInput::Activate(3) => {
                 let i = LibraryKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
                 let next = LibraryKind::ALL[(i + 1) % LibraryKind::ALL.len()];
                 if let Err(e) = sh.set_kind(self.library_id, next) {
@@ -160,7 +170,7 @@ impl Screen for LibraryOptions {
                 }
                 Nav::None
             }
-            ListInput::Activate(3) => {
+            ListInput::Activate(4) => {
                 let view = match sh.library_view(self.library_id) {
                     LibraryView::Shows => LibraryView::Folders,
                     LibraryView::Folders => LibraryView::Shows,
@@ -168,7 +178,7 @@ impl Screen for LibraryOptions {
                 sh.set_library_view(self.library_id, view);
                 Nav::None
             }
-            ListInput::Activate(4) => {
+            ListInput::Activate(5) => {
                 sh.rematch(self.library_id);
                 sh.toast("Re-matching… shows you fixed by hand are kept");
                 Nav::None
@@ -199,7 +209,8 @@ impl Screen for LibraryOptions {
             "Remove library"
         };
         let rows = [
-            Row::new(Icon::Refresh, "Rescan now"),
+            Row::new(Icon::Refresh, "Scan for changes").detail("New, moved and deleted files"),
+            Row::new(Icon::Refresh, "Rescan from scratch").detail("Slower: looks at every file again"),
             Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"),
             Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"),
             Row::new(Icon::None, match sh.library_view(self.library_id) {
