@@ -30,7 +30,8 @@ pub struct SearchView {
 /// The scopes in order, with labels.
 fn scopes(sh: &Shared) -> Vec<(Scope, String)> {
     let mut out = vec![(Scope::Titles, "Movies & shows".to_owned())];
-    out.extend(sh.libs.iter().map(|l| (Scope::Library(l.lib.id), l.lib.name.clone())));
+    // Music isn't searchable yet, so it gets no tab.
+    out.extend(sh.libs.iter().filter(|l| !l.is_music()).map(|l| (Scope::Library(l.lib.id), l.lib.name.clone())));
     out.push((Scope::Episodes, "Episodes".to_owned()));
     out.push((Scope::Paths, "Folders & files".to_owned()));
     out
