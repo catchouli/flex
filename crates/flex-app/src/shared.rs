@@ -1683,6 +1683,7 @@ impl Shared {
                             l.music = Some(Arc::new(music));
                             l.set_music_matches(matches);
                             match_music.push(id);
+                            self.search = None;
                         }
                         Err(e) => {
                             let msg = format!("{}: couldn't read the music: {e}", l.lib.name);
@@ -1764,11 +1765,16 @@ impl Shared {
     }
 
     /// Everything searchable: shows/films (matched title plus folder titles as alternative
-    /// names), episodes by clean name, and every folder and file.
+    /// names), episodes by clean name, every folder and file, and music libraries' artists,
+    /// albums and tracks.
     fn search_items(&self) -> Vec<Item> {
-        use flex_core::search::{Target, path_items};
+        use flex_core::search::{Target, music_items, path_items};
         let mut items = Vec::new();
-        // Music isn't searchable yet.
+        for l in self.libs.iter().filter(|l| l.is_music()) {
+            if let Some(music) = &l.music {
+                items.extend(music_items(&l.lib, music));
+            }
+        }
         for l in self.libs.iter().filter(|l| !l.is_music()) {
             if let Some(catalog) = l.catalog() {
                 for entry in &catalog.shows {
