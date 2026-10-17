@@ -1,5 +1,5 @@
-// Flex web UI: Home, a library's shows, and a show's episodes. Plain DOM, no framework,
-// so it stays quick on a slow mini PC. Works by touch, mouse, or arrow keys + Enter
+// Flex web UI: Home, a library's shows, a show's episodes, and music (music.js). Plain
+// DOM, no framework, so it stays quick on a slow mini PC. Works by touch, mouse, or arrow keys + Enter
 // (a TV remote); Escape/Backspace goes back.
 "use strict";
 
@@ -87,10 +87,15 @@ async function homePage() {
   page.push(h("h2", {}, "Libraries"));
   page.push(
     h("div", { class: "tiles" },
-      data.libraries.map((l) =>
-        h("a", { class: "tile", href: `#/lib/${l.id}`, "data-key": `lib${l.id}` },
+      data.libraries.map((l) => {
+        const music = l.kind === "music";
+        const count = music
+          ? l.albums === null ? "reading the music…" : `${l.albums.toLocaleString()} albums`
+          : `${l.videos.toLocaleString()} videos${l.organised ? "" : " · organising…"}`;
+        return h("a", { class: "tile", href: music ? `#/music/${l.id}` : `#/lib/${l.id}`, "data-key": `lib${l.id}` },
           h("b", {}, l.name),
-          h("span", { class: "dim" }, `${l.videos.toLocaleString()} videos${l.organised ? "" : " · organising…"}`)))));
+          h("span", { class: "dim" }, count));
+      })));
   if (!data.libraries.length) page.push(h("p", { class: "empty" }, "No libraries yet: add them in Flex's Settings."));
   return { title: "Flex", content: page };
 }
@@ -251,6 +256,8 @@ const ROUTES = [
   [/^#?\/?$/, () => homePage()],
   [/^#\/lib\/(\d+)$/, (m) => libraryPage(m[1])],
   [/^#\/show\/(\d+)\/(\d+)$/, (m) => showPage(m[1], m[2])],
+  [/^#\/music\/(\d+)$/, (m) => Music.albumsPage(m[1])],
+  [/^#\/album\/(\d+)\/(.+)$/, (m) => Music.albumPage(m[1], decodeURIComponent(m[2]))],
   [/^#\/play\/(\d+)\/(\d+)(?:\?t=([\d.]+))?$/, (m) => Player.page(m[1], m[2], m[3] === undefined ? null : Number(m[3]))],
 ];
 

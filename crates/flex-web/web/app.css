@@ -156,6 +156,43 @@ a.btn { display: inline-block; }
   position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%);
   padding: 12px 20px; border-radius: 12px; background: rgba(0, 0, 0, .85); z-index: 20;
 }
+body.has-music .toast { bottom: calc(var(--music-bar) + 16px); }
+
+/* Music: square covers, an album's tracks, and the player bar along the bottom. */
+:root { --music-bar: 88px; }
+.poster .art.square { aspect-ratio: 1; }
+.grid.albums .poster { contain-intrinsic-size: auto 240px; }
+.hero.album .inner > img { aspect-ratio: 1; width: 200px; }
+@media (max-width: 600px) { .hero.album .inner > img { width: 120px; } }
+.tracks { display: grid; gap: 4px; max-width: 900px; }
+.track {
+  display: grid; grid-template-columns: 3em 1fr auto; gap: 12px; align-items: center; text-align: left;
+  padding: 12px 14px; border: 0; border-radius: 10px; background: none; cursor: pointer;
+}
+.track:hover { background: var(--row); }
+.track .n, .track .d { color: var(--dim); font-variant-numeric: tabular-nums; }
+.track .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.has-music main { padding-bottom: calc(var(--music-bar) + 32px); }
+.music-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; min-height: var(--music-bar);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 16px; align-items: center;
+  padding: 10px var(--gutter) max(10px, env(safe-area-inset-bottom)); background: rgba(22, 23, 28, .97);
+  border-top: 1px solid var(--row);
+}
+.music-bar .now { display: flex; gap: 12px; align-items: center; min-width: 0; border-radius: 8px; }
+.music-bar .now img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex: none; }
+.music-bar .now .t, .music-bar .now .d { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music-bar .now .d { font-size: 14px; color: var(--dim); }
+.music-bar .controls { display: flex; gap: 8px; }
+.music-bar .controls .btn { min-width: 48px; font-size: 18px; }
+.music-bar .progress { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.music-bar .seek { flex: 1; min-width: 60px; accent-color: var(--focus); }
+.music-bar .clock { font-size: 14px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 700px) {
+  :root { --music-bar: 132px; }
+  .music-bar { grid-template-columns: 1fr auto; }
+  .music-bar .progress { grid-column: 1 / -1; }
+}
 
 /* The player: full window, controls over the video, hidden while watching. */
 body.fullscreen .top { display: none; }

@@ -445,15 +445,21 @@ impl Shared {
 
     fn web_snapshot(&self) -> flex_web::Snapshot {
         flex_web::Snapshot {
-            // The web UI doesn't do music yet.
             libraries: self
                 .libs
                 .iter()
-                .filter(|l| !l.is_music())
                 .map(|l| flex_web::LibrarySnapshot {
                     lib: l.lib.clone(),
                     tree: l.tree.clone(),
                     catalog: l.organised.as_ref().map(|o| o.catalog.clone()),
+                    music: l.music.clone(),
+                    covers: Arc::new(
+                        l.music
+                            .iter()
+                            .flat_map(|m| m.albums.iter())
+                            .filter_map(|a| Some((a.key.clone(), l.album_cover(a)?)))
+                            .collect(),
+                    ),
                 })
                 .collect(),
             series: self.series.clone(),
