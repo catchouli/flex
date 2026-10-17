@@ -18,6 +18,7 @@ pub mod search;
 pub mod titles;
 pub mod tree;
 pub mod update;
+pub mod youtube;
 
 pub use db::Db;
 pub use library::{Library, LibraryKind, MediaFile};

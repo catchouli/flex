@@ -88,12 +88,36 @@ impl FlexApp {
             tray,
             quitting: false,
         };
-        if let Some(path) = start.filter(|p| p.is_file() && flex_core::library::is_video(p)) {
+        if let Some(path) = start.as_ref().filter(|p| p.is_file() && flex_core::library::is_video(p)) {
             let title = flex_core::library::display_name(&path.file_name().unwrap_or_default().to_string_lossy(), true);
-            let req = PlayRequest { path, title, library_id: -1, file_id: -1, start: Some(0.0) };
+            let req = PlayRequest { path: path.clone(), title, library_id: -1, file_id: -1, start: Some(0.0) };
             app.apply(&cc.egui_ctx, Nav::Play { req, replace: false });
+        } else if let Some(id) = start.as_ref().and_then(|s| flex_core::youtube::video_id(&s.to_string_lossy())) {
+            // YouTube spike: `flex <YouTube URL>` plays it (resolving takes a few seconds,
+            // before the window appears). Needs yt-dlp in the data folder's tools or PATH.
+            app.play_youtube(&cc.egui_ctx, &id);
         }
         Ok(app)
+    }
+
+    fn play_youtube(&mut self, ctx: &egui::Context, id: &str) {
+        let Some(tools) = flex_core::youtube::Tools::find() else {
+            let dir = flex_core::youtube::tools_dir();
+            self.sh.toast(format!("YouTube needs yt-dlp: put it in {} (or on the PATH)", dir.display()));
+            return;
+        };
+        log::info!("youtube: resolving {id} with {}", tools.yt_dlp.display());
+        match tools.resolve(id, 1080) {
+            Ok(video) => {
+                log::info!("youtube: {} ({:?}p, separate audio: {})", video.title, video.height, video.audio_url.is_some());
+                let req = PlayRequest { path: PathBuf::from(video.mpv_url()), title: video.title, library_id: -1, file_id: -1, start: Some(0.0) };
+                self.apply(ctx, Nav::Play { req, replace: false });
+            }
+            Err(e) => {
+                log::warn!("youtube: {e:#}");
+                self.sh.toast(format!("Couldn't play that YouTube video: {e:#}"));
+            }
+        }
     }
 
     fn top(&mut self) -> &mut dyn Screen {
