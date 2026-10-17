@@ -131,9 +131,11 @@ fn pick(release: Release, current: Version) -> Result<Option<Installer>> {
 }
 
 /// Downloads the installer to `dest`, checking its size and SHA-256. A matching file
-/// already there (from an earlier try) is kept.
-pub fn download(installer: &Installer, dest: &Path) -> Result<()> {
+/// already there (from an earlier try) is kept. `progress` gets the bytes downloaded so
+/// far as they arrive.
+pub fn download(installer: &Installer, dest: &Path, mut progress: impl FnMut(u64)) -> Result<()> {
     if dest.is_file() && file_sha256(dest).is_ok_and(|h| h == installer.sha256) {
+        progress(installer.size);
         return Ok(());
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -158,6 +160,7 @@ pub fn download(installer: &Installer, dest: &Path) -> Result<()> {
         hasher.update(&buf[..n]);
         file.write_all(&buf[..n])?;
         size += n as u64;
+        progress(size);
     }
     file.sync_all()?;
     drop(file);
@@ -254,9 +257,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let dest = dir.join(&installer.name);
         let _ = std::fs::remove_file(&dest);
-        download(&installer, &dest).unwrap();
+        let mut last = 0;
+        download(&installer, &dest, |done| last = done).unwrap();
         assert_eq!(std::fs::metadata(&dest).unwrap().len(), installer.size);
-        download(&installer, &dest).unwrap(); // already there: kept
+        assert_eq!(last, installer.size);
+        download(&installer, &dest, |_| {}).unwrap(); // already there: kept
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
