@@ -12,6 +12,7 @@ use crate::shared::{PlayRequest, Shared};
 use crate::widgets::{self, Hit};
 use crate::theme;
 use crate::topbar::{self, TopBar};
+use crate::update::Progress;
 
 const CURSOR_HIDE_SECS: f64 = 2.0;
 const TOAST_SECS: f64 = 4.0;
@@ -174,14 +175,34 @@ impl FlexApp {
 
     /// Runs a downloaded update once nothing is loaded in the player (playing or paused).
     fn install_update(&mut self) {
-        let Some(installer) = self.sh.updater.ready() else { return };
-        if self.stack.iter().any(|s| s.is_player()) {
-            return; // checked again when playback ends (the screen changes)
+        if let Some(message) = self.sh.updater.take_message() {
+            self.sh.toast(message);
         }
-        if let Err(e) = self.sh.updater.install(&installer, self.hidden) {
+        let Some((version, installer)) = self.sh.updater.ready() else { return };
+        // Automatic updates wait for playback to end (checked again when the screen
+        // changes); "Update now" doesn't (progress is saved as Flex quits).
+        if !self.sh.updater.asked() && self.stack.iter().any(|s| s.is_player()) {
+            return;
+        }
+        if let Err(e) = self.sh.updater.install(version, &installer, self.hidden) {
             log::warn!("{e:#}");
             self.sh.toast(format!("Couldn't install the update: {e:#}"));
         }
+    }
+
+    /// The update's progress, shown along the bottom until it's done. Automatic updates
+    /// keep quiet during videos.
+    fn update_status(&self) -> Option<String> {
+        let quiet = !self.sh.updater.asked() && self.stack.iter().any(|s| s.is_player());
+        Some(match self.sh.updater.progress() {
+            Progress::Checking => "Checking for updates…".to_owned(),
+            Progress::Downloading { version, done, total } if !quiet => {
+                format!("Found Flex {version}: downloading… {}%", done * 100 / total.max(1))
+            }
+            Progress::Ready { version, .. } if !quiet => format!("Flex {version} downloaded: installing…"),
+            Progress::Installing { version } => format!("Installing Flex {version}… Flex will restart in a moment"),
+            _ => return None,
+        })
     }
 
     /// Stops playback (saving progress) and hides the window; Flex stays in the tray.
@@ -197,15 +218,22 @@ impl FlexApp {
 
     /// Handles the tray icon and later launches, and turns closing the window into hiding
     /// it. Runs while the window is hidden too.
+    fn show_window(&mut self, ctx: &egui::Context) {
+        self.hide_pending = false;
+        self.hidden = false;
+        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+    }
+
     fn handle_commands(&mut self, ctx: &egui::Context) {
         while let Ok(command) = self.commands.try_recv() {
             match command {
-                Command::Show => {
-                    self.hide_pending = false;
-                    self.hidden = false;
-                    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                Command::Show => self.show_window(ctx),
+                Command::UpdateNow => {
+                    // Shown, so the progress along the bottom can be seen.
+                    self.show_window(ctx);
+                    self.sh.updater.update_now(ctx);
                 }
                 Command::Quit => {
                     log::info!("quitting");
@@ -347,7 +375,9 @@ impl FlexApp {
         ctx.request_repaint();
     }
 
-    fn draw_toasts(&mut self, ui: &egui::Ui, now: f64) {
+    /// Toasts, newest at the bottom, with `sticky` (e.g. update progress) below them
+    /// for as long as it's given.
+    fn draw_toasts(&mut self, ui: &egui::Ui, now: f64, sticky: Option<String>) {
         for msg in self.sh.take_toasts() {
             log::info!("{msg}");
             // A repeat of a message already showing just refreshes it instead of stacking.
@@ -355,11 +385,14 @@ impl FlexApp {
             self.toasts.push_back((msg, now + TOAST_SECS));
         }
         self.toasts.retain(|(_, until)| *until > now);
-        let Some(next_expiry) = self.toasts.iter().map(|(_, t)| *t).reduce(f64::min) else { return };
+        let next_expiry = self.toasts.iter().map(|(_, t)| *t).reduce(f64::min);
+        if next_expiry.is_none() && sticky.is_none() {
+            return;
+        }
         let safe = theme::safe_rect(ui.ctx());
         let font = TextStyle::Body.resolve(ui.style());
         let mut bottom = safe.bottom();
-        for (msg, _) in self.toasts.iter().rev() {
+        for msg in sticky.iter().chain(self.toasts.iter().rev().map(|(m, _)| m)) {
             let galley = ui.painter().layout(msg.clone(), font.clone(), theme::TEXT, safe.width() * 0.7);
             let rect = Rect::from_center_size(
                 pos2(safe.center().x, bottom - galley.size().y / 2.0 - 16.0),
@@ -369,7 +402,9 @@ impl FlexApp {
             ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT);
             bottom = rect.top() - 12.0;
         }
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(next_expiry - now));
+        if let Some(next_expiry) = next_expiry {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(next_expiry - now));
+        }
     }
 
     /// Shows the cursor while the mouse moves; hides it after a moment still.
@@ -507,7 +542,8 @@ impl eframe::App for FlexApp {
         }
 
         self.update_cursor(&ctx, now);
-        self.draw_toasts(ui, now);
+        let status = self.update_status();
+        self.draw_toasts(ui, now, status);
         self.hold_to_quit(ui, now, text_focused);
         if self.show_input_log {
             self.input_log_overlay(ui);

@@ -14,6 +14,8 @@ use eframe::egui;
 pub enum Command {
     Show,
     Quit,
+    /// Check for an update and install it now (tray menu).
+    UpdateNow,
 }
 
 fn port_file() -> std::path::PathBuf {
@@ -44,6 +46,7 @@ pub fn listen(commands: Sender<Command>, ctx: egui::Context) {
             let command = match line.trim() {
                 "show" => Command::Show,
                 "quit" => Command::Quit,
+                "update" => Command::UpdateNow,
                 other => {
                     log::warn!("unknown instance command {other:?}");
                     continue;
@@ -88,6 +91,7 @@ fn try_send(command: Command) -> anyhow::Result<()> {
     stream.write_all(match command {
         Command::Show => b"show\n",
         Command::Quit => b"quit\n",
+        Command::UpdateNow => b"update\n",
     })?;
     let mut reply = String::new();
     BufReader::new(&stream).read_line(&mut reply)?;

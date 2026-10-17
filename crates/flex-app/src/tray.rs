@@ -1,5 +1,6 @@
 //! The system tray icon: Flex keeps running there when its window is closed, so it opens
-//! again instantly. Clicking the icon shows the window; its menu has Open and Quit.
+//! again instantly. Clicking the icon shows the window; its menu has Open, Update now (in
+//! installed copies) and Quit.
 
 use std::sync::mpsc::Sender;
 
@@ -38,6 +39,9 @@ fn build(commands: Sender<Command>, ctx: &egui::Context) -> anyhow::Result<tray_
 
     let menu = Menu::new();
     menu.append(&MenuItem::with_id("open", "Open Flex", true, None))?;
+    if crate::update::installed() {
+        menu.append(&MenuItem::with_id("update", "Update now…", true, None))?;
+    }
     menu.append(&PredefinedMenuItem::separator())?;
     menu.append(&MenuItem::with_id("quit", "Quit Flex", true, None))?;
 
@@ -48,6 +52,7 @@ fn build(commands: Sender<Command>, ctx: &egui::Context) -> anyhow::Result<tray_
     let (tx, c) = (commands.clone(), ctx.clone());
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
         "open" => send(&tx, &c, Command::Show),
+        "update" => send(&tx, &c, Command::UpdateNow),
         "quit" => send(&tx, &c, Command::Quit),
         _ => {}
     }));
