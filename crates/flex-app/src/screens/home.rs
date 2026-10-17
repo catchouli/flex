@@ -159,7 +159,7 @@ impl Home {
             self.section = Section::Libraries;
         }
         self.cont = self.cont.min(self.items.len().saturating_sub(1));
-        self.lib = self.lib.min(sh.libs.len().max(1));
+        self.lib = self.lib.min(sh.libs.len().max(1) + usize::from(sh.youtube_enabled()));
     }
 
     fn handle_continue(&mut self, sh: &Shared, press: Press) -> Nav {
@@ -191,8 +191,10 @@ impl Home {
     }
 
     fn handle_libraries(&mut self, sh: &Shared, press: Press) -> Nav {
-        // The Watchlist card, then each library (or an "Add library" card when there are none).
-        let count = 1 + sh.libs.len().max(1);
+        // The Watchlist card, YouTube (when on), then each library (or an "Add library"
+        // card when there are none).
+        let yt = usize::from(sh.youtube_enabled());
+        let count = 1 + yt + sh.libs.len().max(1);
         let cols = self.lib_columns.max(1);
         match press.action {
             Action::Left => self.lib = self.lib.saturating_sub(1),
@@ -211,8 +213,11 @@ impl Home {
             _ if press.is_activate() && self.lib == 0 => {
                 return Nav::push(ShowsView::with_source(sh, Source::Watchlist));
             }
+            _ if press.is_activate() && yt == 1 && self.lib == 1 => {
+                return Nav::push(super::youtube::YouTubeHome::default());
+            }
             _ if press.is_activate() => {
-                return match sh.libs.get(self.lib - 1) {
+                return match sh.libs.get(self.lib - 1 - yt) {
                     Some(l) if l.is_music() => Nav::push(super::music::AlbumsView::new(sh, l.lib.id)),
                     Some(l) => match sh.library_view(l.lib.id) {
                         crate::shared::LibraryView::Shows => Nav::push(ShowsView::new(sh, l.lib.id)),
@@ -249,7 +254,8 @@ impl Screen for Home {
         // selection is visible, then draw clipped to `rect`.
         let lib_columns = (((rect.width() + GAP) / (LIBRARY_CARD[0] + GAP)) as usize).max(1);
         let cont_h = if self.items.is_empty() { 0.0 } else { HEADER_H + CONTINUE_CARD[1] + SECTION_GAP };
-        let lib_rows = (1 + sh.libs.len().max(1)).div_ceil(lib_columns);
+        let yt = usize::from(sh.youtube_enabled());
+        let lib_rows = (1 + yt + sh.libs.len().max(1)).div_ceil(lib_columns);
         let content_h = cont_h + HEADER_H + lib_rows as f32 * (LIBRARY_CARD[1] + GAP);
         if std::mem::take(&mut self.reveal_selection) {
             let (sel_top, sel_bottom) = match self.section {
@@ -328,7 +334,7 @@ impl Screen for Home {
             let min = pos2(body.left() + col as f32 * (LIBRARY_CARD[0] + GAP), body.top() + row as f32 * (LIBRARY_CARD[1] + GAP));
             Rect::from_min_size(min, LIBRARY_CARD.into())
         };
-        for i in 0..1 + sh.libs.len().max(1) {
+        for i in 0..1 + yt + sh.libs.len().max(1) {
             if widgets::hit(ui, card_rect(i)).any() {
                 (self.section, self.lib) = (Section::Libraries, i);
             }
@@ -341,13 +347,19 @@ impl Screen for Home {
             n => format!("{n} titles"),
         };
         widgets::card(painter, card_rect(0), "Watchlist", &["Shows and films to watch", &count], libs_focused && self.lib == 0, &style);
+        if yt == 1 {
+            let status = if sh.youtube.tools.is_none() { "Setting up…" } else { "Subscriptions and search" };
+            widgets::card(painter, card_rect(1), "YouTube", &["No ads, sponsors skipped", status], libs_focused && self.lib == 1, &style);
+        }
         if sh.libs.is_empty() {
-            widgets::card(painter, card_rect(1), "Add library", &["Pick a folder to get started"], libs_focused && self.lib == 1, &style);
+            let i = 1 + yt;
+            widgets::card(painter, card_rect(i), "Add library", &["Pick a folder to get started"], libs_focused && self.lib == i, &style);
         }
         for (i, l) in sh.libs.iter().enumerate() {
             let status = l.status();
             let lines = [l.lib.kind.label(), status.as_str()];
-            widgets::card(painter, card_rect(i + 1), &l.lib.name, &lines, libs_focused && i + 1 == self.lib, &style);
+            let i = i + 1 + yt;
+            widgets::card(painter, card_rect(i), &l.lib.name, &lines, libs_focused && i == self.lib, &style);
         }
         Nav::None
     }

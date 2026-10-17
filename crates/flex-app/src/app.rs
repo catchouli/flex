@@ -93,31 +93,10 @@ impl FlexApp {
             let req = PlayRequest { path: path.clone(), title, library_id: -1, file_id: -1, start: Some(0.0) };
             app.apply(&cc.egui_ctx, Nav::Play { req, replace: false });
         } else if let Some(id) = start.as_ref().and_then(|s| flex_core::youtube::video_id(&s.to_string_lossy())) {
-            // YouTube spike: `flex <YouTube URL>` plays it (resolving takes a few seconds,
-            // before the window appears). Needs yt-dlp in the data folder's tools or PATH.
-            app.play_youtube(&cc.egui_ctx, &id);
+            // `flex <YouTube URL>` plays it (with YouTube set up).
+            app.apply(&cc.egui_ctx, Nav::Play { req: PlayRequest::youtube(&id, "YouTube", Some(0.0)), replace: false });
         }
         Ok(app)
-    }
-
-    fn play_youtube(&mut self, ctx: &egui::Context, id: &str) {
-        let Some(tools) = flex_core::youtube::Tools::find() else {
-            let dir = flex_core::youtube::tools_dir();
-            self.sh.toast(format!("YouTube needs yt-dlp: put it in {} (or on the PATH)", dir.display()));
-            return;
-        };
-        log::info!("youtube: resolving {id} with {}", tools.yt_dlp.display());
-        match tools.resolve(id, 1080) {
-            Ok(video) => {
-                log::info!("youtube: {} ({:?}p, separate audio: {})", video.title, video.height, video.audio_url.is_some());
-                let req = PlayRequest { path: PathBuf::from(video.mpv_url()), title: video.title, library_id: -1, file_id: -1, start: Some(0.0) };
-                self.apply(ctx, Nav::Play { req, replace: false });
-            }
-            Err(e) => {
-                log::warn!("youtube: {e:#}");
-                self.sh.toast(format!("Couldn't play that YouTube video: {e:#}"));
-            }
-        }
     }
 
     fn top(&mut self) -> &mut dyn Screen {
@@ -162,9 +141,22 @@ impl FlexApp {
     }
 
     fn play(&mut self, ctx: &egui::Context, req: PlayRequest, replace: bool) {
+        let saved = match req.youtube_id() {
+            Some(id) => {
+                if self.sh.youtube.tools.is_none() {
+                    self.sh.toast("YouTube isn't set up yet: switch it on in Settings → YouTube");
+                    return;
+                }
+                let id = id.to_owned();
+                self.sh.youtube.forget(&id);
+                self.sh.prepare_youtube(&id);
+                self.sh.yt_progress(&id).and_then(|p| p.position)
+            }
+            None => self.sh.progress(req.library_id, req.file_id).and_then(|p| p.position),
+        };
         // Ask before resuming, unless the caller already chose where to start.
         if req.start.is_none()
-            && let Some(position) = self.sh.progress(req.library_id, req.file_id).and_then(|p| p.position)
+            && let Some(position) = saved
         {
             if replace {
                 self.pop();
@@ -463,6 +455,7 @@ impl eframe::App for FlexApp {
     /// Runs even while the window is hidden, so scans finish without anyone watching.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
+        self.sh.poll_youtube();
         let playback = self.top().playback();
         self.sh.poll_plugins(playback);
         self.handle_commands(ctx);

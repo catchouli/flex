@@ -31,6 +31,8 @@ pub enum Purpose {
     Library,
     /// A Plex database file to import watch history from.
     PlexDatabase,
+    /// A YouTube subscription list (Takeout CSV, FreeTube, NewPipe, OPML).
+    YouTubeImport,
 }
 
 fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
@@ -47,7 +49,9 @@ fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
         let is_dir = if file_type.is_symlink() { item.path().is_dir() } else { file_type.is_dir() };
         if is_dir {
             dirs.push(dir_entry(item.path(), ""));
-        } else if purpose == Purpose::PlexDatabase && name.ends_with(".db") {
+        } else if (purpose == Purpose::PlexDatabase && name.ends_with(".db"))
+            || (purpose == Purpose::YouTubeImport && [".csv", ".json", ".db", ".opml", ".xml"].iter().any(|e| name.to_ascii_lowercase().ends_with(e)))
+        {
             let size = item.metadata().map_or(0, |m| m.len());
             let note = format!("{} MB", size / 1_000_000);
             files.push(Entry { path: item.path(), note, is_dir: false });
@@ -185,6 +189,18 @@ impl Screen for FolderPicker {
             }
             ListInput::Activate(i) => {
                 let entry = &self.dirs[i - self.offset()];
+                if !entry.is_dir && self.purpose == Purpose::YouTubeImport {
+                    return match sh.import_subscriptions(&entry.path) {
+                        Ok(added) => {
+                            sh.toast(format!("Imported {added} new channels; fetching their videos…"));
+                            Nav::Pop
+                        }
+                        Err(e) => {
+                            sh.toast(format!("Couldn't import that: {e:#}"));
+                            Nav::None
+                        }
+                    };
+                }
                 if !entry.is_dir {
                     return Nav::replace(PlexImport::new(sh, entry.path.clone()));
                 }
@@ -202,6 +218,7 @@ impl Screen for FolderPicker {
         let (title, prompt) = match self.purpose {
             Purpose::Library => ("Add library", "Choose a drive or folder"),
             Purpose::PlexDatabase => ("Import from Plex", "Find com.plexapp.plugins.library.db"),
+            Purpose::YouTubeImport => ("Import subscriptions", "Find subscriptions.csv (Google Takeout), or a FreeTube, NewPipe or OPML export"),
         };
         let location = self.dir.as_ref().map_or(prompt.to_owned(), |d| d.display().to_string());
         let subtitle = self.error.clone().unwrap_or(location);
@@ -219,7 +236,11 @@ impl Screen for FolderPicker {
             Row::new(if e.is_dir { Icon::Folder } else { Icon::Add }, name).detail(e.note.as_str())
         }));
         if rows.is_empty() {
-            let what = if self.purpose == Purpose::PlexDatabase { "No folders or .db files here" } else { "No folders here" };
+            let what = match self.purpose {
+                Purpose::Library => "No folders here",
+                Purpose::PlexDatabase => "No folders or .db files here",
+                Purpose::YouTubeImport => "No folders or subscription files here",
+            };
             widgets::message(ui.painter(), body, what, ui.style());
         }
         widgets::list(ui, body, &rows, &mut self.list, focused);

@@ -19,6 +19,7 @@ mod theme;
 mod topbar;
 mod tray;
 mod update;
+mod youtube;
 mod widgets;
 
 use std::path::PathBuf;

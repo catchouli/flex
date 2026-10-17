@@ -158,6 +158,24 @@ pub struct PlayRequest {
     pub start: Option<f64>,
 }
 
+/// The "library" YouTube plays belong to: their path is `youtube:<video id>`.
+pub const YOUTUBE_LIBRARY: i64 = -2;
+const YOUTUBE_PREFIX: &str = "youtube:";
+
+impl PlayRequest {
+    pub fn youtube(id: &str, title: &str, start: Option<f64>) -> Self {
+        Self { path: PathBuf::from(format!("{YOUTUBE_PREFIX}{id}")), title: title.to_owned(), library_id: YOUTUBE_LIBRARY, file_id: -1, start }
+    }
+
+    /// The video id, for a YouTube play.
+    pub fn youtube_id(&self) -> Option<&str> {
+        if self.library_id != YOUTUBE_LIBRARY {
+            return None;
+        }
+        self.path.to_str()?.strip_prefix(YOUTUBE_PREFIX)
+    }
+}
+
 /// Choices offered in Settings for "mark watched at".
 pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
 
@@ -272,6 +290,7 @@ pub struct Shared {
     pub ambient: crate::ambient::Ambient,
     /// The last playback state sent to plugins.
     playback_sent: Option<Playback>,
+    pub youtube: crate::youtube::YouTube,
 }
 
 impl Shared {
@@ -314,8 +333,13 @@ impl Shared {
             plugins,
             ambient,
             playback_sent: None,
+            youtube: crate::youtube::YouTube::new(ctx),
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
+        if shared.youtube_enabled() {
+            // Installs yt-dlp if it's missing; otherwise only checks once a day.
+            shared.youtube.update_tools(false);
+        }
         shared.music_artists = Arc::new(shared.db.music_artists(i64::MAX).unwrap_or_default());
         if shared.auto_update() {
             shared.updater.set_enabled(true, ctx);
@@ -498,6 +522,17 @@ impl Shared {
     /// new progress, or `None` if nothing was recorded (too short, or not a library file).
     pub fn record_progress(&mut self, req: &PlayRequest, position: f64, duration: f64) -> Option<Progress> {
         let threshold = self.watched_threshold();
+        if let Some(id) = req.youtube_id() {
+            let channel = match self.youtube.resolved(id) {
+                Some(Ok(video)) => video.channel.clone(),
+                _ => String::new(),
+            };
+            if let Err(e) = self.db.record_yt_progress(id, &req.title, &channel, position, duration, threshold, now_unix()) {
+                log::warn!("saving YouTube progress: {e:#}");
+            }
+            self.youtube.version += 1;
+            return None;
+        }
         let old = self.progress(req.library_id, req.file_id)?;
         let new = old.after_playing(position, duration, threshold, now_unix())?;
         if new == old {
@@ -518,6 +553,9 @@ impl Shared {
 
     /// Adds a viewing session to the history.
     pub fn add_history(&mut self, req: &PlayRequest, played_at: i64, position: Option<f64>, completed: bool) {
+        if req.youtube_id().is_some() {
+            return; // the history is per library
+        }
         if let Err(e) = self.db.add_history(req.file_id, played_at, position, completed) {
             log::warn!("saving history: {e:#}");
         }
@@ -1309,6 +1347,159 @@ impl Shared {
     }
 
     /// Applies finished/progressing scans. Call once per frame.
+    pub fn youtube_enabled(&self) -> bool {
+        self.setting_bool(crate::youtube::ENABLED_SETTING)
+    }
+
+    pub fn set_youtube_enabled(&mut self, on: bool) {
+        self.set_setting_bool(crate::youtube::ENABLED_SETTING, on);
+        if on {
+            self.youtube.update_tools(false);
+        }
+    }
+
+    /// The tallest video to play, in pixels.
+    pub fn youtube_quality(&self) -> u32 {
+        self.setting(crate::youtube::QUALITY_SETTING).and_then(|q| q.parse().ok()).unwrap_or(crate::youtube::DEFAULT_QUALITY)
+    }
+
+    pub fn set_youtube_quality(&mut self, height: u32) {
+        self.set_setting(crate::youtube::QUALITY_SETTING, &height.to_string());
+    }
+
+    pub fn youtube_shorts(&self) -> bool {
+        self.setting_bool(crate::youtube::SHORTS_SETTING)
+    }
+
+    pub fn set_youtube_shorts(&mut self, on: bool) {
+        self.set_setting_bool(crate::youtube::SHORTS_SETTING, on);
+        self.youtube.version += 1;
+    }
+
+    /// SponsorBlock categories to skip.
+    pub fn sponsorblock_categories(&self) -> Vec<String> {
+        match self.setting(crate::youtube::SPONSORBLOCK_SETTING) {
+            Some(list) => list.split(',').filter(|c| !c.is_empty()).map(str::to_owned).collect(),
+            None => flex_core::youtube::sponsorblock::default_categories(),
+        }
+    }
+
+    pub fn set_sponsorblock_category(&mut self, category: &str, on: bool) {
+        let mut list = self.sponsorblock_categories();
+        list.retain(|c| c != category);
+        if on {
+            list.push(category.to_owned());
+        }
+        self.set_setting(crate::youtube::SPONSORBLOCK_SETTING, &list.join(","));
+    }
+
+    /// Starts finding a video's streams (and what to skip) ahead of playing it.
+    pub fn prepare_youtube(&mut self, id: &str) {
+        let (quality, categories) = (self.youtube_quality(), self.sponsorblock_categories());
+        self.youtube.prepare(id, quality, categories);
+    }
+
+    pub fn yt_channels(&self) -> Vec<flex_core::youtube::store::Channel> {
+        self.db.yt_channels().unwrap_or_default()
+    }
+
+    pub fn yt_latest(&self, limit: usize) -> Vec<flex_core::youtube::store::Video> {
+        self.db.yt_latest(limit, self.youtube_shorts()).unwrap_or_default()
+    }
+
+    pub fn yt_channel_videos(&self, channel_id: &str, limit: usize) -> Vec<flex_core::youtube::store::Video> {
+        self.db.yt_channel_videos(channel_id, limit, self.youtube_shorts()).unwrap_or_default()
+    }
+
+    pub fn yt_continue(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
+        self.db.yt_continue(limit).unwrap_or_default()
+    }
+
+    pub fn yt_progress(&self, id: &str) -> Option<flex_core::youtube::store::WatchProgress> {
+        self.db.yt_progress(id).ok().flatten()
+    }
+
+    pub fn yt_progress_all(&self) -> HashMap<String, flex_core::youtube::store::WatchProgress> {
+        self.db.yt_progress_all().unwrap_or_default()
+    }
+
+    pub fn set_yt_watched(&mut self, id: &str, title: &str, channel: &str, watched: bool) {
+        if let Err(e) = self.db.set_yt_watched(id, title, channel, watched, now_unix()) {
+            log::warn!("saving YouTube progress: {e:#}");
+        }
+        self.youtube.version += 1;
+    }
+
+    pub fn subscribe(&mut self, id: &str, title: &str) {
+        match self.db.add_yt_channel(id, title, now_unix()) {
+            Ok(true) => {
+                self.toast(format!("Subscribed to {title}"));
+                self.youtube.version += 1;
+                // Its videos show up after the next refresh; start one if none is running.
+                self.youtube.refresh(vec![id.to_owned()]);
+            }
+            Ok(false) => self.toast(format!("Already subscribed to {title}")),
+            Err(e) => self.toast(format!("Couldn't subscribe: {e:#}")),
+        }
+    }
+
+    pub fn unsubscribe(&mut self, id: &str) {
+        if let Err(e) = self.db.remove_yt_channel(id) {
+            self.toast(format!("Couldn't unsubscribe: {e:#}"));
+        }
+        self.youtube.version += 1;
+    }
+
+    pub fn is_subscribed(&self, channel_id: &str) -> bool {
+        self.yt_channels().iter().any(|c| c.id == channel_id)
+    }
+
+    /// Imports a subscription list (Takeout CSV, FreeTube, NewPipe or OPML).
+    pub fn import_subscriptions(&mut self, path: &Path) -> anyhow::Result<usize> {
+        let text = std::fs::read_to_string(path)?;
+        let found = flex_core::youtube::feeds::parse_subscriptions(&text);
+        anyhow::ensure!(!found.is_empty(), "no YouTube channels in that file");
+        let now = now_unix();
+        let mut added = 0;
+        for (id, title) in &found {
+            added += usize::from(self.db.add_yt_channel(id, title, now)?);
+        }
+        self.youtube.version += 1;
+        let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
+        self.youtube.refresh(ids);
+        Ok(added)
+    }
+
+    /// Takes YouTube's background results: saves feeds, reports tool updates and new
+    /// subscriptions, and refreshes feeds every so often.
+    pub fn poll_youtube(&mut self) {
+        use crate::youtube::Msg;
+        for msg in self.youtube.poll() {
+            match msg {
+                Msg::Feed(id, Ok((title, videos))) => {
+                    if let Err(e) = self.db.save_yt_feed(&id, &title, &videos, now_unix()) {
+                        log::warn!("saving the feed for {id}: {e:#}");
+                    }
+                }
+                Msg::Feed(id, Err(e)) => log::warn!("youtube: feed for {id}: {e}"),
+                Msg::FeedsDone => self.youtube.version += 1,
+                Msg::Tools(Ok(report)) => {
+                    for (tool, version) in report.updated {
+                        log::info!("youtube: {} {version} installed", tool.name());
+                    }
+                }
+                Msg::Tools(Err(e)) => self.toast(format!("Couldn't set up YouTube: {e}")),
+                Msg::Channel(Ok((id, title))) => self.subscribe(&id, &title),
+                Msg::Channel(Err(e)) => self.toast(format!("Couldn't find that channel: {e}")),
+                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) => {}
+            }
+        }
+        if self.youtube_enabled() && self.youtube.tools.is_some() && self.youtube.refresh_due() {
+            let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
+            self.youtube.refresh(ids);
+        }
+    }
+
     /// Handles plugin messages, tells plugins about playback and updates lights.
     /// `playback`: what the top screen is playing, if anything.
     pub fn poll_plugins(&mut self, playback: Option<Playback>) {
