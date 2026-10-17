@@ -1,5 +1,5 @@
 //! Options for one item, opened by holding OK (or right-click): mark watched/unwatched,
-//! play from the beginning.
+//! play from the beginning, and (from Continue Watching) remove it from there.
 
 use eframe::egui::{Rect, Ui};
 
@@ -18,19 +18,35 @@ pub enum Target {
 enum Choice {
     MarkWatched(bool),
     PlayFromStart(PlayRequest),
+    RemoveFromContinue,
 }
 
 pub struct OptionsMenu {
     target: Target,
     list: ListState,
+    /// Opened from Continue Watching: its key there (see `Shared::hide_continue`).
+    continue_key: Option<String>,
 }
 
 impl OptionsMenu {
     pub fn new(target: Target) -> Self {
-        Self { target, list: ListState::default() }
+        Self { target, list: ListState::default(), continue_key: None }
+    }
+
+    /// Opened on a Continue Watching card: also offers to remove it from there.
+    pub fn from_continue(target: Target, key: String) -> Self {
+        Self { continue_key: Some(key), ..Self::new(target) }
     }
 
     fn choices(&self, sh: &Shared) -> Vec<(Row, Choice)> {
+        let mut choices = self.target_choices(sh);
+        if self.continue_key.is_some() {
+            choices.push((Row::new(Icon::Remove, "Remove from Continue Watching").detail("Until you watch it again"), Choice::RemoveFromContinue));
+        }
+        choices
+    }
+
+    fn target_choices(&self, sh: &Shared) -> Vec<(Row, Choice)> {
         match &self.target {
             Target::File { library_id, file_id } => {
                 let Some(progress) = sh.progress(*library_id, *file_id) else { return Vec::new() };
@@ -83,6 +99,12 @@ impl Screen for OptionsMenu {
                     Target::Files { library_id, ids, .. } => (*library_id, ids.clone()),
                 };
                 sh.set_watched(library_id, &ids, watched);
+                Nav::Pop
+            }
+            Choice::RemoveFromContinue => {
+                if let Some(key) = &self.continue_key {
+                    sh.hide_continue(key);
+                }
                 Nav::Pop
             }
         }

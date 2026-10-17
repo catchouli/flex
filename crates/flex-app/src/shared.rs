@@ -291,6 +291,8 @@ pub struct Shared {
     /// The last playback state sent to plugins.
     playback_sent: Option<Playback>,
     pub youtube: crate::youtube::YouTube,
+    /// Bumped when something is removed from Continue Watching, so Home refreshes.
+    pub continue_version: u64,
 }
 
 impl Shared {
@@ -334,6 +336,7 @@ impl Shared {
             ambient,
             playback_sent: None,
             youtube: crate::youtube::YouTube::new(ctx),
+            continue_version: 0,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
         if shared.youtube_enabled() {
@@ -630,8 +633,19 @@ impl Shared {
         let mut items = progress::continue_watching_shows(organised, limit);
         let pending = self.libs.iter().filter(|l| l.organised.is_none() && !l.is_music()).map(|l| (&l.lib, &*l.tree));
         items.extend(progress::continue_watching(pending, limit));
+        let mut items = progress::without_hidden(items, &self.db.continue_hidden().unwrap_or_default());
         items.truncate(limit);
         items
+    }
+
+    /// Removes an entry from Continue Watching until it's played again (`key` from
+    /// `ContinueItem::hide_key`, or `yt:<video id>`).
+    pub fn hide_continue(&mut self, key: &str) {
+        if let Err(e) = self.db.hide_continue(key, now_unix()) {
+            log::warn!("hiding from Continue Watching: {e:#}");
+        }
+        self.continue_version += 1;
+        self.youtube.version += 1;
     }
 
     pub fn library_view(&self, id: i64) -> LibraryView {
@@ -1411,8 +1425,14 @@ impl Shared {
         self.db.yt_channel_videos(channel_id, limit, self.youtube_shorts()).unwrap_or_default()
     }
 
+    /// Part-watched YouTube videos, minus any removed from Continue Watching (until played
+    /// again).
     pub fn yt_continue(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
-        self.db.yt_continue(limit).unwrap_or_default()
+        let hidden = self.db.continue_hidden().unwrap_or_default();
+        let mut items = self.db.yt_continue(usize::MAX).unwrap_or_default();
+        items.retain(|(id, p)| hidden.get(&format!("yt:{id}")).is_none_or(|at| p.updated_at > *at));
+        items.truncate(limit);
+        items
     }
 
     pub fn yt_progress(&self, id: &str) -> Option<flex_core::youtube::store::WatchProgress> {

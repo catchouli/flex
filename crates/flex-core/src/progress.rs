@@ -1,6 +1,6 @@
 //! Watch progress: resume positions, the "watched" rule and Continue Watching.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::library::Library;
 use crate::tree::Tree;
@@ -70,6 +70,22 @@ pub struct ContinueItem {
     pub library_id: i64,
     pub file_id: i64,
     pub kind: ContinueKind,
+    /// When the show or film was last played (Unix time), for ordering and for
+    /// "Remove from Continue Watching".
+    pub last_played: i64,
+}
+
+impl ContinueItem {
+    /// Its key in the `continue_hidden` table.
+    pub fn hide_key(&self) -> String {
+        format!("{}:{}", self.library_id, self.file_id)
+    }
+}
+
+/// Drops entries removed from Continue Watching (`hidden`: key → when), unless they've
+/// been played since.
+pub fn without_hidden(items: Vec<ContinueItem>, hidden: &HashMap<String, i64>) -> Vec<ContinueItem> {
+    items.into_iter().filter(|i| hidden.get(&i.hide_key()).is_none_or(|at| i.last_played > *at)).collect()
 }
 
 fn parent_of(rel: &str) -> &str {
@@ -93,17 +109,17 @@ pub fn continue_watching<'a>(
 
     let mut seen = HashSet::new();
     let mut items = Vec::new();
-    for (_, lib, tree, file) in played {
+    for (last_played, lib, tree, file) in played {
         // Episodes: one entry per folder (season). Movies stand alone, even side by side.
         let group = if lib.kind.is_episodic() { parent_of(&file.rel_path) } else { &file.rel_path };
         if !seen.insert((lib.id, group)) {
             continue; // an older entry from a folder already represented
         }
         let item = if file.progress.position.is_some() {
-            Some(ContinueItem { library_id: lib.id, file_id: file.id, kind: ContinueKind::Resume })
+            Some(ContinueItem { library_id: lib.id, file_id: file.id, kind: ContinueKind::Resume, last_played })
         } else if lib.kind.is_episodic() {
             tree.next_unwatched_in_folder(file.id)
-                .map(|next| ContinueItem { library_id: lib.id, file_id: next.id, kind: ContinueKind::Next })
+                .map(|next| ContinueItem { library_id: lib.id, file_id: next.id, kind: ContinueKind::Next, last_played })
         } else {
             None
         };
@@ -134,7 +150,7 @@ pub fn continue_watching_shows<'a>(
             else {
                 continue;
             };
-            let item = |file_id, kind| ContinueItem { library_id: lib.id, file_id, kind };
+            let item = |file_id, kind| ContinueItem { library_id: lib.id, file_id, kind, last_played };
             // Anything partway through, most recently played first.
             let in_progress = show
                 .episodes
@@ -236,6 +252,15 @@ mod tests {
     }
 
     #[test]
+    fn removed_entries_stay_hidden_until_played_again() {
+        let item = |file_id, last_played| ContinueItem { library_id: 1, file_id, kind: ContinueKind::Resume, last_played };
+        let hidden: HashMap<String, i64> = [("1:10".to_owned(), 500)].into();
+        let kept = without_hidden(vec![item(10, 400), item(11, 400)], &hidden);
+        assert_eq!(kept, vec![item(11, 400)], "removed at 500, last played before");
+        assert_eq!(without_hidden(vec![item(10, 600)], &hidden), vec![item(10, 600)], "played since");
+    }
+
+    #[test]
     fn continue_watching_per_show() {
         use crate::catalog::{self, Catalog};
         use crate::db::{GroupMatch, Show};
@@ -253,7 +278,8 @@ mod tests {
         let matches = [m("Show S1", 1), m("Show S2", 1), m("Done", 2)];
         let cat = Catalog::build(&tree, &parsed, &groups, vec![show(1, "Show"), show(2, "Done")], &matches);
         let items = continue_watching_shows([(&lib, &tree, &cat)], 10);
-        assert_eq!(items, [ContinueItem { library_id: 1, file_id: 3, kind: ContinueKind::Next }]);
+        // Last played: episode 2, at 20.
+        assert_eq!(items, [ContinueItem { library_id: 1, file_id: 3, kind: ContinueKind::Next, last_played: 20 }]);
         // Up next / next-episode stops at the end of a season.
         assert_eq!(cat.neighbour_in_season(1, 1), Some(2));
         assert_eq!(cat.neighbour_in_season(2, 1), None);
@@ -303,7 +329,7 @@ mod tests {
             file(7, 2, "Other.mkv", played(50, None, true)), // finished movie: nothing
         ]);
         let items = continue_watching([(&anime, &anime_tree), (&movies, &movie_tree)], 10);
-        let summary: Vec<_> = items.iter().map(|i| (i.file_id, i.kind)).collect();
-        assert_eq!(summary, [(6, ContinueKind::Resume), (4, ContinueKind::Resume), (8, ContinueKind::Next)]);
+        let summary: Vec<_> = items.iter().map(|i| (i.file_id, i.kind, i.last_played)).collect();
+        assert_eq!(summary, [(6, ContinueKind::Resume, 40), (4, ContinueKind::Resume, 30), (8, ContinueKind::Next, 20)]);
     }
 }

@@ -190,6 +190,11 @@ const MIGRATIONS: &[&str] = &[
         duration   REAL,
         watched    INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
+    );",
+    // 13: entries removed from Continue Watching (until played again)
+    "CREATE TABLE continue_hidden (
+        key       TEXT PRIMARY KEY, -- '<library id>:<file id>', or 'yt:<video id>'
+        hidden_at INTEGER NOT NULL
     );"
 ];
 
@@ -585,6 +590,22 @@ impl Db {
     }
 
     /// Watchlist entries: (key, library id, added at), most recent first.
+    /// Removes an entry from Continue Watching until it's played again.
+    pub fn hide_continue(&self, key: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO continue_hidden (key, hidden_at) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET hidden_at = ?2",
+            params![key, now],
+        )?;
+        Ok(())
+    }
+
+    /// Entries removed from Continue Watching: key → when.
+    pub fn continue_hidden(&self) -> Result<HashMap<String, i64>> {
+        let mut stmt = self.conn.prepare("SELECT key, hidden_at FROM continue_hidden")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn watchlist(&self) -> Result<Vec<(String, i64, i64)>> {
         let mut stmt = self.conn.prepare("SELECT key, library_id, added_at FROM watchlist ORDER BY added_at DESC")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
