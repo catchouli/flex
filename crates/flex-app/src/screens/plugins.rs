@@ -254,7 +254,7 @@ impl Screen for AmbientLight {
         let rows: Vec<Row> = CHOICES
             .iter()
             .zip(sh.ambient.values)
-            .map(|(c, v)| Row::new(Icon::None, format!("{}: {}", c.label, c.options[v])).detail("OK to change"))
+            .map(|(c, v)| Row::new(Icon::None, format!("{}: {}", c.label, c.options[v])).detail(c.detail))
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
