@@ -16,6 +16,10 @@ pub const ENABLED_SETTING: &str = "youtube";
 pub const QUALITY_SETTING: &str = "youtube_quality";
 pub const SHORTS_SETTING: &str = "youtube_shorts";
 pub const SPONSORBLOCK_SETTING: &str = "youtube_sponsorblock";
+pub const CONTINUE_SETTING: &str = "youtube_continue";
+/// How many part-watched videos Continue Watching keeps, as offered in Settings.
+pub const CONTINUE_LIMITS: [usize; 5] = [0, 3, 5, 10, 20];
+pub const DEFAULT_CONTINUE: usize = 10;
 /// Highest resolutions offered in Settings; the default is 1080p.
 pub const QUALITIES: [u32; 4] = [720, 1080, 1440, 2160];
 pub const DEFAULT_QUALITY: u32 = 1080;

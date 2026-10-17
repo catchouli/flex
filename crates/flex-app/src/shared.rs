@@ -375,6 +375,8 @@ impl Shared {
             // Installs yt-dlp if it's missing; otherwise only checks once a day.
             shared.youtube.update_tools(false);
         }
+        // Videos piled up before there was a limit (or since it was lowered).
+        shared.trim_yt_continue();
         shared.music_artists = Arc::new(shared.db.music_artists(i64::MAX).unwrap_or_default());
         if shared.auto_update() {
             shared.updater.set_enabled(true, ctx);
@@ -572,6 +574,7 @@ impl Shared {
                 log::warn!("saving YouTube progress: {e:#}");
             }
             self.youtube.version += 1;
+            self.trim_yt_continue();
             return None;
         }
         let old = self.progress(req.library_id, req.file_id)?;
@@ -1484,11 +1487,30 @@ impl Shared {
     /// Part-watched YouTube videos, minus any removed from Continue Watching (until played
     /// again).
     pub fn yt_continue(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
-        let hidden = self.db.continue_hidden().unwrap_or_default();
-        let mut items = self.db.yt_continue(usize::MAX).unwrap_or_default();
-        items.retain(|(id, p)| hidden.get(&format!("yt:{id}")).is_none_or(|at| p.updated_at > *at));
-        items.truncate(limit);
-        items
+        self.db.yt_continue(limit.min(self.youtube_continue_limit())).unwrap_or_default()
+    }
+
+    /// How many part-watched YouTube videos Continue Watching keeps (older ones drop off).
+    pub fn youtube_continue_limit(&self) -> usize {
+        self.setting(crate::youtube::CONTINUE_SETTING).and_then(|v| v.parse().ok()).unwrap_or(crate::youtube::DEFAULT_CONTINUE)
+    }
+
+    pub fn set_youtube_continue_limit(&mut self, keep: usize) {
+        self.set_setting(crate::youtube::CONTINUE_SETTING, &keep.to_string());
+        self.trim_yt_continue();
+    }
+
+    /// Drops the oldest YouTube videos from Continue Watching beyond the limit.
+    fn trim_yt_continue(&mut self) {
+        match self.db.trim_yt_continue(self.youtube_continue_limit(), now_unix()) {
+            Ok(0) => {}
+            Ok(n) => {
+                log::info!("youtube: {n} older videos dropped from Continue Watching");
+                self.continue_version += 1;
+                self.youtube.version += 1;
+            }
+            Err(e) => log::warn!("trimming Continue Watching: {e:#}"),
+        }
     }
 
     pub fn yt_progress(&self, id: &str) -> Option<flex_core::youtube::store::WatchProgress> {
