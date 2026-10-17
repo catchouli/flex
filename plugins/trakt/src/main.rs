@@ -300,20 +300,31 @@ impl Trakt {
         }
         let (host, auth, connecting) = (host.clone(), Arc::clone(&self.auth), Arc::clone(&self.connecting));
         std::thread::spawn(move || {
-            if let Err(e) = device_flow(&client, &host, &auth) {
-                host.status(false, e);
+            let result = device_flow(&client, &host, &auth);
+            // The code stays on screen until now: connected, or it didn't work out.
+            host.clear_toast(CODE_TOAST);
+            match result {
+                Ok(name) => host.toast(format!("Connected to Trakt as {name}")),
+                Err(e) => {
+                    host.toast(&e);
+                    host.status(false, e);
+                }
             }
             connecting.store(false, Ordering::SeqCst);
         });
     }
 }
 
-/// Shows a code to enter on trakt.tv, then waits for it to be approved.
-fn device_flow(client: &Client, host: &Host, auth: &Mutex<Option<Auth>>) -> Result<(), String> {
+/// The key of the toast showing the sign-in code.
+const CODE_TOAST: &str = "code";
+
+/// Shows a code to enter on Trakt's site (on screen until it's used or expires), then
+/// waits for it to be approved. Returns the Trakt username.
+fn device_flow(client: &Client, host: &Host, auth: &Mutex<Option<Auth>>) -> Result<String, String> {
     let code = client.device_code()?;
     let prompt = format!("Go to {} and enter {}", code.url.trim_start_matches("https://"), code.user_code);
     host.status(true, &prompt);
-    host.toast(&prompt);
+    host.toast_kept(CODE_TOAST, &prompt, code.expires_in as f64);
     let deadline = now() + code.expires_in;
     let mut interval = code.interval.max(1);
     while now() < deadline {
@@ -325,8 +336,7 @@ fn device_flow(client: &Client, host: &Host, auth: &Mutex<Option<Auth>>) -> Resu
                 let name = fresh.username.clone();
                 *auth.lock().unwrap_or_else(|e| e.into_inner()) = Some(fresh);
                 host.status(true, format!("Connected as {name}"));
-                host.toast(format!("Connected to Trakt as {name}"));
-                return Ok(());
+                return Ok(name);
             }
             Poll::Pending => {}
             Poll::SlowDown => interval += 1,
@@ -527,7 +537,10 @@ mod tests {
         assert_eq!(trakt.auth().unwrap().access, "a1");
         assert_eq!(trakt.auth().unwrap().username, "cat");
         let out = String::from_utf8(messages.lock().unwrap().clone()).unwrap();
-        assert!(out.contains("Go to trakt.tv/activate and enter ABCD1234"), "{out}");
+        assert!(
+            out.contains(r#"{"type":"toast","text":"Go to trakt.tv/activate and enter ABCD1234","seconds":600.0,"key":"code"}"#),
+            "the code stays up as long as it's valid: {out}"
+        );
         assert!(out.contains(r#""access_token":"a1""#), "saved in Flex's settings: {out}");
 
         // Playing: a1 is refused, so the sign-in is renewed and the scrobble retried.

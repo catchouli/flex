@@ -31,7 +31,8 @@ pub struct FlexApp {
     input_log: InputLog,
     show_input_log: bool,
     back_hold_since: Option<f64>,
-    toasts: VecDeque<(String, f64)>,
+    /// (text, shown until, key).
+    toasts: VecDeque<(String, f64, Option<String>)>,
     last_pointer_move: f64,
     /// Restore saved fullscreen once the window exists (fullscreen at creation misbehaves
     /// on Windows: the window ends up borderless in a corner).
@@ -394,21 +395,18 @@ impl FlexApp {
     /// Toasts, newest at the bottom, with `sticky` (e.g. update progress) below them
     /// for as long as it's given.
     fn draw_toasts(&mut self, ui: &egui::Ui, now: f64, sticky: Option<String>) {
-        for msg in self.sh.take_toasts() {
-            log::info!("{msg}");
-            // A repeat of a message already showing just refreshes it instead of stacking.
-            self.toasts.retain(|(m, _)| *m != msg);
-            self.toasts.push_back((msg, now + TOAST_SECS));
+        for toast in self.sh.take_toasts() {
+            add_toast(&mut self.toasts, toast, now);
         }
-        self.toasts.retain(|(_, until)| *until > now);
-        let next_expiry = self.toasts.iter().map(|(_, t)| *t).reduce(f64::min);
+        self.toasts.retain(|(_, until, _)| *until > now);
+        let next_expiry = self.toasts.iter().map(|(_, t, _)| *t).reduce(f64::min);
         if next_expiry.is_none() && sticky.is_none() {
             return;
         }
         let safe = theme::safe_rect(ui.ctx());
         let font = TextStyle::Body.resolve(ui.style());
         let mut bottom = safe.bottom();
-        for msg in sticky.iter().chain(self.toasts.iter().rev().map(|(m, _)| m)) {
+        for msg in sticky.iter().chain(self.toasts.iter().rev().map(|(m, _, _)| m)) {
             let galley = ui.painter().layout(msg.clone(), font.clone(), theme::TEXT, safe.width() * 0.7);
             let rect = Rect::from_center_size(
                 pos2(safe.center().x, bottom - galley.size().y / 2.0 - 16.0),
@@ -581,6 +579,20 @@ impl eframe::App for FlexApp {
     }
 }
 
+/// Adds a toast to those showing: a repeat of one already up just refreshes it, and one
+/// with a key replaces the toast with that key (or, with no text, only removes it).
+fn add_toast(toasts: &mut VecDeque<(String, f64, Option<String>)>, toast: flex_core::plugins::Toast, now: f64) {
+    match &toast.key {
+        Some(key) => toasts.retain(|(_, _, k)| k.as_ref() != Some(key)),
+        None => toasts.retain(|(m, _, _)| *m != toast.text),
+    }
+    if toast.text.is_empty() {
+        return;
+    }
+    log::info!("{}", toast.text);
+    toasts.push_back((toast.text, now + toast.seconds.unwrap_or(TOAST_SECS), toast.key));
+}
+
 /// Shown instead of the app if it can't start (e.g. the database can't be opened).
 pub struct StartupError(pub String);
 
@@ -591,5 +603,31 @@ impl eframe::App for StartupError {
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(safe));
         ui.heading("Flex couldn't start");
         ui.label(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use flex_core::plugins::Toast;
+
+    use super::{TOAST_SECS, add_toast};
+
+    #[test]
+    fn keyed_toasts_stay_until_replaced_or_cleared() {
+        let mut toasts = VecDeque::new();
+        let kept = |text: &str| Toast { text: text.into(), seconds: Some(600.0), key: Some("plugin:trakt:code".into()) };
+        add_toast(&mut toasts, kept("Enter ABCD"), 0.0);
+        add_toast(&mut toasts, Toast::new("Saved"), 1.0);
+        add_toast(&mut toasts, Toast::new("Saved"), 2.0);
+        assert_eq!(toasts.len(), 2, "a repeat refreshes rather than stacks");
+        assert_eq!(toasts[0].1, 600.0, "kept for its own time");
+        assert_eq!(toasts[1].1, 2.0 + TOAST_SECS);
+        add_toast(&mut toasts, kept("Enter EFGH"), 3.0);
+        assert_eq!(toasts.iter().filter(|t| t.2.is_some()).count(), 1, "same key replaces");
+        add_toast(&mut toasts, Toast { text: String::new(), seconds: None, key: Some("plugin:trakt:code".into()) }, 4.0);
+        assert!(toasts.iter().all(|t| t.2.is_none()), "empty text clears it");
+        assert_eq!(toasts.len(), 1);
     }
 }

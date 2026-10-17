@@ -169,7 +169,7 @@ Write these to stdout, one per line, and flush after each.
 | `{"type":"status","ok":true,"text":"Connected"}` | Sets the status line under your plugin's name. `ok: false` shows it as a problem |
 | `{"type":"choices","key":"device","options":[{"id":"a1","label":"Strip A"}]}` | Replaces a `choice` setting's options |
 | `{"type":"set","settings":{"device":"a1"}}` | Changes and saves settings, e.g. to remember the device you connected to |
-| `{"type":"toast","text":"Found 2 strips"}` | Shows a short message on screen |
+| `{"type":"toast","text":"Found 2 strips"}` | Shows a short message on screen for a few seconds. Add `"seconds":600` to keep it up longer and a `"key"` to replace it later; a toast with the same key and empty `text` removes it (the Trakt plugin keeps its sign-in code up this way until it's used) |
 | `{"type":"log","level":"info","text":"…"}` | Writes to Flex's log (`error`, `warn`, `info` or `debug`) |
 
 Lines that aren't JSON are written to the log as they are, so stray prints won't break

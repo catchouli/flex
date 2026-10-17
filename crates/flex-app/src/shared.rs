@@ -272,7 +272,7 @@ pub struct Shared {
     scan_cancel: HashMap<i64, Arc<AtomicBool>>,
     /// When libraries were last scanned for changes automatically.
     last_auto_scan: Option<std::time::Instant>,
-    toasts: Vec<String>,
+    toasts: Vec<flex_core::plugins::Toast>,
     /// Music artists' details from MusicBrainz (photo, discography), by MusicBrainz id.
     pub music_artists: Arc<HashMap<String, ArtistInfo>>,
     /// Closing the window hides Flex in the system tray instead of quitting.
@@ -1201,10 +1201,10 @@ impl Shared {
     }
 
     pub fn toast(&mut self, msg: impl Into<String>) {
-        self.toasts.push(msg.into());
+        self.toasts.push(flex_core::plugins::Toast::new(msg));
     }
 
-    pub fn take_toasts(&mut self) -> Vec<String> {
+    pub fn take_toasts(&mut self) -> Vec<flex_core::plugins::Toast> {
         std::mem::take(&mut self.toasts)
     }
 
@@ -1507,9 +1507,8 @@ impl Shared {
     /// `playing`: what the top screen is playing, if anything, and the library file.
     pub fn poll_plugins(&mut self, playing: Option<(Playback, Option<(i64, i64)>)>) {
         let mut wait = self.plugins.poll(&self.db);
-        for toast in self.plugins.take_toasts() {
-            self.toast(toast);
-        }
+        let plugin_toasts = self.plugins.take_toasts();
+        self.toasts.extend(plugin_toasts);
         // Plugins hear about starts, pauses, resumes and stops (not every frame); a stop
         // carries where playback got to. Something new starting stops the old one first.
         let same = |a: &Playback, b: &Playback| a.state == b.state && a.title == b.title && a.kind == b.kind;

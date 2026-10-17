@@ -145,8 +145,16 @@ pub enum PluginMessage {
     Choices { key: String, options: Vec<Choice> },
     /// Changes settings and saves them, e.g. remembering the device it connected to.
     Set { settings: Settings },
-    /// A short message shown on screen for a few seconds.
-    Toast { text: String },
+    /// A short message shown on screen, for a few seconds unless `seconds` says longer.
+    /// A later toast with the same `key` replaces it, and one with empty text removes it
+    /// (e.g. a sign-in code shown until it's used).
+    Toast {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seconds: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+    },
     /// A line for Flex's log.
     Log { level: LogLevel, text: String },
     #[serde(other)]
@@ -204,7 +212,17 @@ impl Host {
     }
 
     pub fn toast(&self, text: impl Into<String>) {
-        self.send(&PluginMessage::Toast { text: text.into() });
+        self.send(&PluginMessage::Toast { text: text.into(), seconds: None, key: None });
+    }
+
+    /// A toast that stays up for `seconds` (or until replaced or cleared with the same key).
+    pub fn toast_kept(&self, key: impl Into<String>, text: impl Into<String>, seconds: f64) {
+        self.send(&PluginMessage::Toast { text: text.into(), seconds: Some(seconds), key: Some(key.into()) });
+    }
+
+    /// Removes a toast shown with [`Host::toast_kept`].
+    pub fn clear_toast(&self, key: impl Into<String>) {
+        self.send(&PluginMessage::Toast { text: String::new(), seconds: None, key: Some(key.into()) });
     }
 
     pub fn log(&self, level: LogLevel, text: impl Into<String>) {
@@ -312,6 +330,14 @@ mod tests {
         assert_eq!(serde_json::to_string(&light).unwrap(), r#"{"type":"light","zones":[[255,140,60]],"brightness":0.5}"#);
         let status: PluginMessage = serde_json::from_str(r#"{"type":"status","ok":true,"text":"hi"}"#).unwrap();
         assert_eq!(status, PluginMessage::Status { ok: true, text: "hi".into() });
+    }
+
+    #[test]
+    fn toasts_can_stay_and_be_cleared() {
+        let plain: PluginMessage = serde_json::from_str(r#"{"type":"toast","text":"hi"}"#).unwrap();
+        assert_eq!(plain, PluginMessage::Toast { text: "hi".into(), seconds: None, key: None });
+        let kept = PluginMessage::Toast { text: "Enter ABCD".into(), seconds: Some(600.0), key: Some("code".into()) };
+        assert_eq!(serde_json::to_string(&kept).unwrap(), r#"{"type":"toast","text":"Enter ABCD","seconds":600.0,"key":"code"}"#);
     }
 
     #[test]
