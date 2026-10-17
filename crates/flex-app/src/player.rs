@@ -254,8 +254,10 @@ impl Player {
             painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::TEXT);
         }
         if let Some(light) = light {
-            // The colour as the strip shows it: colour scaled by brightness.
-            let [r, g, b] = light.zones[0].map(|c| (f32::from(c) * light.brightness).round() as u8);
+            // The colour as the strip shows it (colour scaled by brightness), turned from
+            // LED values back into screen ones.
+            let srgb = |c: u8| (flex_core::ambient::linear_to_srgb(f32::from(c) / 255.0 * light.brightness) * 255.0).round() as u8;
+            let [r, g, b] = light.zones[0].map(srgb);
             let swatch = Rect::from_min_size(rect.right_top() + vec2(-80.0, rect.height() - 52.0), vec2(56.0, 36.0));
             painter.rect_filled(swatch, CornerRadius::same(6), Color32::from_rgb(r, g, b));
         }

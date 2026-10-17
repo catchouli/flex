@@ -74,11 +74,13 @@ pub enum HostMessage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Light {
     /// As many colours as the plugin's `[light] zones`, at full brightness (the
-    /// brightest channel is 255 unless the colour is black). Zones run clockwise from
+    /// brightest channel is 255 unless the colour is black), in linear light: the
+    /// amount of light per channel, which is what LEDs dimmed by PWM want. For a device
+    /// that expects screen (sRGB) values, convert each channel (roughly `c^(1/2.2)`). Zones run clockwise from
     /// the bottom left corner of the screen: up the left edge, along the top, down the
     /// right edge and back along the bottom. With one zone it is the whole picture.
     pub zones: Vec<[u8; 3]>,
-    /// How bright to make it, 0.0 (off) to 1.0.
+    /// How bright to make it, 0.0 (off) to 1.0, also linear (0.5 = half the light).
     pub brightness: f32,
 }
 

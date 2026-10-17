@@ -218,7 +218,8 @@ pub const CHOICES: [Choice; 6] = [
 const SMOOTHING_SECS: [f32; 4] = [0.0, 0.12, 0.3, 0.8];
 const SATURATIONS: [f32; 4] = [1.0, 1.2, 1.5, 2.0];
 const BRIGHTNESSES: [f32; 5] = [1.0, 0.8, 0.6, 0.4, 0.2];
-const IDLE_COLOURS: [[u8; 3]; 3] = [[255, 140, 50], [255, 200, 140], [255, 255, 255]];
+/// As LED (linear) values: what the strip shows at full brightness.
+const IDLE_COLOURS: [Linear; 3] = [[1.0, 0.45, 0.12], [1.0, 0.7, 0.4], [1.0, 1.0, 1.0]];
 const IDLE_BRIGHTNESSES: [f32; 5] = [0.1, 0.2, 0.3, 0.5, 1.0];
 /// How quickly the light fades to the idle colour when leaving a video.
 const IDLE_FADE_SECS: f32 = 0.8;
@@ -267,7 +268,7 @@ impl Ambient {
     fn idle(&self) -> Idle {
         let scale = IDLE_BRIGHTNESSES[self.values[IDLE_BRIGHTNESS]];
         match IDLE_COLOURS.get(self.values[IDLE]) {
-            Some(rgb) => Idle::Colour(ambient::linear(rgb.map(|c| (f32::from(c) * scale).round() as u8))),
+            Some(rgb) => Idle::Colour(rgb.map(|c| c * scale)),
             None if self.values[IDLE] == 3 => Idle::Colour([0.0; 3]),
             None => Idle::Hold,
         }

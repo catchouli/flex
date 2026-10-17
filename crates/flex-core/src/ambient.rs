@@ -1,6 +1,8 @@
 //! Ambient light: turning a tiny copy of the video frame into colours for LED strips
-//! behind the TV (sent to plugins as `flex_plugin::Light`). Averaging happens in linear
-//! light, so a red and green scene comes out yellow, not a muddy brown.
+//! behind the TV (sent to plugins as `flex_plugin::Light`). Everything happens in linear
+//! light: averaging (so a red and green scene comes out yellow, not a muddy brown), and
+//! the output too, since LEDs give out light in proportion to the value they're sent.
+//! Sending screen (sRGB) values instead washes colours out towards white.
 
 use std::sync::LazyLock;
 
@@ -34,7 +36,8 @@ fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
-fn linear_to_srgb(c: f32) -> f32 {
+/// Linear light to sRGB, 0.0–1.0 (e.g. to show a light's colour on screen).
+pub fn linear_to_srgb(c: f32) -> f32 {
     let c = c.clamp(0.0, 1.0);
     if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
@@ -103,22 +106,22 @@ pub struct Tuning {
     pub saturation: f32,
     /// Scales the brightness sent to the light (0.0–1.0).
     pub max_brightness: f32,
-    /// Below this brightness (0.0–1.0) the light goes off, so dark scenes stay dark.
+    /// Below this brightness (linear, 0.0–1.0) the light goes off, so dark scenes stay
+    /// dark. 0.003 is about 12/255 on screen.
     pub dark_cutoff: f32,
 }
 
 impl Default for Tuning {
     fn default() -> Self {
-        Self { saturation: 1.2, max_brightness: 1.0, dark_cutoff: 0.03 }
+        Self { saturation: 1.2, max_brightness: 1.0, dark_cutoff: 0.003 }
     }
 }
 
-/// Turns linear colours into what plugins get: full-brightness colours plus one
+/// Turns linear colours into what plugins get: full-brightness linear colours plus one
 /// brightness (that of the brightest zone).
 pub fn to_light(zones: &[Linear], tuning: &Tuning) -> Light {
-    let srgb: Vec<[f32; 3]> = zones.iter().map(|c| c.map(linear_to_srgb)).collect();
-    let value = srgb.iter().flat_map(|c| c.iter().copied()).fold(0.0f32, f32::max);
-    let colours = srgb
+    let value = zones.iter().flat_map(|c| c.iter().copied()).fold(0.0f32, f32::max);
+    let colours = zones
         .iter()
         .map(|c| {
             let max = c.iter().copied().fold(0.0f32, f32::max);
@@ -226,15 +229,19 @@ mod tests {
     #[test]
     fn light_is_full_brightness_colour_plus_brightness() {
         let plain = Tuning { saturation: 1.0, max_brightness: 1.0, dark_cutoff: 0.0 };
-        let l = to_light(&[linear([128, 64, 0])], &plain);
+        let l = to_light(&[[0.5, 0.25, 0.0]], &plain);
         assert_eq!(l.zones, vec![[255, 128, 0]]);
-        assert!((l.brightness - 128.0 / 255.0).abs() < 0.01);
+        assert!((l.brightness - 0.5).abs() < 1e-6);
+        // Output stays linear: a blueish scene (60, 90, 140 on screen) must stay clearly
+        // blue on an LED, not the pale (109, 164, 255) that sRGB values give.
+        assert_eq!(to_light(&[linear([60, 90, 140])], &plain).zones, vec![[44, 99, 255]]);
         // Saturation boost pulls the weakest channel down; grey stays grey.
         let vivid = Tuning { saturation: 2.0, ..plain };
-        assert_eq!(to_light(&[linear([200, 150, 150])], &vivid).zones, vec![[255, 127, 127]]);
-        assert_eq!(to_light(&[linear([90, 90, 90])], &vivid).zones, vec![[255, 255, 255]]);
+        assert_eq!(to_light(&[[0.8, 0.4, 0.4]], &vivid).zones, vec![[255, 0, 0]]);
+        assert_eq!(to_light(&[[0.3; 3]], &vivid).zones, vec![[255, 255, 255]]);
         // Dark scenes switch off; brightness is scaled by the maximum.
-        assert_eq!(to_light(&[linear([3, 3, 3])], &Tuning::default()).brightness, 0.0);
+        assert_eq!(to_light(&[linear([8, 8, 8])], &Tuning::default()).brightness, 0.0);
+        assert!(to_light(&[linear([20, 20, 20])], &Tuning::default()).brightness > 0.0);
         let half = Tuning { max_brightness: 0.5, ..plain };
         assert!((to_light(&[linear([255, 0, 0])], &half).brightness - 0.5).abs() < 1e-6);
         assert_eq!(to_light(&[[0.0; 3]], &plain).zones, vec![[0, 0, 0]]);
