@@ -456,8 +456,8 @@ impl eframe::App for FlexApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
         self.sh.poll_youtube();
-        let playback = self.top().playback();
-        self.sh.poll_plugins(playback);
+        let playing = self.top().playback().map(|p| (p, self.top().playing_file()));
+        self.sh.poll_plugins(playing);
         self.handle_commands(ctx);
         self.install_update();
     }

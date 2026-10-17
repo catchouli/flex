@@ -1,0 +1,11 @@
+[package]
+name = "flex-trakt"
+description = "Flex plugin: scrobbles what you watch to Trakt (trakt.tv)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flex-plugin = { version = "0.7.0", path = "../../crates/flex-plugin" }
+ureq = { version = "3", features = ["json"] }

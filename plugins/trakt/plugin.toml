@@ -1,0 +1,37 @@
+name = "Trakt"
+description = "Keeps your Trakt history up to date with what you watch in Flex"
+version = "0.7.0"
+command = "flex-trakt"
+subscribe = ["playback"]
+
+[[settings]]
+key = "connect"
+label = "Connect to Trakt"
+type = "button"
+detail = "Shows a code to enter at trakt.tv/activate on your phone"
+
+[[settings]]
+key = "scrobble"
+label = "Send what I watch"
+type = "bool"
+detail = "Trakt marks things watched once you're 80% through"
+default = true
+
+[[settings]]
+key = "disconnect"
+label = "Disconnect"
+type = "button"
+
+[[settings]]
+key = "client_id"
+label = "Trakt app ID"
+type = "text"
+detail = "Only if this copy of Flex wasn't built with one"
+default = ""
+
+[[settings]]
+key = "client_secret"
+label = "Trakt app secret"
+type = "text"
+secret = true
+default = ""

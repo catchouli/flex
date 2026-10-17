@@ -290,6 +290,8 @@ pub struct Shared {
     pub ambient: crate::ambient::Ambient,
     /// The last playback state sent to plugins.
     playback_sent: Option<Playback>,
+    /// The latest playback seen (with its library file), for where a stop happened.
+    playback_last: Option<(Playback, Option<(i64, i64)>)>,
     pub youtube: crate::youtube::YouTube,
 }
 
@@ -333,6 +335,7 @@ impl Shared {
             plugins,
             ambient,
             playback_sent: None,
+            playback_last: None,
             youtube: crate::youtube::YouTube::new(ctx),
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
@@ -1501,27 +1504,69 @@ impl Shared {
     }
 
     /// Handles plugin messages, tells plugins about playback and updates lights.
-    /// `playback`: what the top screen is playing, if anything.
-    pub fn poll_plugins(&mut self, playback: Option<Playback>) {
+    /// `playing`: what the top screen is playing, if anything, and the library file.
+    pub fn poll_plugins(&mut self, playing: Option<(Playback, Option<(i64, i64)>)>) {
         let mut wait = self.plugins.poll(&self.db);
         for toast in self.plugins.take_toasts() {
             self.toast(toast);
         }
-        let playback = playback.or_else(|| {
-            self.playback_sent.as_ref().map(|_| Playback { state: PlaybackState::Stopped, title: String::new(), kind: String::new() })
-        });
-        if playback != self.playback_sent {
-            if let Some(p) = &playback {
-                self.plugins.send_playback(p);
+        // Plugins hear about starts, pauses, resumes and stops (not every frame); a stop
+        // carries where playback got to. Something new starting stops the old one first.
+        let same = |a: &Playback, b: &Playback| a.state == b.state && a.title == b.title && a.kind == b.kind;
+        let previous = self.playback_last.take();
+        match (&playing, self.playback_sent.take()) {
+            (Some((p, _)), Some(sent)) if same(p, &sent) => self.playback_sent = Some(sent),
+            (Some((p, file)), sent) => {
+                if sent.is_some_and(|s| s.title != p.title) {
+                    self.send_stopped(previous);
+                }
+                let p = self.with_media(p.clone(), *file);
+                self.plugins.send_playback(&p);
+                self.playback_sent = Some(p);
             }
-            self.playback_sent = playback.filter(|p| p.state != PlaybackState::Stopped);
+            (None, Some(_)) => self.send_stopped(previous),
+            (None, None) => {}
         }
+        self.playback_last = playing;
         let video = self.playback_sent.as_ref().is_some_and(|p| p.kind == "video");
         if let Some(lights) = self.ambient.tick(&self.plugins, video) {
             wait = Some(wait.map_or(lights, |w| w.min(lights)));
         }
         if let Some(wait) = wait {
             self.ctx.request_repaint_after(wait);
+        }
+    }
+
+    fn send_stopped(&self, last: Option<(Playback, Option<(i64, i64)>)>) {
+        let (last, file) = last.unwrap_or_default();
+        let stopped = self.with_media(Playback { state: PlaybackState::Stopped, ..last }, file);
+        self.plugins.send_playback(&stopped);
+    }
+
+    /// Adds what a library file is (a matched film or episode) to a playback event.
+    fn with_media(&self, mut playback: Playback, file: Option<(i64, i64)>) -> Playback {
+        if playback.media.is_none() && self.plugins.plugins().iter().any(|p| p.running() && p.subscribes("playback")) {
+            playback.media = file.and_then(|(library_id, file_id)| self.media_info(library_id, file_id));
+        }
+        playback
+    }
+
+    /// A file as plugins see it: the film or episode it's matched to online.
+    pub fn media_info(&self, library_id: i64, file_id: i64) -> Option<flex_plugin::Media> {
+        let entry = self.lib(library_id)?.catalog()?.show_of_file(file_id)?;
+        let (source, id) = entry.show.provider_id.as_deref()?.split_once(':')?;
+        let id: u64 = id.parse().ok()?;
+        let (tmdb, anilist) = match source {
+            "tv" | "movie" => (Some(id), None),
+            "anilist" => (None, Some(id)),
+            _ => return None,
+        };
+        let media = flex_plugin::Media { title: entry.show.title.clone(), year: entry.show.year, tmdb, anilist, ..Default::default() };
+        if entry.is_series() {
+            let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
+            Some(flex_plugin::Media { kind: "episode".into(), season: Some(ep.season), episode: ep.number, ..media })
+        } else {
+            Some(flex_plugin::Media { kind: "movie".into(), ..media })
         }
     }
 

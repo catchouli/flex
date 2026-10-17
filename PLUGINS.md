@@ -82,7 +82,8 @@ itself.
 | `text` | opens a text box | a string |
 | `button` | a button | none: pressing it sends an `action` |
 
-Every type also takes `detail` (a line of help under the setting). `default` is the
+Every type also takes `detail` (a line of help under the setting). A `text` setting with
+`secret = true` (a password or API key) shows only as "set" and is typed in hidden. `default` is the
 value before anyone changes it. Choice options look like
 `options = [{ id = "", label = "The first one found" }]`, and a plugin can replace them
 while it runs (with `choices`, below), which is how "Find strips" fills in the list.
@@ -129,13 +130,24 @@ only the one that changed.
   seconds when nothing changes. If you fall behind, Flex skips ahead to the newest
   colours instead of building up a queue.
 
-**`playback`** (with `subscribe = ["playback"]`):
+**`playback`** (with `subscribe = ["playback"]`), sent when something starts, pauses,
+resumes or stops (not continuously):
 
 ```json
-{"type":"playback","state":"playing","title":"Frieren · S1E3 …","kind":"video"}
+{"type":"playback","state":"playing","title":"Frieren · S1E3 …","kind":"video",
+ "position":61.2,"duration":1420.5,
+ "media":{"kind":"episode","title":"Frieren","year":2023,"tmdb":null,"anilist":154587,"season":1,"episode":3}}
 ```
 
-`state` is `playing`, `paused` or `stopped`. `kind` is `video` or `music`.
+- `state` is `playing`, `paused` or `stopped`. `kind` is `video` or `music`.
+- `position` and `duration` are in seconds. A `stopped` message says what was playing
+  and where it stopped. When one thing follows another (the next episode), you get
+  `stopped` for the first before `playing` for the next.
+- `media` says what it is, for films and episodes Flex has matched online: `kind` is
+  `movie` or `episode`, with the film or show's `title` and `year`, its `tmdb` id (films
+  and TV) or `anilist` id (anime), and for episodes the `season` and `episode` number.
+  It's missing for unmatched files, music and YouTube. The Trakt plugin in
+  [`plugins/trakt`](plugins/trakt) uses it.
 
 **`action`** means a `button` setting was pressed. `id` is its `key`.
 

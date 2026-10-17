@@ -12,8 +12,8 @@ use crate::widgets;
 pub enum Purpose {
     RenameLibrary(i64),
     TmdbToken,
-    /// Plugin index and setting key.
-    PluginSetting(usize, String),
+    /// Plugin index, setting key, and whether it's a secret (typed in hidden).
+    PluginSetting(usize, String, bool),
     YouTubeSearch,
     YouTubeChannel,
 }
@@ -51,9 +51,9 @@ impl TextEntry {
     }
 
     /// `label` is the setting's name; `text` its current value.
-    pub fn plugin_setting(plugin: usize, key: &str, label: &str, text: String) -> Self {
+    pub fn plugin_setting(plugin: usize, key: &str, label: &str, text: String, secret: bool) -> Self {
         Self {
-            purpose: Purpose::PluginSetting(plugin, key.to_owned()),
+            purpose: Purpose::PluginSetting(plugin, key.to_owned(), secret),
             title: label.to_owned(),
             hint: "Type, then Enter. Esc keeps it as it was.".into(),
             text,
@@ -96,7 +96,7 @@ impl TextEntry {
     fn save(&self, sh: &mut Shared) -> anyhow::Result<()> {
         match &self.purpose {
             Purpose::RenameLibrary(id) => sh.rename_library(*id, &self.text),
-            Purpose::PluginSetting(plugin, key) => {
+            Purpose::PluginSetting(plugin, key, _) => {
                 let (plugins, db) = sh.plugins_mut();
                 plugins.set_setting(*plugin, key, flex_plugin::serde_json::Value::String(self.text.clone()), db);
                 Ok(())
@@ -139,7 +139,7 @@ impl Screen for TextEntry {
         let field = Rect::from_min_size(body.min, vec2(body.width().min(900.0), 64.0));
         let edit = egui::TextEdit::singleline(&mut self.text)
             .id(Self::id())
-            .password(matches!(self.purpose, Purpose::TmdbToken))
+            .password(matches!(self.purpose, Purpose::TmdbToken | Purpose::PluginSetting(_, _, true)))
             .font(TextStyle::Body)
             .margin(vec2(18.0, 12.0))
             .desired_width(field.width());

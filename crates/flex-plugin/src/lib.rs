@@ -84,20 +84,51 @@ pub struct Light {
     pub brightness: f32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Playback {
     pub state: PlaybackState,
-    /// What's playing, e.g. "Frieren · S1E3"; empty when stopped.
+    /// What's playing, e.g. "Frieren · S1E3". When stopped: what was playing.
     #[serde(default)]
     pub title: String,
     /// "video" or "music".
     #[serde(default)]
     pub kind: String,
+    /// Where playback is, in seconds (when stopped: where it stopped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+    /// What it is, for a film or an episode Flex has matched online (not for unmatched
+    /// files, music or YouTube).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<Media>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A film or an episode, as matched online.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Media {
+    /// "movie" or "episode".
+    pub kind: String,
+    /// The film's or show's title, and its year.
+    pub title: String,
+    #[serde(default)]
+    pub year: Option<i32>,
+    /// TMDB id of the film or show, when matched there (anime is matched on AniList).
+    #[serde(default)]
+    pub tmdb: Option<u64>,
+    #[serde(default)]
+    pub anilist: Option<u64>,
+    /// Episodes: season and episode number.
+    #[serde(default)]
+    pub season: Option<i32>,
+    #[serde(default)]
+    pub episode: Option<i32>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaybackState {
+    #[default]
     Playing,
     Paused,
     Stopped,
@@ -281,6 +312,25 @@ mod tests {
         assert_eq!(serde_json::to_string(&light).unwrap(), r#"{"type":"light","zones":[[255,140,60]],"brightness":0.5}"#);
         let status: PluginMessage = serde_json::from_str(r#"{"type":"status","ok":true,"text":"hi"}"#).unwrap();
         assert_eq!(status, PluginMessage::Status { ok: true, text: "hi".into() });
+    }
+
+    #[test]
+    fn playback_details_are_optional() {
+        // As older versions of Flex sent it.
+        let old: HostMessage = serde_json::from_str(r#"{"type":"playback","state":"paused","title":"T","kind":"video"}"#).unwrap();
+        let HostMessage::Playback(p) = old else { panic!("not playback") };
+        assert_eq!((p.state, p.position, p.media), (PlaybackState::Paused, None, None));
+        let full = HostMessage::Playback(Playback {
+            state: PlaybackState::Stopped,
+            title: "Frieren · S1E3".into(),
+            kind: "video".into(),
+            position: Some(1300.0),
+            duration: Some(1420.0),
+            media: Some(Media { kind: "episode".into(), title: "Frieren".into(), year: Some(2023), anilist: Some(154587), season: Some(1), episode: Some(3), ..Media::default() }),
+        });
+        let json = serde_json::to_string(&full).unwrap();
+        assert!(json.contains(r#""media":{"kind":"episode","title":"Frieren""#), "{json}");
+        assert_eq!(serde_json::from_str::<HostMessage>(&json).unwrap(), full);
     }
 
     #[test]

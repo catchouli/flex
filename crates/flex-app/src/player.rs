@@ -582,7 +582,18 @@ impl Screen for Player {
 
     fn playback(&self) -> Option<Playback> {
         let state = if self.paused() { PlaybackState::Paused } else { PlaybackState::Playing };
-        Some(Playback { state, title: self.req.title.clone(), kind: "video".into() })
+        Some(Playback {
+            state,
+            title: self.req.title.clone(),
+            kind: "video".into(),
+            position: self.mpv.get_f64("time-pos"),
+            duration: self.duration,
+            media: None,
+        })
+    }
+
+    fn playing_file(&self) -> Option<(i64, i64)> {
+        (self.req.library_id >= 0 && self.req.file_id >= 0).then_some((self.req.library_id, self.req.file_id))
     }
 
     fn on_controls(&self, pos: egui::Pos2) -> bool {

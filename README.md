@@ -89,6 +89,10 @@ smoothly it changes, how vivid and bright it is, and what it shows when you're n
 watching anything (a dim warm white unless you change it). Press F2 during a video to
 see the colour being sent.
 
+There's also a [Trakt](https://trakt.tv) plugin, which keeps your Trakt history up to
+date with what you watch: switch it on, choose "Connect to Trakt" and enter the code it
+shows at trakt.tv/activate on your phone.
+
 Flex works out the colour itself and only samples the screen while a light plugin is
 running, so a plugin for a different kind of light only has to pass it on. A plugin is
 just a program that reads and writes lines of JSON, so you can write one in whatever

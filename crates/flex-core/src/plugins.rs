@@ -77,6 +77,9 @@ pub struct SettingSpec {
     /// For `choice`: the starting options (the plugin can replace them).
     #[serde(default)]
     pub options: Vec<Choice>,
+    /// For `text`: a password or key, shown only as "set" and typed in hidden.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
