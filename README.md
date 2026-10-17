@@ -18,6 +18,11 @@ opens instantly and stays snappy even with tens of thousands of videos.
 It's made to be used from the couch with a TV remote (arrows, OK and back are all you
 need), but a keyboard and mouse work fine too.
 
+And it has plugins, for bolting on extras that don't belong in a media player. We
+wanted the LED strip behind our TV to glow with whatever's on screen, so the first
+plugin does just that, talking to the strip over Bluetooth with
+[lotus-lamp-rs](https://github.com/bombpersons/lotus-lamp-rs).
+
 ## Getting it running
 
 You'll need Rust and a copy of libmpv.
@@ -42,6 +47,26 @@ Then:
 
 If something gets matched to the wrong show or album, open it and pick "Match online…"
 (or "Folders & seasons…" for shows) to fix it.
+
+## Plugins
+
+Plugins live in a `plugins` folder, either next to `flex.exe` (releases come with the
+LED strip one) or in Flex's data folder (Settings → Plugins → "Open plugins folder").
+Every plugin is off until you switch it on in Settings → Plugins, and one that's off
+never runs, so they cost nothing if you don't use them. `cargo build --release
+--workspace` builds the plugins in this repo along with Flex.
+
+For the LED strip, switch on "LED strip (Lotus Lamp)" and press play. It connects to
+the first strip it finds and remembers it; "Find strips" lets you pick another.
+Settings → Ambient light chooses between the whole picture and just its edges, how
+smoothly it changes, how vivid and bright it is, and what it shows when you're not
+watching anything (a dim warm white unless you change it). Press F2 during a video to
+see the colour being sent.
+
+Flex works out the colour itself and only samples the screen while a light plugin is
+running, so a plugin for a different kind of light only has to pass it on. A plugin is
+just a program that reads and writes lines of JSON, so you can write one in whatever
+you like. See [PLUGINS.md](PLUGINS.md).
 
 ## Remote controls
 

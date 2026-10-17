@@ -24,7 +24,8 @@ pub struct Manifest {
     pub description: String,
     #[serde(default)]
     pub version: String,
-    /// The program, relative to the plugin's folder (".exe" is added on Windows).
+    /// The program: in the plugin's folder (".exe" is added on Windows), else a bare name
+    /// like "python3" is looked up on the PATH.
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -142,10 +143,14 @@ fn read_manifest(dir: &Path) -> Result<Manifest> {
     toml::from_str(&text).context("reading plugin.toml")
 }
 
-/// The plugin's program: `command` in its folder unless it's an absolute path.
+/// The plugin's program: `command` in its folder (or an absolute path), else a bare
+/// program name for the system to find on the PATH.
 fn program(plugin: &Installed) -> PathBuf {
-    let path = plugin.dir.join(&plugin.manifest.command);
-    if cfg!(windows) && path.extension().is_none() { path.with_extension("exe") } else { path }
+    let command = &plugin.manifest.command;
+    let path = plugin.dir.join(command);
+    let path = if cfg!(windows) && path.extension().is_none() { path.with_extension("exe") } else { path };
+    let bare = Path::new(command).components().count() == 1;
+    if bare && !path.exists() { PathBuf::from(command) } else { path }
 }
 
 /// Messages to one plugin. Light updates aren't queued: only the newest is kept, so a
@@ -616,6 +621,24 @@ mod tests {
         let m: Manifest = toml::from_str("name = \"x\"\ncommand = \"y\"").unwrap();
         assert_eq!(m.light.zones, 1);
         assert!(m.settings.is_empty());
+    }
+
+    #[test]
+    fn programs_come_from_the_folder_or_the_path() {
+        let dir = std::env::temp_dir().join(format!("flex-plugin-program-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = if cfg!(windows) { "here.exe" } else { "here" };
+        std::fs::write(dir.join(exe), "").unwrap();
+        let plugin = |command: &str| Installed {
+            id: "p".into(),
+            dir: dir.clone(),
+            manifest: toml::from_str(&format!("name = \"p\"\ncommand = {command:?}")).unwrap(),
+        };
+        assert_eq!(program(&plugin("here")), dir.join(exe));
+        assert_eq!(program(&plugin("python3")), PathBuf::from("python3"));
+        let tool = if cfg!(windows) { "bin/tool.exe" } else { "bin/tool" };
+        assert_eq!(program(&plugin("bin/tool")), dir.join(tool));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
