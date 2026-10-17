@@ -1090,6 +1090,7 @@ version = "0.5.1"
 dependencies = [
  "anyhow",
  "directories",
+ "flex-plugin",
  "hunch",
  "lofty",
  "log",
@@ -1100,9 +1101,18 @@ dependencies = [
  "serde_json",
  "sha2",
  "strsim",
+ "toml 0.8.2",
  "unicode-normalization",
  "ureq",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "flex-plugin"
+version = "0.5.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

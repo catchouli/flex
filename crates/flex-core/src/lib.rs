@@ -10,6 +10,7 @@ pub mod musicbrainz;
 pub mod natural;
 pub mod parse;
 pub mod plex;
+pub mod plugins;
 pub mod progress;
 pub mod scan;
 pub mod search;
