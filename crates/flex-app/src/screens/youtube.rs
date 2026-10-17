@@ -24,6 +24,11 @@ const BUTTON: egui::Vec2 = egui::vec2(260.0, 64.0);
 const BUTTONS_H: f32 = 96.0;
 const LATEST: usize = 300;
 
+/// "1 channel", "3 channels".
+fn count(n: usize, thing: &str) -> String {
+    format!("{n} {thing}{}", if n == 1 { "" } else { "s" })
+}
+
 /// A video as shown in a grid.
 #[derive(Clone)]
 pub struct VideoItem {
@@ -263,8 +268,8 @@ impl Screen for YouTubeHome {
             (false, _, _) if sh.youtube.tools_busy => "Setting up (downloading yt-dlp)…".to_owned(),
             (false, _, _) => "Not set up: switch YouTube on in Settings → YouTube".to_owned(),
             (true, 0, _) => "Search, or subscribe to channels in Channels".to_owned(),
-            (true, n, true) => format!("{n} channels · checking for new videos…"),
-            (true, n, false) => format!("{n} channels · no ads, sponsors skipped"),
+            (true, n, true) => format!("{} · checking for new videos…", count(n, "channel")),
+            (true, n, false) => format!("{} · no ads, sponsors skipped", count(n, "channel")),
         };
         let body = widgets::header(ui.painter(), rect, "YouTube", &subtitle, ui.style());
         let items = std::mem::take(&mut self.items);
@@ -493,8 +498,7 @@ impl Screen for ChannelList {
         let channels = sh.yt_channels();
         let subtitle = match channels.len() {
             0 => "No subscriptions yet".to_owned(),
-            1 => "1 subscription".to_owned(),
-            n => format!("{n} subscriptions"),
+            n => count(n, "subscription"),
         };
         let body = widgets::header(ui.painter(), rect, "Channels", &subtitle, ui.style());
         let mut rows = vec![
@@ -572,7 +576,7 @@ impl Screen for YouTubeSettings {
             Row::new(Icon::None, format!("Quality: up to {}p", sh.youtube_quality())).detail("OK to change"),
             Row::new(Icon::None, format!("Shorts: {}", if sh.youtube_shorts() { "shown" } else { "hidden" })).detail("OK to change"),
             Row::new(Icon::None, "SponsorBlock…").detail(format!("Skipping {skipping} kinds of segment")),
-            Row::new(Icon::Folder, "Channels…").detail(format!("{channels} subscriptions")),
+            Row::new(Icon::Folder, "Channels…").detail(count(channels, "subscription")),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
