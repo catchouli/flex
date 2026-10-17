@@ -77,6 +77,9 @@ pub struct SettingSpec {
     /// For `choice`: the starting options (the plugin can replace them).
     #[serde(default)]
     pub options: Vec<Choice>,
+    /// For `text`: a password or key, shown only as "set" and typed in hidden.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -290,7 +293,23 @@ pub struct Host {
     rx: Receiver<(usize, u64, Incoming)>,
     /// Called from plugin threads when a message comes in (to repaint the UI).
     waker: Arc<dyn Fn() + Send + Sync>,
-    toasts: Vec<String>,
+    toasts: Vec<Toast>,
+}
+
+/// A message to show on screen (see `PluginMessage::Toast`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Toast {
+    pub text: String,
+    /// How long to show it; `None` for the usual few seconds.
+    pub seconds: Option<f64>,
+    /// Replaces (or with empty text, removes) an earlier toast with the same key.
+    pub key: Option<String>,
+}
+
+impl Toast {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into(), seconds: None, key: None }
+    }
 }
 
 /// How long a plugin may take to exit after `shutdown`.
@@ -413,7 +432,7 @@ impl Host {
     }
 
     /// Messages plugins asked to show on screen.
-    pub fn take_toasts(&mut self) -> Vec<String> {
+    pub fn take_toasts(&mut self) -> Vec<Toast> {
         std::mem::take(&mut self.toasts)
     }
 
@@ -432,7 +451,12 @@ impl Host {
                     p.settings.extend(settings);
                     save_settings(p, db);
                 }
-                Incoming::Message(PluginMessage::Toast { text }) => self.toasts.push(format!("{}: {text}", p.installed.manifest.name)),
+                Incoming::Message(PluginMessage::Toast { text, seconds, key }) => {
+                    // Keys are per plugin, so plugins can't clear each other's toasts.
+                    let key = key.map(|k| format!("plugin:{id}:{k}"));
+                    let text = if text.is_empty() { text } else { format!("{}: {text}", p.installed.manifest.name) };
+                    self.toasts.push(Toast { text, seconds, key });
+                }
                 Incoming::Message(PluginMessage::Log { level, text }) => {
                     let level = match level {
                         LogLevel::Error => log::Level::Error,

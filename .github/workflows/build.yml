@@ -21,9 +21,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # --workspace: the plugins in plugins/ too.
+      # --workspace: the plugins in plugins/ too. The Trakt plugin's app ID (and secret, for
+      # an older Trakt app) come from repository secrets; without them it asks in Settings.
       - name: Build
         run: cargo build --release --locked --workspace
+        env:
+          FLEX_TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          FLEX_TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
       - name: Test
         run: cargo test --release --locked --workspace
       - uses: actions/upload-artifact@v4

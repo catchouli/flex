@@ -84,20 +84,51 @@ pub struct Light {
     pub brightness: f32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Playback {
     pub state: PlaybackState,
-    /// What's playing, e.g. "Frieren · S1E3"; empty when stopped.
+    /// What's playing, e.g. "Frieren · S1E3". When stopped: what was playing.
     #[serde(default)]
     pub title: String,
     /// "video" or "music".
     #[serde(default)]
     pub kind: String,
+    /// Where playback is, in seconds (when stopped: where it stopped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+    /// What it is, for a film or an episode Flex has matched online (not for unmatched
+    /// files, music or YouTube).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<Media>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A film or an episode, as matched online.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Media {
+    /// "movie" or "episode".
+    pub kind: String,
+    /// The film's or show's title, and its year.
+    pub title: String,
+    #[serde(default)]
+    pub year: Option<i32>,
+    /// TMDB id of the film or show, when matched there (anime is matched on AniList).
+    #[serde(default)]
+    pub tmdb: Option<u64>,
+    #[serde(default)]
+    pub anilist: Option<u64>,
+    /// Episodes: season and episode number.
+    #[serde(default)]
+    pub season: Option<i32>,
+    #[serde(default)]
+    pub episode: Option<i32>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaybackState {
+    #[default]
     Playing,
     Paused,
     Stopped,
@@ -114,8 +145,16 @@ pub enum PluginMessage {
     Choices { key: String, options: Vec<Choice> },
     /// Changes settings and saves them, e.g. remembering the device it connected to.
     Set { settings: Settings },
-    /// A short message shown on screen for a few seconds.
-    Toast { text: String },
+    /// A short message shown on screen, for a few seconds unless `seconds` says longer.
+    /// A later toast with the same `key` replaces it, and one with empty text removes it
+    /// (e.g. a sign-in code shown until it's used).
+    Toast {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seconds: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+    },
     /// A line for Flex's log.
     Log { level: LogLevel, text: String },
     #[serde(other)]
@@ -173,7 +212,17 @@ impl Host {
     }
 
     pub fn toast(&self, text: impl Into<String>) {
-        self.send(&PluginMessage::Toast { text: text.into() });
+        self.send(&PluginMessage::Toast { text: text.into(), seconds: None, key: None });
+    }
+
+    /// A toast that stays up for `seconds` (or until replaced or cleared with the same key).
+    pub fn toast_kept(&self, key: impl Into<String>, text: impl Into<String>, seconds: f64) {
+        self.send(&PluginMessage::Toast { text: text.into(), seconds: Some(seconds), key: Some(key.into()) });
+    }
+
+    /// Removes a toast shown with [`Host::toast_kept`].
+    pub fn clear_toast(&self, key: impl Into<String>) {
+        self.send(&PluginMessage::Toast { text: String::new(), seconds: None, key: Some(key.into()) });
     }
 
     pub fn log(&self, level: LogLevel, text: impl Into<String>) {
@@ -281,6 +330,33 @@ mod tests {
         assert_eq!(serde_json::to_string(&light).unwrap(), r#"{"type":"light","zones":[[255,140,60]],"brightness":0.5}"#);
         let status: PluginMessage = serde_json::from_str(r#"{"type":"status","ok":true,"text":"hi"}"#).unwrap();
         assert_eq!(status, PluginMessage::Status { ok: true, text: "hi".into() });
+    }
+
+    #[test]
+    fn toasts_can_stay_and_be_cleared() {
+        let plain: PluginMessage = serde_json::from_str(r#"{"type":"toast","text":"hi"}"#).unwrap();
+        assert_eq!(plain, PluginMessage::Toast { text: "hi".into(), seconds: None, key: None });
+        let kept = PluginMessage::Toast { text: "Enter ABCD".into(), seconds: Some(600.0), key: Some("code".into()) };
+        assert_eq!(serde_json::to_string(&kept).unwrap(), r#"{"type":"toast","text":"Enter ABCD","seconds":600.0,"key":"code"}"#);
+    }
+
+    #[test]
+    fn playback_details_are_optional() {
+        // As older versions of Flex sent it.
+        let old: HostMessage = serde_json::from_str(r#"{"type":"playback","state":"paused","title":"T","kind":"video"}"#).unwrap();
+        let HostMessage::Playback(p) = old else { panic!("not playback") };
+        assert_eq!((p.state, p.position, p.media), (PlaybackState::Paused, None, None));
+        let full = HostMessage::Playback(Playback {
+            state: PlaybackState::Stopped,
+            title: "Frieren · S1E3".into(),
+            kind: "video".into(),
+            position: Some(1300.0),
+            duration: Some(1420.0),
+            media: Some(Media { kind: "episode".into(), title: "Frieren".into(), year: Some(2023), anilist: Some(154587), season: Some(1), episode: Some(3), ..Media::default() }),
+        });
+        let json = serde_json::to_string(&full).unwrap();
+        assert!(json.contains(r#""media":{"kind":"episode","title":"Frieren""#), "{json}");
+        assert_eq!(serde_json::from_str::<HostMessage>(&json).unwrap(), full);
     }
 
     #[test]

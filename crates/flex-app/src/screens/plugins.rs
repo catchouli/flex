@@ -146,7 +146,11 @@ fn describe(p: &Plugin, spec: &SettingSpec, value: Option<&Value>) -> String {
             let n = value.and_then(Value::as_f64).unwrap_or(spec.min.unwrap_or(0.0));
             format!("{n}{}", spec.unit)
         }
-        SettingKind::Text => value.and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("not set").to_owned(),
+        SettingKind::Text => match value.and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            Some(_) if spec.secret => "set".to_owned(),
+            Some(text) => text.to_owned(),
+            None => "not set".to_owned(),
+        },
         SettingKind::Button => return spec.label.clone(),
     };
     format!("{}: {shown}", spec.label)
@@ -181,8 +185,9 @@ impl Screen for PluginOptions {
                         Nav::None
                     }
                     SettingKind::Text => {
-                        let text = current.as_ref().and_then(Value::as_str).unwrap_or("").to_owned();
-                        Nav::push(TextEntry::plugin_setting(self.index, &spec.key, &spec.label, text))
+                        // A secret starts empty rather than showing what's saved.
+                        let text = if spec.secret { String::new() } else { current.as_ref().and_then(Value::as_str).unwrap_or("").to_owned() };
+                        Nav::push(TextEntry::plugin_setting(self.index, &spec.key, &spec.label, text, spec.secret))
                     }
                     _ => {
                         match next_value(p, spec, current.as_ref()) {

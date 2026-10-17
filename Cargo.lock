@@ -1253,6 +1253,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "flex-trakt"
+version = "0.7.0"
+dependencies = [
+ "flex-plugin",
+ "ureq",
+]
+
+[[package]]
 name = "flex-web"
 version = "0.7.0"
 dependencies = [

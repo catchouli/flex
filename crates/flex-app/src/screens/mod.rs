@@ -80,6 +80,11 @@ pub trait Screen {
         None
     }
 
+    /// For the video player: the library file playing, as (library id, file id).
+    fn playing_file(&self) -> Option<(i64, i64)> {
+        None
+    }
+
     /// For the player: whether `pos` is on its on-screen controls, where a click
     /// shouldn't pause or play.
     fn on_controls(&self, _pos: Pos2) -> bool {
