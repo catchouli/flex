@@ -343,3 +343,73 @@ impl Drop for Renderer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{Event, Mpv};
+
+    /// Plays a real YouTube video in a windowless mpv (needs yt-dlp and network):
+    /// `cargo test -p flex plays_youtube -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn plays_youtube() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let tools = flex_core::youtube::Tools::find().expect("yt-dlp in the tools folder or on the PATH");
+        let started = Instant::now();
+        let video = tools.resolve("aqz-KE-bpKQ", 1080).unwrap();
+        eprintln!("resolved in {:?}: {} ({:?}p)", started.elapsed(), video.title, video.height);
+
+        let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("hwdec", "no")]).unwrap();
+        let loading = Instant::now();
+        // Through the relay, as the player does.
+        mpv.command(&["loadfile", &video.relayed_mpv_url()]).unwrap();
+        match mpv.wait_event(30.0) {
+            Some(Event::FileLoaded) => {}
+            Some(Event::EndFile { error, .. }) => panic!("didn't play: {error:?}"),
+            Some(Event::Shutdown) | None => panic!("no FileLoaded within 30s"),
+        }
+        eprintln!("loaded in {:?}", loading.elapsed());
+        let count = mpv.get_i64("track-list/count").unwrap_or(0);
+        let kinds: Vec<String> = (0..count).filter_map(|i| mpv.get_string(&format!("track-list/{i}/type"))).collect();
+        eprintln!("tracks: {kinds:?}, duration {:?}", mpv.get_f64("duration"));
+        assert!(kinds.iter().any(|k| k == "video") && kinds.iter().any(|k| k == "audio"), "{kinds:?}");
+
+        let wait_for = |what: &str, done: &dyn Fn(f64) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let _ = mpv.poll_events();
+                if let Some(pos) = mpv.get_f64("time-pos").filter(|p| done(*p)) {
+                    return pos;
+                }
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        };
+        let t = Instant::now();
+        let pos = wait_for("playback", &|p| p >= 2.0);
+        eprintln!("playing: {pos:.1}s after {:?}", t.elapsed());
+        // It keeps up: 15 more seconds play in about 15 seconds, without pausing to buffer.
+        let t = Instant::now();
+        let mut stalls = 0;
+        let mut was_waiting = false;
+        let pos = loop {
+            let _ = mpv.poll_events();
+            let waiting = mpv.get_flag("paused-for-cache").unwrap_or(false);
+            stalls += usize::from(waiting && !was_waiting);
+            was_waiting = waiting;
+            let pos = mpv.get_f64("time-pos").unwrap_or(0.0);
+            if pos >= 17.0 || t.elapsed() > Duration::from_secs(40) {
+                break pos;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        eprintln!("played to {pos:.1}s in {:?} with {stalls} stalls", t.elapsed());
+        assert!(pos >= 17.0 && stalls == 0, "buffering: {stalls} stalls, reached {pos:.1}s");
+        let t = Instant::now();
+        mpv.command(&["seek", "300", "absolute"]).unwrap();
+        let pos = wait_for("seek", &|p| p >= 300.0);
+        eprintln!("seeked to {pos:.1}s in {:?}", t.elapsed());
+    }
+}

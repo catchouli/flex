@@ -1,5 +1,5 @@
-//! Typing a value (needs a keyboard): naming a library, pasting the TMDB token, or a
-//! plugin's text setting.
+//! Typing a value (needs a keyboard): naming a library, pasting the TMDB token, a
+//! plugin's text setting, or YouTube searches and channel links.
 //! Enter saves; Esc or Back leaves it unchanged.
 
 use eframe::egui::{self, Key, Rect, TextStyle, Ui, vec2};
@@ -14,6 +14,8 @@ pub enum Purpose {
     TmdbToken,
     /// Plugin index and setting key.
     PluginSetting(usize, String),
+    YouTubeSearch,
+    YouTubeChannel,
 }
 
 pub struct TextEntry {
@@ -59,6 +61,34 @@ impl TextEntry {
         }
     }
 
+    pub fn youtube_search() -> Self {
+        Self {
+            purpose: Purpose::YouTubeSearch,
+            title: "Search YouTube".into(),
+            hint: "Type what to look for, then Enter.".into(),
+            text: String::new(),
+            focus_pending: true,
+        }
+    }
+
+    pub fn youtube_channel() -> Self {
+        Self {
+            purpose: Purpose::YouTubeChannel,
+            title: "Add a channel".into(),
+            hint: "Paste a link to the channel (or one of its videos), or its @handle, then Enter.".into(),
+            text: String::new(),
+            focus_pending: true,
+        }
+    }
+
+    /// Where to go once saved: search results, or back.
+    fn after_save(&self, sh: &mut Shared) -> Nav {
+        match self.purpose {
+            Purpose::YouTubeSearch => Nav::replace(super::youtube::SearchResults::new(sh, &self.text)),
+            _ => Nav::Pop,
+        }
+    }
+
     fn id() -> egui::Id {
         egui::Id::new("flex-text-entry")
     }
@@ -69,6 +99,16 @@ impl TextEntry {
             Purpose::PluginSetting(plugin, key) => {
                 let (plugins, db) = sh.plugins_mut();
                 plugins.set_setting(*plugin, key, flex_plugin::serde_json::Value::String(self.text.clone()), db);
+                Ok(())
+            }
+            Purpose::YouTubeSearch => {
+                anyhow::ensure!(!self.text.trim().is_empty(), "Type something to search for");
+                Ok(())
+            }
+            Purpose::YouTubeChannel => {
+                anyhow::ensure!(!self.text.trim().is_empty(), "Paste a channel link or @handle first");
+                sh.youtube.find_channel(self.text.trim());
+                sh.toast("Looking up that channel…");
                 Ok(())
             }
             Purpose::TmdbToken => {
@@ -114,7 +154,7 @@ impl Screen for TextEntry {
             }
             if enter {
                 return match self.save(sh) {
-                    Ok(()) => Nav::Pop,
+                    Ok(()) => self.after_save(sh),
                     Err(e) => {
                         sh.toast(format!("{e:#}"));
                         self.focus_pending = true;

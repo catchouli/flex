@@ -88,10 +88,13 @@ impl FlexApp {
             tray,
             quitting: false,
         };
-        if let Some(path) = start.filter(|p| p.is_file() && flex_core::library::is_video(p)) {
+        if let Some(path) = start.as_ref().filter(|p| p.is_file() && flex_core::library::is_video(p)) {
             let title = flex_core::library::display_name(&path.file_name().unwrap_or_default().to_string_lossy(), true);
-            let req = PlayRequest { path, title, library_id: -1, file_id: -1, start: Some(0.0) };
+            let req = PlayRequest { path: path.clone(), title, library_id: -1, file_id: -1, start: Some(0.0) };
             app.apply(&cc.egui_ctx, Nav::Play { req, replace: false });
+        } else if let Some(id) = start.as_ref().and_then(|s| flex_core::youtube::video_id(&s.to_string_lossy())) {
+            // `flex <YouTube URL>` plays it (with YouTube set up).
+            app.apply(&cc.egui_ctx, Nav::Play { req: PlayRequest::youtube(&id, "YouTube", Some(0.0)), replace: false });
         }
         Ok(app)
     }
@@ -138,9 +141,22 @@ impl FlexApp {
     }
 
     fn play(&mut self, ctx: &egui::Context, req: PlayRequest, replace: bool) {
+        let saved = match req.youtube_id() {
+            Some(id) => {
+                if self.sh.youtube.tools.is_none() {
+                    self.sh.toast("YouTube isn't set up yet: switch it on in Settings → YouTube");
+                    return;
+                }
+                let id = id.to_owned();
+                self.sh.youtube.forget(&id);
+                self.sh.prepare_youtube(&id);
+                self.sh.yt_progress(&id).and_then(|p| p.position)
+            }
+            None => self.sh.progress(req.library_id, req.file_id).and_then(|p| p.position),
+        };
         // Ask before resuming, unless the caller already chose where to start.
         if req.start.is_none()
-            && let Some(position) = self.sh.progress(req.library_id, req.file_id).and_then(|p| p.position)
+            && let Some(position) = saved
         {
             if replace {
                 self.pop();
@@ -439,6 +455,7 @@ impl eframe::App for FlexApp {
     /// Runs even while the window is hidden, so scans finish without anyone watching.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
+        self.sh.poll_youtube();
         let playback = self.top().playback();
         self.sh.poll_plugins(playback);
         self.handle_commands(ctx);

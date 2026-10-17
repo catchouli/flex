@@ -21,6 +21,7 @@ pub mod search;
 pub mod settings;
 pub mod shows;
 pub mod up_next;
+pub mod youtube;
 
 use eframe::egui::{Pos2, Rect, Ui};
 
