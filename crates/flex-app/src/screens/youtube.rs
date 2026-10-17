@@ -118,7 +118,12 @@ struct VideoGrid {
     button: Option<usize>,
     /// The video last asked to be prepared.
     prepared: Option<String>,
+    /// The first few videos have been prepared (once, when the grid first shows them).
+    warmed: bool,
 }
+
+/// Videos prepared as soon as a grid appears, since the first ones are the likeliest picks.
+const WARM: usize = 4;
 
 enum GridInput {
     None,
@@ -185,6 +190,11 @@ impl VideoGrid {
         if items.is_empty() {
             widgets::message(ui.painter(), area, empty, &style);
             return;
+        }
+        if !std::mem::replace(&mut self.warmed, true) {
+            for item in items.iter().take(WARM) {
+                sh.prepare_youtube(&item.id);
+            }
         }
         let images = &mut sh.images;
         let grid_focused = focused && self.button.is_none();
@@ -395,7 +405,8 @@ impl Screen for SearchResults {
     }
 }
 
-/// Hold OK on a video: play from the start, mark watched, its channel.
+/// Hold OK on a video: play from the start, mark watched, its channel, and (when
+/// part-watched) remove it from Continue Watching.
 pub struct VideoOptions {
     item: VideoItem,
     list: ListState,
@@ -406,6 +417,7 @@ enum VideoChoice {
     Watched(bool),
     Channel,
     Subscribe(bool),
+    RemoveFromContinue,
 }
 
 impl VideoOptions {
@@ -413,10 +425,25 @@ impl VideoOptions {
         Self { item, list: ListState::default() }
     }
 
+    /// For a part-watched video on Home's Continue Watching row.
+    pub fn continuing(id: &str, title: &str, channel: &str) -> Self {
+        let item = VideoItem {
+            id: id.to_owned(),
+            title: title.to_owned(),
+            channel: channel.to_owned(),
+            channel_id: String::new(),
+            detail: String::new(),
+            fraction: None,
+            watched: false,
+        };
+        Self::new(item)
+    }
+
     fn choices(&self, sh: &Shared) -> Vec<(Row, VideoChoice)> {
         let progress = sh.yt_progress(&self.item.id);
         let mut out = Vec::new();
-        if progress.as_ref().is_some_and(|p| p.position.is_some()) {
+        let continuing = progress.as_ref().is_some_and(|p| p.position.is_some());
+        if continuing {
             out.push((Row::new(Icon::Video, "Play from beginning"), VideoChoice::FromStart));
         }
         if progress.as_ref().is_some_and(|p| p.watched) {
@@ -429,6 +456,9 @@ impl VideoOptions {
             let subscribed = sh.is_subscribed(&self.item.channel_id);
             let label = if subscribed { format!("Unsubscribe from {}", self.item.channel) } else { format!("Subscribe to {}", self.item.channel) };
             out.push((Row::new(if subscribed { Icon::Remove } else { Icon::Add }, label), VideoChoice::Subscribe(!subscribed)));
+        }
+        if continuing && sh.yt_continue(usize::MAX).iter().any(|(id, _)| *id == self.item.id) {
+            out.push((Row::new(Icon::Remove, "Remove from Continue Watching").detail("Until you watch it again"), VideoChoice::RemoveFromContinue));
         }
         out
     }
@@ -456,6 +486,10 @@ impl Screen for VideoOptions {
             Some(VideoChoice::Subscribe(false)) => {
                 sh.unsubscribe(&item.channel_id);
                 sh.toast(format!("Unsubscribed from {}", item.channel));
+                Nav::Pop
+            }
+            Some(VideoChoice::RemoveFromContinue) => {
+                sh.hide_continue(&format!("yt:{}", item.id));
                 Nav::Pop
             }
             None => Nav::None,

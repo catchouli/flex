@@ -1,9 +1,10 @@
-//! Home: a Continue Watching row (when there's anything to continue) above a grid of
-//! library cards.
+//! Home: a Continue Watching row (when there's anything to continue: library files and,
+//! with YouTube on, part-watched videos) above a grid of library cards.
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, Style, TextStyle, TextureHandle, Ui, pos2, vec2};
 use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
+use flex_core::youtube::store::WatchProgress;
 
 use super::options::{OptionsMenu, Target};
 use super::browse::{ShowsView, Source};
@@ -11,7 +12,7 @@ use super::details::{TitleOf, TitlePage};
 use super::{Nav, Screen, library::LibraryView, picker::FolderPicker};
 use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
-use crate::shared::Shared;
+use crate::shared::{PlayRequest, Shared};
 use crate::shots::{self, Shot};
 use crate::{theme, widgets};
 
@@ -37,6 +38,30 @@ struct CardText {
     fraction: Option<f64>,
 }
 
+/// A Continue Watching card.
+#[derive(Clone, PartialEq)]
+enum Entry {
+    Library(ContinueItem),
+    YouTube { id: String, progress: WatchProgress },
+}
+
+impl Entry {
+    fn last_played(&self) -> i64 {
+        match self {
+            Entry::Library(i) => i.last_played,
+            Entry::YouTube { progress, .. } => progress.updated_at,
+        }
+    }
+
+    /// Its key for `Shared::hide_continue` (also identifies it across refreshes).
+    fn key(&self) -> String {
+        match self {
+            Entry::Library(i) => i.hide_key(),
+            Entry::YouTube { id, .. } => format!("yt:{id}"),
+        }
+    }
+}
+
 pub struct Home {
     section: Section,
     /// Selected index in each section.
@@ -45,9 +70,11 @@ pub struct Home {
     /// First visible Continue Watching card (the row scrolls sideways).
     cont_offset: usize,
     lib_columns: usize,
-    items: Vec<ContinueItem>,
-    /// Library versions the items were computed for.
+    items: Vec<Entry>,
+    /// Library versions (then YouTube's and Continue Watching's) the items were computed for.
     items_key: Option<Vec<(i64, u64)>>,
+    /// The YouTube video last asked to be prepared (when its card was selected).
+    prepared: Option<String>,
     /// Vertical scroll, and whether to bring the selection into view on the next frame
     /// (set when the selection moves, so mouse-wheel scrolling isn't undone).
     scroll: f32,
@@ -64,13 +91,25 @@ impl Default for Home {
             lib_columns: 1,
             items: Vec::new(),
             items_key: None,
+            prepared: None,
             scroll: 0.0,
             reveal_selection: true,
         }
     }
 }
 
-fn describe(sh: &Shared, item: &ContinueItem) -> Option<CardText> {
+fn describe(sh: &Shared, entry: &Entry) -> Option<CardText> {
+    let item = match entry {
+        Entry::Library(item) => item,
+        Entry::YouTube { progress, .. } => {
+            let left = match (progress.position, progress.duration) {
+                (Some(pos), Some(dur)) => theme::format_remaining(dur - pos),
+                _ => String::new(),
+            };
+            let fraction = progress.position.zip(progress.duration).filter(|(_, d)| *d > 0.0).map(|(p, d)| p / d);
+            return Some(CardText { show: progress.title.clone(), episode: progress.channel.clone(), status: left, fraction });
+        }
+    };
     let state = sh.lib(item.library_id)?;
     let file = state.tree.file(item.file_id)?;
     let titles = sh.titles(item.library_id, item.file_id)?;
@@ -93,7 +132,11 @@ fn describe(sh: &Shared, item: &ContinueItem) -> Option<CardText> {
 
 /// The picture for a Continue Watching card, as shown elsewhere for what it'll play: an
 /// episode's TMDB still or a film's backdrop, else a screenshot from the video itself.
-fn card_image(sh: &mut Shared, item: &ContinueItem) -> Option<TextureHandle> {
+fn card_image(sh: &mut Shared, entry: &Entry) -> Option<TextureHandle> {
+    let item = match entry {
+        Entry::Library(item) => item,
+        Entry::YouTube { id, .. } => return sh.images.get(&flex_core::youtube::feeds::thumbnail(id), Size::Still),
+    };
     let entry = sh.lib(item.library_id)?.catalog()?.show_of_file(item.file_id);
     let tmdb = match entry {
         Some(e) if e.is_series() => sh.episode_meta(item.library_id, item.file_id).and_then(|m| m.still.clone()).map(|p| (p, Size::Still)),
@@ -136,16 +179,27 @@ fn continue_card(ui: &Ui, rect: Rect, text: &CardText, image: Option<&TextureHan
 
 impl Home {
     fn refresh(&mut self, sh: &Shared) {
-        let key: Vec<(i64, u64)> = sh.libs.iter().map(|l| (l.lib.id, l.version)).collect();
+        let mut key: Vec<(i64, u64)> = sh.libs.iter().map(|l| (l.lib.id, l.version)).collect();
+        key.push((-1, sh.continue_version));
+        if sh.youtube_enabled() {
+            key.push((crate::shared::YOUTUBE_LIBRARY, sh.youtube.version));
+        }
         if self.items_key.as_ref() != Some(&key) {
             let was_empty = self.items.is_empty();
-            let selected = self.items.get(self.cont).map(|i| i.file_id);
-            self.items = sh.continue_watching(MAX_CONTINUE);
+            let selected = self.items.get(self.cont).map(Entry::key);
+            let mut items: Vec<Entry> = sh.continue_watching(MAX_CONTINUE).into_iter().map(Entry::Library).collect();
+            if sh.youtube_enabled() {
+                items.extend(sh.yt_continue(MAX_CONTINUE).into_iter().map(|(id, progress)| Entry::YouTube { id, progress }));
+            }
+            // Library entries come most recent first; slot YouTube in by when it was played.
+            items.sort_by_key(|e| std::cmp::Reverse(e.last_played()));
+            items.truncate(MAX_CONTINUE);
+            self.items = items;
             self.items_key = Some(key);
             // Keep the item you moved to selected when the row reorders; on the first card
             // (where Home starts), stay on the first card, e.g. once shows are sorted.
             if self.cont > 0
-                && let Some(i) = selected.and_then(|id| self.items.iter().position(|i| i.file_id == id))
+                && let Some(i) = selected.and_then(|k| self.items.iter().position(|e| e.key() == k))
             {
                 self.cont = i;
             }
@@ -163,19 +217,30 @@ impl Home {
     }
 
     fn handle_continue(&mut self, sh: &Shared, press: Press) -> Nav {
-        let item = self.items.get(self.cont).copied();
+        let entry = self.items.get(self.cont).cloned();
         match press.action {
             Action::Left => self.cont = self.cont.saturating_sub(1),
             Action::Right => self.cont = (self.cont + 1).min(self.items.len().saturating_sub(1)),
             Action::Up if !press.repeat => return Nav::FocusTopBar,
             Action::Down => self.section = Section::Libraries,
-            Action::Menu if !press.repeat => {
-                if let Some(i) = item {
-                    return Nav::push(OptionsMenu::new(Target::File { library_id: i.library_id, file_id: i.file_id }));
+            Action::Menu if !press.repeat => match &entry {
+                Some(e @ Entry::Library(i)) => {
+                    let target = Target::File { library_id: i.library_id, file_id: i.file_id };
+                    return Nav::push(OptionsMenu::from_continue(target, e.key()));
                 }
-            }
+                Some(Entry::YouTube { id, progress }) => {
+                    return Nav::push(super::youtube::VideoOptions::continuing(id, &progress.title, &progress.channel));
+                }
+                None => {}
+            },
             _ if press.is_activate() => {
-                let Some(i) = item else { return Nav::None };
+                let i = match entry {
+                    Some(Entry::Library(i)) => i,
+                    Some(Entry::YouTube { id, progress }) => {
+                        return Nav::Play { req: PlayRequest::youtube(&id, &progress.title, None), replace: false };
+                    }
+                    None => return Nav::None,
+                };
                 let Some(req) = sh.play_request(i.library_id, i.file_id) else { return Nav::None };
                 // Back from the player returns to the show or film's page rather than Home.
                 let screen: Box<dyn Screen> = match sh.lib(i.library_id).and_then(|l| l.catalog()?.show_of_file(i.file_id)) {
@@ -305,6 +370,15 @@ impl Screen for Home {
                 let selected = focused && self.section == Section::Continue && i == self.cont;
                 let image = card_image(sh, &self.items[i]);
                 continue_card(ui, Rect::from_min_size(min, CONTINUE_CARD.into()), &text, image.as_ref(), selected, &style);
+            }
+            // A selected YouTube card starts finding its streams, so OK plays sooner.
+            if focused
+                && self.section == Section::Continue
+                && let Some(Entry::YouTube { id, .. }) = self.items.get(self.cont)
+                && self.prepared.as_deref() != Some(id)
+            {
+                self.prepared = Some(id.clone());
+                sh.prepare_youtube(id);
             }
             hints.paint(ui.painter());
             // An arrow selects the first hidden card that way and scrolls a page.

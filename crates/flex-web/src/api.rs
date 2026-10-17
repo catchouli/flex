@@ -123,6 +123,9 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
     let mut items = progress::continue_watching_shows(organised, MAX_CONTINUE);
     let pending = snapshot.libraries.iter().filter(|l| l.catalog.is_none()).map(|l| (&l.lib, &*l.tree));
     items.extend(progress::continue_watching(pending, MAX_CONTINUE));
+    // Removed on the TV (hold OK → Remove from Continue Watching): hidden here too.
+    let hidden = state.db.lock().unwrap_or_else(|e| e.into_inner()).continue_hidden().unwrap_or_default();
+    let mut items = progress::without_hidden(items, &hidden);
     items.truncate(MAX_CONTINUE);
 
     let cont = items
