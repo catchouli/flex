@@ -1,11 +1,12 @@
 //! Search results for the query typed in the top bar, with a row of scopes along the top:
-//! Movies & shows (default), each library, Episodes, Folders & files. Up from the first
-//! result reaches the scopes; Left/Right switches.
+//! Movies & shows (default), each library, Episodes, Music (with a music library), Folders
+//! & files. Up from the first result reaches the scopes; Left/Right switches.
 
 use eframe::egui::{Align2, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::search::{Item, Scope, Target};
 
 use super::details::{EpisodePage, TitlePage, open_file};
+use super::music::{AlbumPage, ArtistPage, play_album};
 use super::options::{self, OptionsMenu};
 use super::{Nav, Screen, library::open_folder};
 use crate::input::{Action, Press};
@@ -30,9 +31,11 @@ pub struct SearchView {
 /// The scopes in order, with labels.
 fn scopes(sh: &Shared) -> Vec<(Scope, String)> {
     let mut out = vec![(Scope::Titles, "Movies & shows".to_owned())];
-    // Music isn't searchable yet, so it gets no tab.
     out.extend(sh.libs.iter().filter(|l| !l.is_music()).map(|l| (Scope::Library(l.lib.id), l.lib.name.clone())));
     out.push((Scope::Episodes, "Episodes".to_owned()));
+    if sh.libs.iter().any(|l| l.is_music()) {
+        out.push((Scope::Music, "Music".to_owned()));
+    }
     out.push((Scope::Paths, "Folders & files".to_owned()));
     out
 }
@@ -60,6 +63,9 @@ impl SearchView {
             Target::Episode { library_id, file_id } => Nav::push(EpisodePage::new(*library_id, *file_id)),
             Target::Folder { library_id, rel } => open_folder(sh, *library_id, rel),
             Target::File { library_id, file_id } => open_file(sh, *library_id, *file_id),
+            Target::Album { library_id, key } => Nav::push(AlbumPage::new(*library_id, key.clone())),
+            Target::Artist { library_id, name } => Nav::push(ArtistPage::new(sh, *library_id, name.clone())),
+            Target::Track { library_id, album, index } => play_album(sh, *library_id, album, *index, false),
         }
     }
 }
@@ -91,6 +97,8 @@ impl Screen for SearchView {
                 Target::File { library_id, file_id } | Target::Episode { library_id, file_id } => {
                     options::Target::File { library_id: *library_id, file_id: *file_id }
                 }
+                // Music has no options menu.
+                Target::Album { .. } | Target::Artist { .. } | Target::Track { .. } => return Nav::None,
             };
             return Nav::push(OptionsMenu::new(target));
         }
@@ -139,8 +147,8 @@ impl Screen for SearchView {
             .iter()
             .map(|item| {
                 let icon = match item.target {
-                    Target::Show { .. } | Target::Folder { .. } => Icon::Folder,
-                    Target::Episode { .. } | Target::File { .. } => Icon::Video,
+                    Target::Show { .. } | Target::Folder { .. } | Target::Album { .. } | Target::Artist { .. } => Icon::Folder,
+                    Target::Episode { .. } | Target::File { .. } | Target::Track { .. } => Icon::Video,
                 };
                 Row::new(icon, item.title.as_str()).detail(item.context.as_str())
             })
