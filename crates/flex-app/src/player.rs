@@ -15,6 +15,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, Rect, TextStyle, pos2, v
 use eframe::egui_glow;
 use eframe::glow::{self, HasContext};
 
+use flex_core::skip::{self, Skip, SkipKind};
 use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_plugin::{Light, Playback, PlaybackState};
 
@@ -22,7 +23,7 @@ use crate::ambient::Margins;
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
 use crate::screens::{Nav, Screen, up_next::UpNext};
-use crate::shared::{PlayRequest, Shared};
+use crate::shared::{PlayRequest, Shared, SkipMode};
 use crate::theme;
 
 const OSD_SECS: f64 = 3.0;
@@ -75,6 +76,13 @@ pub struct Player {
     drag: Option<(f64, f64)>,
     /// For a YouTube video: its streams are found in the background, then loaded.
     youtube: Option<YouTubePlay>,
+    /// Openings and endings found in the chapters (once the length is known).
+    skips: Option<Vec<Skip>>,
+    /// Skippable parts already skipped automatically (each only once).
+    auto_skipped: Vec<usize>,
+    /// The part the "Skip" button is offering now, and where the button was drawn.
+    skip_prompt: Option<Skip>,
+    skip_button: Option<Rect>,
 }
 
 struct YouTubePlay {
@@ -121,6 +129,10 @@ impl Player {
             osd_panel: None,
             drag: None,
             youtube,
+            skips: None,
+            auto_skipped: Vec::new(),
+            skip_prompt: None,
+            skip_button: None,
         })
     }
 
@@ -156,8 +168,57 @@ impl Player {
         }
     }
 
+    /// Jumps past the opening or ending the button offers.
+    fn skip(&mut self) {
+        if let Some(skip) = self.skip_prompt.take() {
+            self.command(&["seek", &format!("{:.3}", skip.end), "absolute"]);
+        }
+    }
+
+    /// Reads the chapters for openings and endings, then each frame offers (or makes) a skip.
+    fn update_skips(&mut self, sh: &mut Shared) {
+        if self.skips.is_none() && self.loaded && self.duration.is_some() {
+            let count = self.mpv.get_i64("chapter-list/count").unwrap_or(0);
+            let chapters: Vec<(f64, String)> = (0..count)
+                .filter_map(|i| {
+                    let time = self.mpv.get_f64(&format!("chapter-list/{i}/time"))?;
+                    Some((time, self.mpv.get_string(&format!("chapter-list/{i}/title")).unwrap_or_default()))
+                })
+                .collect();
+            let skips = skip::find(&chapters, self.duration);
+            if !skips.is_empty() {
+                log::info!("skippable: {skips:?}");
+            }
+            self.skips = Some(skips);
+        }
+        let mode = sh.skip_mode();
+        let current = match (&self.skips, self.mpv.get_f64("time-pos")) {
+            (Some(skips), Some(pos)) if mode != SkipMode::Off => skip::at(skips, pos).map(|(i, s)| (i, *s)),
+            _ => None,
+        };
+        self.skip_prompt = None;
+        let Some((i, part)) = current else { return };
+        if mode == SkipMode::Auto {
+            if !self.auto_skipped.contains(&i) {
+                self.auto_skipped.push(i);
+                self.command(&["seek", &format!("{:.3}", part.end), "absolute"]);
+                sh.toast(match part.kind {
+                    SkipKind::Opening => "Skipped the opening",
+                    SkipKind::Ending => "Skipped the credits",
+                });
+            }
+        } else {
+            self.skip_prompt = Some(part);
+        }
+    }
+
     fn handle_press(&mut self, now: f64, press: Press) -> Nav {
         let osd_visible = now < self.osd_until;
+        // While "Skip opening" shows, OK presses it (Play/Pause still pauses).
+        if press.action == Action::Ok && !press.repeat && self.skip_prompt.is_some() {
+            self.skip();
+            return Nav::None;
+        }
         match press.action {
             Action::Ok | Action::PlayPause if !press.repeat => {
                 let _ = self.mpv.set_flag("pause", !self.paused());
@@ -437,6 +498,18 @@ impl Player {
             painter.text(screen.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(ui.style()), theme::TEXT);
         }
 
+        self.update_skips(sh);
+        self.skip_button = None;
+        if let Some(part) = self.skip_prompt {
+            // Bottom right, above where the OSD panel goes.
+            let size = vec2(330.0, 72.0);
+            let rect = Rect::from_min_size(pos2(safe.right() - size.x, safe.bottom() - 180.0 - size.y), size);
+            if crate::widgets::hit(ui, rect) == crate::widgets::Hit::Click {
+                self.skip();
+            }
+            crate::widgets::button(painter, rect, &format!("{}  ⏭", part.kind.label()), true, ui.style());
+            self.skip_button = Some(rect);
+        }
         if self.show_stats {
             self.draw_stats(ui, safe, sh.ambient.current.as_ref());
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -586,7 +659,7 @@ impl Screen for Player {
     }
 
     fn on_controls(&self, pos: egui::Pos2) -> bool {
-        self.osd_panel.is_some_and(|panel| panel.contains(pos))
+        self.osd_panel.is_some_and(|panel| panel.contains(pos)) || self.skip_button.is_some_and(|b| b.contains(pos))
     }
 
     fn on_leave(&mut self, sh: &mut Shared) {

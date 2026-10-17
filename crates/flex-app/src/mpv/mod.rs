@@ -350,6 +350,27 @@ mod tests {
 
     use super::{Event, Mpv};
 
+    /// Reads a file's chapters the way the player does and finds its opening and ending:
+    /// `FLEX_CHAPTER_VIDEO=… cargo test -p flex reads_chapters -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn reads_chapters() {
+        let video = std::env::var("FLEX_CHAPTER_VIDEO").expect("FLEX_CHAPTER_VIDEO");
+        let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("pause", "yes")]).unwrap();
+        mpv.command(&["loadfile", &video]).unwrap();
+        assert!(matches!(mpv.wait_event(10.0), Some(Event::FileLoaded)));
+        let count = mpv.get_i64("chapter-list/count").unwrap_or(0);
+        let chapters: Vec<(f64, String)> = (0..count)
+            .filter_map(|i| Some((mpv.get_f64(&format!("chapter-list/{i}/time"))?, mpv.get_string(&format!("chapter-list/{i}/title")).unwrap_or_default())))
+            .collect();
+        eprintln!("chapters: {chapters:?}");
+        let skips = flex_core::skip::find(&chapters, mpv.get_f64("duration"));
+        eprintln!("skips: {skips:?}");
+        assert_eq!(skips.len(), 2);
+        assert_eq!((skips[0].start, skips[0].end), (20.0, 110.0));
+        assert_eq!((skips[1].start, skips[1].end), (500.0, 590.0));
+    }
+
     /// Plays a real YouTube video in a windowless mpv (needs yt-dlp and network):
     /// `cargo test -p flex plays_youtube -- --ignored --nocapture`.
     #[test]

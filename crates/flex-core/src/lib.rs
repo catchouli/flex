@@ -15,6 +15,7 @@ pub mod plugins;
 pub mod progress;
 pub mod scan;
 pub mod search;
+pub mod skip;
 pub mod titles;
 pub mod tree;
 pub mod update;

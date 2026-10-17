@@ -176,6 +176,35 @@ impl PlayRequest {
     }
 }
 
+const SKIP_SETTING: &str = "skip_intros";
+
+/// Skipping openings and endings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkipMode {
+    /// Show a "Skip opening" button (OK presses it).
+    Ask,
+    Auto,
+    Off,
+}
+
+impl SkipMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            SkipMode::Ask => "Ask",
+            SkipMode::Auto => "Automatically",
+            SkipMode::Off => "Off",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            SkipMode::Ask => SkipMode::Auto,
+            SkipMode::Auto => SkipMode::Off,
+            SkipMode::Off => SkipMode::Ask,
+        }
+    }
+}
+
 /// Choices offered in Settings for "mark watched at".
 pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
 
@@ -1367,6 +1396,24 @@ impl Shared {
     }
 
     /// Applies finished/progressing scans. Call once per frame.
+    /// What to do at a file's opening and ending chapters (see `flex_core::skip`).
+    pub fn skip_mode(&self) -> SkipMode {
+        match self.setting(SKIP_SETTING).as_deref() {
+            Some("auto") => SkipMode::Auto,
+            Some("off") => SkipMode::Off,
+            _ => SkipMode::Ask,
+        }
+    }
+
+    pub fn set_skip_mode(&mut self, mode: SkipMode) {
+        let value = match mode {
+            SkipMode::Ask => "ask",
+            SkipMode::Auto => "auto",
+            SkipMode::Off => "off",
+        };
+        self.set_setting(SKIP_SETTING, value);
+    }
+
     pub fn youtube_enabled(&self) -> bool {
         self.setting_bool(crate::youtube::ENABLED_SETTING)
     }

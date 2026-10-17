@@ -23,9 +23,9 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        // Web access, Plugins, YouTube, "Close to system tray" where there's a tray, "Start
-        // with Windows", then "Update automatically" in installed copies.
-        let tray_row = libs + 10;
+        // Web access, Plugins, YouTube, skipping openings, "Close to system tray" where
+        // there's a tray, "Start with Windows", then "Update automatically" in installed copies.
+        let tray_row = libs + 11;
         let autostart_row = tray_row + usize::from(TRAY);
         let update = crate::update::installed();
         let rows = autostart_row + usize::from(cfg!(windows)) + usize::from(update);
@@ -65,6 +65,11 @@ impl Screen for Settings {
             }
             ListInput::Activate(i) if i == libs + 8 => Nav::push(Plugins::default()),
             ListInput::Activate(i) if i == libs + 9 => Nav::push(super::youtube::YouTubeSettings::default()),
+            ListInput::Activate(i) if i == libs + 10 => {
+                let next = sh.skip_mode().next();
+                sh.set_skip_mode(next);
+                Nav::None
+            }
             ListInput::Activate(i) if TRAY && i == tray_row => {
                 sh.set_close_to_tray(!sh.close_to_tray);
                 Nav::None
@@ -116,6 +121,10 @@ impl Screen for Settings {
         }));
         let youtube = if sh.youtube_enabled() { "on" } else { "off" };
         rows.push(Row::new(Icon::None, format!("YouTube: {youtube}…")).detail("No ads, SponsorBlock, subscriptions"));
+        rows.push(
+            Row::new(Icon::None, format!("Skip openings and endings: {}", sh.skip_mode().label()))
+                .detail("For files with OP/ED chapters · OK to change"),
+        );
         if TRAY {
             let on = if sh.close_to_tray { "on" } else { "off" };
             rows.push(Row::new(Icon::None, format!("Close to system tray: {on}")).detail("Closing keeps Flex running in the tray, so it opens instantly"));
