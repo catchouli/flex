@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::glow::{self, HasContext};
-use flex_core::ambient::{self, Grid, Linear, Mode, Smoother, Tuning};
+use flex_core::ambient::{self, Boost, Grid, Linear, Mode, Smoother};
 use flex_core::plugins::Host;
 use flex_plugin::Light;
 
@@ -192,32 +192,64 @@ pub struct Choice {
     pub label: &'static str,
     pub options: &'static [&'static str],
     pub default: usize,
+    /// Help shown beside it.
+    pub detail: &'static str,
 }
 
 pub const MODE: usize = 0;
 const SMOOTHING: usize = 1;
 const SATURATION: usize = 2;
 const BRIGHTNESS: usize = 3;
-const IDLE: usize = 4;
-const IDLE_BRIGHTNESS: usize = 5;
+const CURVE: usize = 4;
+const IDLE: usize = 5;
+const IDLE_BRIGHTNESS: usize = 6;
 
-pub const CHOICES: [Choice; 6] = [
-    Choice { key: "ambient_mode", label: "Colour from", options: &["The whole picture", "The edges of the picture"], default: 0 },
-    Choice { key: "ambient_smoothing", label: "Smoothing", options: &["Off", "Quick", "Medium", "Slow"], default: 2 },
-    Choice { key: "ambient_saturation", label: "Colours", options: &["As on screen", "A bit more vivid", "More vivid", "Very vivid"], default: 1 },
-    Choice { key: "ambient_brightness", label: "Brightness", options: &["100%", "80%", "60%", "40%", "20%"], default: 0 },
+const CHANGE: &str = "OK to change";
+
+pub const CHOICES: [Choice; 7] = [
+    Choice { key: "ambient_mode", label: "Colour from", options: &["The whole picture", "The edges of the picture"], default: 0, detail: CHANGE },
+    Choice { key: "ambient_smoothing", label: "Smoothing", options: &["Off", "Quick", "Medium", "Slow"], default: 2, detail: CHANGE },
+    Choice {
+        key: "ambient_saturation",
+        label: "Colours",
+        options: &["As on screen", "A bit more vivid", "More vivid", "Very vivid"],
+        default: 1,
+        detail: CHANGE,
+    },
+    // A new key: the old "ambient_brightness" stored indexes into a different list.
+    Choice {
+        key: "ambient_boost",
+        label: "Brightness",
+        options: &["20%", "40%", "60%", "80%", "100%", "150%", "200%", "300%", "400%"],
+        default: 4,
+        detail: "Over 100% boosts it; too much washes bright colours out",
+    },
+    Choice {
+        key: "ambient_curve",
+        label: "Brightness follows",
+        options: &["The light from the screen", "How bright the picture looks"],
+        default: 0,
+        detail: "The second is much brighter in most scenes",
+    },
     Choice {
         key: "ambient_idle",
         label: "Outside videos",
         options: &["Warm white", "Soft white", "Cool white", "Off", "Keep the last colour"],
         default: 0,
+        detail: CHANGE,
     },
-    Choice { key: "ambient_idle_brightness", label: "Brightness outside videos", options: &["10%", "20%", "30%", "50%", "100%"], default: 1 },
+    Choice {
+        key: "ambient_idle_brightness",
+        label: "Brightness outside videos",
+        options: &["10%", "20%", "30%", "50%", "100%"],
+        default: 1,
+        detail: CHANGE,
+    },
 ];
 
 const SMOOTHING_SECS: [f32; 4] = [0.0, 0.12, 0.3, 0.8];
 const SATURATIONS: [f32; 4] = [1.0, 1.2, 1.5, 2.0];
-const BRIGHTNESSES: [f32; 5] = [1.0, 0.8, 0.6, 0.4, 0.2];
+const GAINS: [f32; 9] = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 3.0, 4.0];
 /// As LED (linear) values: what the strip shows at full brightness.
 const IDLE_COLOURS: [Linear; 3] = [[1.0, 0.45, 0.12], [1.0, 0.7, 0.4], [1.0, 1.0, 1.0]];
 const IDLE_BRIGHTNESSES: [f32; 5] = [0.1, 0.2, 0.3, 0.5, 1.0];
@@ -297,11 +329,9 @@ impl Ambient {
 
         let grid = if video { self.sampler.lock().unwrap_or_else(|e| e.into_inner()).fresh().cloned() } else { None };
         let (mode, idle) = (self.mode(), self.idle());
-        let tuning = Tuning {
-            saturation: if grid.is_some() { SATURATIONS[self.values[SATURATION]] } else { 1.0 },
-            max_brightness: BRIGHTNESSES[self.values[BRIGHTNESS]],
-            ..Tuning::default()
-        };
+        // Boost and saturation are for the picture; the idle colour has its own brightness.
+        let boost = Boost { gain: GAINS[self.values[BRIGHTNESS]], perceived: self.values[CURVE] == 1, ..Boost::default() };
+        let saturation = if grid.is_some() { SATURATIONS[self.values[SATURATION]] } else { 1.0 };
         let tau = if grid.is_some() { SMOOTHING_SECS[self.values[SMOOTHING]] } else { IDLE_FADE_SECS };
         let mut settled = true;
         let smoothers = &mut self.smoothers;
@@ -310,14 +340,14 @@ impl Ambient {
             let smoother = smoothers.entry(zones).or_default();
             let held = smoother.current().to_vec();
             let target = match (&grid, &idle) {
-                (Some(grid), _) => grid.zones(zones, mode),
+                (Some(grid), _) => boost.apply(&grid.zones(zones, mode)),
                 // Video without a fresh frame (loading, seeking), or "keep the last colour".
                 (None, _) if (video || matches!(idle, Idle::Hold)) && !held.is_empty() => held,
                 (None, Idle::Colour(c)) => vec![*c; zones],
                 (None, _) => vec![[0.0; 3]; zones],
             };
             let target = if target.len() == zones { target } else { vec![[0.0; 3]; zones] };
-            let light = ambient::to_light(smoother.step(&target, dt, tau), &tuning);
+            let light = ambient::to_light(smoother.step(&target, dt, tau), saturation);
             settled &= grid.is_none() && smoother.settled(&target);
             if zones == 1 {
                 one_zone = Some(light.clone());
