@@ -16,6 +16,7 @@ pub mod progress;
 pub mod scan;
 pub mod search;
 pub mod skip;
+pub mod sync;
 pub mod titles;
 pub mod tree;
 pub mod update;

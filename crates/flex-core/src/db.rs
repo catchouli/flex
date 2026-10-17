@@ -195,8 +195,22 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE continue_hidden (
         key       TEXT PRIMARY KEY, -- '<library id>:<file id>', or 'yt:<video id>'
         hidden_at INTEGER NOT NULL
+    );",
+    // 14: when things last changed, and what was removed, for syncing between devices
+    // (see `sync`): watched/position changes, folders moved and shows matched by hand.
+    "ALTER TABLE media_files ADD COLUMN state_at INTEGER; -- NULL: use last_played
+    ALTER TABLE group_matches ADD COLUMN changed_at INTEGER;
+    ALTER TABLE shows ADD COLUMN manual_at INTEGER;
+    CREATE TABLE sync_removed (
+        kind TEXT NOT NULL,      -- 'watchlist' or 'yt_channel'
+        key  TEXT NOT NULL,
+        at   INTEGER NOT NULL,
+        PRIMARY KEY (kind, key)
     );"
 ];
+
+/// Now, in SQL (Unix seconds).
+const SQL_NOW: &str = "CAST(strftime('%s', 'now') AS INTEGER)";
 
 /// What MusicBrainz said about one album.
 #[derive(Clone, Debug, PartialEq)]
@@ -459,8 +473,10 @@ impl Db {
     /// Assigns a group by hand (to `show_id`, optionally with a season). Never undone by scans.
     pub fn set_group_match(&self, library_id: i64, group_key: &str, show_id: i64, season: Option<i32>) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO group_matches (library_id, group_key, show_id, season, manual) VALUES (?1, ?2, ?3, ?4, 1)
-             ON CONFLICT(library_id, group_key) DO UPDATE SET show_id = ?3, season = ?4, manual = 1",
+            &format!(
+                "INSERT INTO group_matches (library_id, group_key, show_id, season, manual, changed_at) VALUES (?1, ?2, ?3, ?4, 1, {SQL_NOW})
+                 ON CONFLICT(library_id, group_key) DO UPDATE SET show_id = ?3, season = ?4, manual = 1, changed_at = {SQL_NOW}"
+            ),
             params![library_id, group_key, show_id, season],
         )?;
         Self::delete_empty_shows(&self.conn, library_id)
@@ -487,8 +503,11 @@ impl Db {
             }
             None => {
                 tx.execute(
-                    "UPDATE shows SET provider = 'tmdb', provider_id = ?2, title = ?3, year = ?4, overview = ?5,
-                     poster = ?6, state = ?7, details_at = NULL WHERE id = ?1",
+                    &format!(
+                        "UPDATE shows SET provider = 'tmdb', provider_id = ?2, title = ?3, year = ?4, overview = ?5,
+                         poster = ?6, state = ?7, details_at = NULL,
+                         manual_at = CASE WHEN ?7 = 'manual' THEN {SQL_NOW} ELSE manual_at END WHERE id = ?1"
+                    ),
                     params![show_id, provider_id, found.title, found.year, found.overview, found.poster_path, state],
                 )?;
             }
@@ -618,9 +637,20 @@ impl Db {
                 "INSERT OR IGNORE INTO watchlist (key, library_id, added_at) VALUES (?1, ?2, strftime('%s', 'now'))",
                 params![key, library_id],
             )?;
+            self.conn.execute("DELETE FROM sync_removed WHERE kind = 'watchlist' AND key = ?1", [key])?;
         } else {
             self.conn.execute("DELETE FROM watchlist WHERE key = ?1", [key])?;
+            self.removed("watchlist", key)?;
         }
+        Ok(())
+    }
+
+    /// Remembers that something was removed, so other devices remove it too (`sync`).
+    pub(crate) fn removed(&self, kind: &str, key: &str) -> Result<()> {
+        self.conn.execute(
+            &format!("INSERT INTO sync_removed (kind, key, at) VALUES (?1, ?2, {SQL_NOW}) ON CONFLICT(kind, key) DO UPDATE SET at = {SQL_NOW}"),
+            params![kind, key],
+        )?;
         Ok(())
     }
 
@@ -884,7 +914,7 @@ impl Db {
 
     pub fn set_progress(&self, file_id: i64, p: &Progress) -> Result<()> {
         self.conn.execute(
-            "UPDATE media_files SET position = ?2, duration = ?3, watched = ?4, last_played = ?5 WHERE id = ?1",
+            &format!("UPDATE media_files SET position = ?2, duration = ?3, watched = ?4, last_played = ?5, state_at = {SQL_NOW} WHERE id = ?1"),
             params![file_id, p.position, p.duration, p.watched, p.last_played],
         )?;
         Ok(())
@@ -954,7 +984,7 @@ impl Db {
     pub fn set_watched(&mut self, file_ids: &[i64], watched: bool) -> Result<()> {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
-            let mut stmt = tx.prepare("UPDATE media_files SET watched = ?2, position = NULL WHERE id = ?1")?;
+            let mut stmt = tx.prepare(&format!("UPDATE media_files SET watched = ?2, position = NULL, state_at = {SQL_NOW} WHERE id = ?1"))?;
             for id in file_ids {
                 stmt.execute(params![id, watched])?;
             }
