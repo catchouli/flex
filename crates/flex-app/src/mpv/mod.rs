@@ -355,6 +355,7 @@ mod tests {
     #[test]
     #[ignore]
     fn plays_youtube() {
+        let _ = env_logger::builder().is_test(true).try_init();
         let tools = flex_core::youtube::Tools::find().expect("yt-dlp in the tools folder or on the PATH");
         let started = Instant::now();
         let video = tools.resolve("aqz-KE-bpKQ", 1080).unwrap();
@@ -362,7 +363,8 @@ mod tests {
 
         let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("hwdec", "no")]).unwrap();
         let loading = Instant::now();
-        mpv.command(&["loadfile", &video.mpv_url()]).unwrap();
+        // Through the relay, as the player does.
+        mpv.command(&["loadfile", &video.relayed_mpv_url()]).unwrap();
         match mpv.wait_event(30.0) {
             Some(Event::FileLoaded) => {}
             Some(Event::EndFile { error, .. }) => panic!("didn't play: {error:?}"),
@@ -388,6 +390,23 @@ mod tests {
         let t = Instant::now();
         let pos = wait_for("playback", &|p| p >= 2.0);
         eprintln!("playing: {pos:.1}s after {:?}", t.elapsed());
+        // It keeps up: 15 more seconds play in about 15 seconds, without pausing to buffer.
+        let t = Instant::now();
+        let mut stalls = 0;
+        let mut was_waiting = false;
+        let pos = loop {
+            let _ = mpv.poll_events();
+            let waiting = mpv.get_flag("paused-for-cache").unwrap_or(false);
+            stalls += usize::from(waiting && !was_waiting);
+            was_waiting = waiting;
+            let pos = mpv.get_f64("time-pos").unwrap_or(0.0);
+            if pos >= 17.0 || t.elapsed() > Duration::from_secs(40) {
+                break pos;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        eprintln!("played to {pos:.1}s in {:?} with {stalls} stalls", t.elapsed());
+        assert!(pos >= 17.0 && stalls == 0, "buffering: {stalls} stalls, reached {pos:.1}s");
         let t = Instant::now();
         mpv.command(&["seek", "300", "absolute"]).unwrap();
         let pos = wait_for("seek", &|p| p >= 300.0);

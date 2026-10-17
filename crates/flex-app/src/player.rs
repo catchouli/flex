@@ -311,7 +311,7 @@ impl Player {
                         self.req.title = video.title.clone();
                     }
                     log::info!("youtube: playing {} ({:?}p)", video.title, video.height);
-                    if let Err(e) = self.mpv.command(&["loadfile", &video.mpv_url()]) {
+                    if let Err(e) = self.mpv.command(&["loadfile", &video.relayed_mpv_url()]) {
                         sh.toast(format!("Couldn't play that video: {e:#}"));
                         return Some(Nav::Pop);
                     }

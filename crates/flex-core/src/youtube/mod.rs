@@ -5,6 +5,7 @@
 //! The streams come straight from YouTube's video servers, so there are no ads in them.
 
 pub mod feeds;
+pub mod proxy;
 pub mod sponsorblock;
 pub mod store;
 pub mod tools;
@@ -109,6 +110,9 @@ pub struct Video {
     pub video_url: String,
     /// A separate audio stream, when there is one (usual on YouTube).
     pub audio_url: Option<String>,
+    /// The streams' sizes in bytes, when yt-dlp knows them (it usually does).
+    pub video_size: Option<u64>,
+    pub audio_size: Option<u64>,
     pub height: Option<u32>,
     /// (start in seconds, title)
     pub chapters: Vec<(f64, String)>,
@@ -118,12 +122,32 @@ impl Video {
     /// What to hand mpv: the stream, or both streams joined with mpv's EDL (each URL is
     /// length-prefixed, so it needs no escaping).
     pub fn mpv_url(&self) -> String {
-        match &self.audio_url {
-            None => self.video_url.clone(),
-            Some(audio) => {
-                let part = |url: &str| format!("!no_clip;!no_chapters;%{}%{url}", url.len());
-                format!("edl://{};!new_stream;{}", part(&self.video_url), part(audio))
+        join(&self.video_url, self.audio_url.as_deref())
+    }
+
+    /// [`Video::mpv_url`] through the local relay (see [`proxy`]), which fetches from
+    /// YouTube in pieces so it isn't throttled; the direct URLs if it can't start.
+    pub fn relayed_mpv_url(&self) -> String {
+        match proxy::global() {
+            Ok(relay) => {
+                let video = relay.add(&self.video_url, self.video_size);
+                let audio = self.audio_url.as_deref().map(|a| relay.add(a, self.audio_size));
+                join(&video, audio.as_deref())
             }
+            Err(e) => {
+                log::warn!("youtube: no relay ({e:#}); playing directly");
+                self.mpv_url()
+            }
+        }
+    }
+}
+
+fn join(video: &str, audio: Option<&str>) -> String {
+    match audio {
+        None => video.to_owned(),
+        Some(audio) => {
+            let part = |url: &str| format!("!no_clip;!no_chapters;%{}%{url}", url.len());
+            format!("edl://{};!new_stream;{}", part(video), part(audio))
         }
     }
 }
@@ -141,6 +165,7 @@ struct Info {
     thumbnail: Option<String>,
     url: Option<String>,
     height: Option<u32>,
+    filesize: Option<u64>,
     #[serde(default)]
     requested_formats: Vec<Format>,
     #[serde(default)]
@@ -153,6 +178,7 @@ struct Format {
     #[serde(default)]
     vcodec: Option<String>,
     height: Option<u32>,
+    filesize: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -165,14 +191,15 @@ struct Chapter {
 fn parse(json: &[u8]) -> Result<Video> {
     let info: Info = serde_json::from_slice(json).context("reading yt-dlp's output")?;
     let has_video = |f: &&Format| f.vcodec.as_deref().is_some_and(|c| c != "none");
-    let (video_url, audio_url, height) = match &info.requested_formats[..] {
-        [] => (info.url.context("yt-dlp gave no stream")?, None, info.height),
+    let (video_url, video_size, audio, height) = match &info.requested_formats[..] {
+        [] => (info.url.context("yt-dlp gave no stream")?, info.filesize, None, info.height),
         formats => {
             let video = formats.iter().find(has_video).unwrap_or(&formats[0]);
-            let audio = formats.iter().find(|f| !std::ptr::eq(*f, video)).map(|f| f.url.clone());
-            (video.url.clone(), audio, video.height)
+            let audio = formats.iter().find(|f| !std::ptr::eq(*f, video)).map(|f| (f.url.clone(), f.filesize));
+            (video.url.clone(), video.filesize, audio, video.height)
         }
     };
+    let (audio_url, audio_size) = audio.map_or((None, None), |(url, size)| (Some(url), size));
     Ok(Video {
         id: info.id,
         title: info.title,
@@ -181,6 +208,8 @@ fn parse(json: &[u8]) -> Result<Video> {
         thumbnail: info.thumbnail,
         video_url,
         audio_url,
+        video_size,
+        audio_size,
         height,
         chapters: info.chapters.unwrap_or_default().into_iter().map(|c| (c.start_time, c.title)).collect(),
     })
