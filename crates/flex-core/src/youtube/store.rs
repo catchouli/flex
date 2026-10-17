@@ -156,12 +156,29 @@ impl Db {
         Ok(())
     }
 
-    /// Part-watched videos, most recent first: (id, progress).
+    /// Part-watched videos for Continue Watching, most recent first: (id, progress).
+    /// Leaves out ones removed from there (until they're played again).
     pub fn yt_continue(&self, limit: usize) -> Result<Vec<(String, WatchProgress)>> {
-        let mut all: Vec<(String, WatchProgress)> = self.yt_progress_all()?.into_iter().filter(|(_, p)| p.position.is_some()).collect();
+        let hidden = self.continue_hidden()?;
+        let mut all: Vec<(String, WatchProgress)> = self
+            .yt_progress_all()?
+            .into_iter()
+            .filter(|(id, p)| p.position.is_some() && hidden.get(&format!("yt:{id}")).is_none_or(|at| p.updated_at > *at))
+            .collect();
         all.sort_by_key(|(_, p)| std::cmp::Reverse(p.updated_at));
         all.truncate(limit);
         Ok(all)
+    }
+
+    /// Keeps only the `keep` most recently played videos in Continue Watching: older ones
+    /// are removed from there (keeping their resume point; playing one again brings it
+    /// back). Returns how many were removed.
+    pub fn trim_yt_continue(&self, keep: usize, now: i64) -> Result<usize> {
+        let extra = self.yt_continue(usize::MAX)?.into_iter().skip(keep).collect::<Vec<_>>();
+        for (id, _) in &extra {
+            self.hide_continue(&format!("yt:{id}"), now)?;
+        }
+        Ok(extra.len())
     }
 }
 
@@ -192,6 +209,26 @@ mod tests {
 
         db.remove_yt_channel("UCa").unwrap();
         assert_eq!(ids(db.yt_latest(10, true).unwrap()), ["v3"]);
+    }
+
+    #[test]
+    fn continue_watching_keeps_only_the_newest() {
+        let db = Db::open_in_memory().unwrap();
+        for (i, id) in ["a", "b", "c", "d"].iter().enumerate() {
+            db.record_yt_progress(id, "T", "C", 60.0, 600.0, 0.9, 100 + i as i64).unwrap();
+        }
+        assert_eq!(db.trim_yt_continue(2, 200).unwrap(), 2);
+        let ids = |db: &Db| db.yt_continue(10).unwrap().into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(&db), ["d", "c"], "the two most recent stay");
+        assert_eq!(db.yt_progress("a").unwrap().unwrap().position, Some(60.0), "resume point kept");
+        assert_eq!(db.trim_yt_continue(2, 201).unwrap(), 0, "nothing more to do");
+        // Playing an old one again brings it back as the newest; the oldest then goes.
+        db.record_yt_progress("a", "T", "C", 90.0, 600.0, 0.9, 300).unwrap();
+        db.trim_yt_continue(2, 301).unwrap();
+        assert_eq!(ids(&db), ["a", "d"]);
+        // None at all.
+        db.trim_yt_continue(0, 400).unwrap();
+        assert!(ids(&db).is_empty());
     }
 
     #[test]
