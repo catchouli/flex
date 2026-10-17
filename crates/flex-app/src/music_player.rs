@@ -297,6 +297,13 @@ impl Screen for MusicPlayer {
         true
     }
 
+    fn playback(&self) -> Option<flex_plugin::Playback> {
+        let entry = self.position().and_then(|i| self.entries.get(i)).filter(|_| self.started)?;
+        let state = if self.paused() { flex_plugin::PlaybackState::Paused } else { flex_plugin::PlaybackState::Playing };
+        let title = format!("{} · {}", entry.artists, entry.title);
+        Some(flex_plugin::Playback { state, title, kind: "music".into() })
+    }
+
     /// Clicks act on the list and bar, never as the video player's click-to-pause.
     fn on_controls(&self, _pos: egui::Pos2) -> bool {
         true

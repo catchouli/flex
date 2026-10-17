@@ -15,6 +15,9 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, Rect, TextStyle, pos2, v
 use eframe::egui_glow;
 use eframe::glow::{self, HasContext};
 
+use flex_plugin::{Light, Playback, PlaybackState};
+
+use crate::ambient::Margins;
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
 use crate::screens::{Nav, Screen, up_next::UpNext};
@@ -235,15 +238,28 @@ impl Player {
         ]
     }
 
-    fn draw_stats(&self, ui: &egui::Ui, safe: Rect) {
+    /// `light`: what the ambient light shows, with a swatch, when it's on.
+    fn draw_stats(&self, ui: &egui::Ui, safe: Rect, light: Option<&Light>) {
         let painter = ui.painter();
         let mono = TextStyle::Monospace.resolve(ui.style());
-        let lines = self.stats_lines();
+        let mut lines = self.stats_lines();
+        if let Some(light) = light {
+            let [r, g, b] = light.zones[0];
+            lines.push(format!("Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%", light.brightness * 100.0));
+        }
         let rect = Rect::from_min_size(safe.min, vec2(860.0, 32.0 + 36.0 * lines.len() as f32));
         painter.rect_filled(rect, CornerRadius::same(10), theme::OSD_BG);
         for (n, line) in lines.iter().enumerate() {
             let pos = rect.min + vec2(20.0, 16.0 + 36.0 * n as f32);
             painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::TEXT);
+        }
+        if let Some(light) = light {
+            // The colour as the strip shows it (colour scaled by brightness), turned from
+            // LED values back into screen ones.
+            let srgb = |c: u8| (flex_core::ambient::linear_to_srgb(f32::from(c) / 255.0 * light.brightness) * 255.0).round() as u8;
+            let [r, g, b] = light.zones[0].map(srgb);
+            let swatch = Rect::from_min_size(rect.right_top() + vec2(-80.0, rect.height() - 52.0), vec2(56.0, 36.0));
+            painter.rect_filled(swatch, CornerRadius::same(6), Color32::from_rgb(r, g, b));
         }
     }
 
@@ -328,11 +344,23 @@ impl Player {
 
         let screen = ctx.content_rect();
         let renderer = self.renderer.clone();
+        // Ambient light: sample the picture (without the black bars) right after it's drawn.
+        let sampler = sh.plugins.wants_light().then(|| sh.ambient.sampler.clone());
+        let margin = |k: &str| self.mpv.get_i64(&format!("osd-dimensions/{k}")).unwrap_or(0) as i32;
+        let margins = if sampler.is_some() {
+            Margins { left: margin("ml"), right: margin("mr"), top: margin("mt"), bottom: margin("mb") }
+        } else {
+            Margins::default()
+        };
         let callback = egui_glow::CallbackFn::new(move |info, painter| {
             let target = painter.intermediate_fbo();
             let fbo = target.map_or(0, |f| f.0.get() as i32);
             let [w, h] = info.screen_size_px;
             renderer.render(fbo, w as i32, h as i32, target.is_none());
+            if let Some(sampler) = &sampler {
+                let mut sampler = sampler.lock().unwrap_or_else(|e| e.into_inner());
+                unsafe { sampler.capture(painter.gl(), target, w as i32, h as i32, margins, target.is_none()) };
+            }
             // mpv doesn't restore GL state; egui resets the rest after callbacks.
             unsafe { painter.gl().bind_framebuffer(glow::FRAMEBUFFER, target) };
         });
@@ -345,7 +373,7 @@ impl Player {
         }
 
         if self.show_stats {
-            self.draw_stats(ui, safe);
+            self.draw_stats(ui, safe, sh.ambient.current.as_ref());
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
         if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
@@ -485,6 +513,11 @@ impl Screen for Player {
 
     fn is_player(&self) -> bool {
         true
+    }
+
+    fn playback(&self) -> Option<Playback> {
+        let state = if self.paused() { PlaybackState::Paused } else { PlaybackState::Playing };
+        Some(Playback { state, title: self.req.title.clone(), kind: "video".into() })
     }
 
     fn on_controls(&self, pos: egui::Pos2) -> bool {

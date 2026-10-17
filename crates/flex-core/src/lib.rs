@@ -1,5 +1,6 @@
 //! UI-independent parts of Flex: library storage, scanning, folder trees and search.
 
+pub mod ambient;
 pub mod catalog;
 pub mod db;
 pub mod disc;
@@ -10,6 +11,7 @@ pub mod musicbrainz;
 pub mod natural;
 pub mod parse;
 pub mod plex;
+pub mod plugins;
 pub mod progress;
 pub mod scan;
 pub mod search;

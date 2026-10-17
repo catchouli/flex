@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "plugins/*"]
+# Plugins are built with --workspace (CI does), so everyday builds skip Bluetooth etc.
+default-members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"

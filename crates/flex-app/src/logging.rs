@@ -148,8 +148,13 @@ mod windows {
 pub fn open_logs_folder() {
     let dir = logs_dir();
     let _ = std::fs::create_dir_all(&dir);
+    open_folder(&dir);
+}
+
+/// Opens `dir` in Explorer / Finder.
+pub fn open_folder(dir: &std::path::Path) {
     let program = if cfg!(windows) { "explorer" } else { "open" };
-    if let Err(e) = std::process::Command::new(program).arg(&dir).spawn() {
+    if let Err(e) = std::process::Command::new(program).arg(dir).spawn() {
         log::warn!("opening {}: {e}", dir.display());
     }
 }
