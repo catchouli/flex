@@ -91,7 +91,7 @@ see the colour being sent.
 
 There's also a [Trakt](https://trakt.tv) plugin, which keeps your Trakt history up to
 date with what you watch: switch it on, choose "Connect to Trakt" and enter the code it
-shows at trakt.tv/activate on your phone.
+shows at the address it gives (auth.trakt.tv/activate) on your phone.
 
 Flex works out the colour itself and only samples the screen while a light plugin is
 running, so a plugin for a different kind of light only has to pass it on. A plugin is

@@ -2,8 +2,9 @@
 //! progress follow Flex. Only films and episodes Flex has matched online are sent (TMDB
 //! ids, or title and year for anime matched on AniList).
 //!
-//! Connecting uses Trakt's device sign-in: the plugin shows a code to enter at
-//! trakt.tv/activate on a phone, so nothing has to be typed on the TV.
+//! Connecting uses Trakt's device sign-in: the plugin shows a code to enter at the address
+//! Trakt gives (auth.trakt.tv/activate) on a phone, so nothing has to be typed on the TV.
+//! It works without an app secret (checked against Trakt in October 2026).
 //!
 //! Trakt needs a registered app (from trakt.tv/oauth/applications). New apps are public
 //! ones (PKCE) with only an ID; older apps also have a secret, which is sent when given.
@@ -147,7 +148,7 @@ impl Client {
         Ok(DeviceCode {
             device_code: v["device_code"].as_str().unwrap_or_default().to_owned(),
             user_code: v["user_code"].as_str().unwrap_or_default().to_owned(),
-            url: v["verification_url"].as_str().unwrap_or("https://trakt.tv/activate").to_owned(),
+            url: v["verification_url"].as_str().unwrap_or("https://auth.trakt.tv/activate").to_owned(),
             interval: v["interval"].as_u64().unwrap_or(5),
             expires_in: v["expires_in"].as_u64().unwrap_or(600),
         })

@@ -8,7 +8,7 @@ subscribe = ["playback"]
 key = "connect"
 label = "Connect to Trakt"
 type = "button"
-detail = "Shows a code to enter at trakt.tv/activate on your phone"
+detail = "Shows a code to enter on Trakt's site on your phone"
 
 [[settings]]
 key = "scrobble"
