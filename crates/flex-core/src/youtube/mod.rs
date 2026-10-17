@@ -6,6 +6,7 @@
 
 pub mod feeds;
 pub mod sponsorblock;
+pub mod store;
 pub mod tools;
 
 use std::path::{Path, PathBuf};
