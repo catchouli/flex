@@ -316,6 +316,9 @@ impl Player {
                         return Some(Nav::Pop);
                     }
                     yt.loaded = true;
+                    // Where playback starts, so a segment right there (e.g. a sponsor read
+                    // at 0:00) counts as played into.
+                    yt.last_pos = Some(self.req.start.unwrap_or(0.0));
                 }
                 Some(Err(e)) => {
                     let e = e.clone();
