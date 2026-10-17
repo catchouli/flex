@@ -164,7 +164,33 @@ const MIGRATIONS: &[&str] = &[
         rel_path   TEXT NOT NULL,
         mtime      INTEGER NOT NULL, -- nanoseconds; 0 = read it again
         PRIMARY KEY (library_id, rel_path)
-    ) WITHOUT ROWID;"
+    ) WITHOUT ROWID;",
+    // 12: YouTube: subscribed channels, their recent videos (from RSS) and watch progress
+    "CREATE TABLE yt_channels (
+        id         TEXT PRIMARY KEY, -- UC...
+        title      TEXT NOT NULL,
+        added_at   INTEGER NOT NULL,
+        checked_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE yt_videos (
+        id         TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        channel    TEXT NOT NULL,
+        published  INTEGER NOT NULL,
+        short      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX yt_videos_channel ON yt_videos (channel_id, published);
+    CREATE INDEX yt_videos_published ON yt_videos (published);
+    CREATE TABLE yt_progress (
+        id         TEXT PRIMARY KEY,
+        title      TEXT NOT NULL,
+        channel    TEXT NOT NULL,
+        position   REAL,              -- NULL: not started, or finished
+        duration   REAL,
+        watched    INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+    );"
 ];
 
 /// What MusicBrainz said about one album.
@@ -261,7 +287,7 @@ pub struct ScanSummary {
 }
 
 pub struct Db {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Db {

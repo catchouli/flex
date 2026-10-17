@@ -15,6 +15,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, Rect, TextStyle, pos2, v
 use eframe::egui_glow;
 use eframe::glow::{self, HasContext};
 
+use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_plugin::{Light, Playback, PlaybackState};
 
 use crate::ambient::Margins;
@@ -72,6 +73,17 @@ pub struct Player {
     osd_panel: Option<Rect>,
     /// While the seek bar is held: the position under the mouse, and when it last seeked.
     drag: Option<(f64, f64)>,
+    /// For a YouTube video: its streams are found in the background, then loaded.
+    youtube: Option<YouTubePlay>,
+}
+
+struct YouTubePlay {
+    id: String,
+    loaded: bool,
+    /// SponsorBlock segments to skip, once known.
+    segments: Option<Vec<Segment>>,
+    /// Position at the last check, to tell playing into a segment from seeking into it.
+    last_pos: Option<f64>,
 }
 
 impl Player {
@@ -84,7 +96,10 @@ impl Player {
             mpv.set_string("start", &format!("{start:.1}"))?;
         }
         log::info!("playing {}", req.path.display());
-        mpv.load(&req.path)?;
+        let youtube = req.youtube_id().map(|id| YouTubePlay { id: id.to_owned(), loaded: false, segments: None, last_pos: None });
+        if youtube.is_none() {
+            mpv.load(&req.path)?;
+        }
         let now = ctx.input(|i| i.time);
         Ok(Self {
             req,
@@ -105,6 +120,7 @@ impl Player {
             show_stats: false,
             osd_panel: None,
             drag: None,
+            youtube,
         })
     }
 
@@ -285,9 +301,56 @@ impl Player {
         label
     }
 
+    /// YouTube: loads the streams once found, and skips SponsorBlock segments.
+    fn update_youtube(&mut self, sh: &mut Shared, ctx: &egui::Context) -> Option<Nav> {
+        let yt = self.youtube.as_mut()?;
+        if !yt.loaded {
+            match sh.youtube.resolved(&yt.id) {
+                Some(Ok(video)) => {
+                    if self.req.title == "YouTube" {
+                        self.req.title = video.title.clone();
+                    }
+                    log::info!("youtube: playing {} ({:?}p)", video.title, video.height);
+                    if let Err(e) = self.mpv.command(&["loadfile", &video.mpv_url()]) {
+                        sh.toast(format!("Couldn't play that video: {e:#}"));
+                        return Some(Nav::Pop);
+                    }
+                    yt.loaded = true;
+                    // Where playback starts, so a segment right there (e.g. a sponsor read
+                    // at 0:00) counts as played into.
+                    yt.last_pos = Some(self.req.start.unwrap_or(0.0));
+                }
+                Some(Err(e)) => {
+                    let e = e.clone();
+                    sh.toast(format!("Couldn't play that video: {e}"));
+                    return Some(Nav::Pop);
+                }
+                None => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+            }
+            return None;
+        }
+        if yt.segments.is_none() {
+            yt.segments = sh.youtube.segments(&yt.id).map(<[Segment]>::to_vec);
+        }
+        if let (Some(segments), Some(pos)) = (&yt.segments, self.mpv.get_f64("time-pos")) {
+            let skip = yt.last_pos.and_then(|before| sponsorblock::entered(segments, before, pos));
+            if let Some(segment) = skip {
+                let _ = self.mpv.command(&["seek", &format!("{:.3}", segment.end), "absolute"]);
+                sh.toast(format!("Skipped: {}", sponsorblock::category_name(&segment.category)));
+                yt.last_pos = Some(segment.end);
+            } else {
+                yt.last_pos = Some(pos);
+            }
+        }
+        None
+    }
+
     fn draw(&mut self, ui: &mut egui::Ui, sh: &mut Shared) -> Nav {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
+        if let Some(nav) = self.update_youtube(sh, &ctx) {
+            return nav;
+        }
         for event in self.mpv.poll_events() {
             match event {
                 mpv::Event::FileLoaded => {
@@ -369,7 +432,9 @@ impl Player {
         let painter = ui.painter();
         let safe = theme::safe_rect(&ctx);
         if !self.loaded {
-            painter.text(screen.center(), Align2::CENTER_CENTER, "Loading…", TextStyle::Heading.resolve(ui.style()), theme::TEXT);
+            let asking = self.youtube.as_ref().is_some_and(|yt| !yt.loaded);
+            let text = if asking { "Asking YouTube…" } else { "Loading…" };
+            painter.text(screen.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(ui.style()), theme::TEXT);
         }
 
         if self.show_stats {

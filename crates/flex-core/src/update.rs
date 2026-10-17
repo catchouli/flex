@@ -133,9 +133,15 @@ fn pick(release: Release, current: Version) -> Result<Option<Installer>> {
 /// Downloads the installer to `dest`, checking its size and SHA-256. A matching file
 /// already there (from an earlier try) is kept. `progress` gets the bytes downloaded so
 /// far as they arrive.
-pub fn download(installer: &Installer, dest: &Path, mut progress: impl FnMut(u64)) -> Result<()> {
-    if dest.is_file() && file_sha256(dest).is_ok_and(|h| h == installer.sha256) {
-        progress(installer.size);
+pub fn download(installer: &Installer, dest: &Path, progress: impl FnMut(u64)) -> Result<()> {
+    download_verified(&installer.url, &installer.name, installer.size, &installer.sha256, dest, progress)
+}
+
+/// Downloads `url` to `dest`, checking its size and SHA-256 (lowercase hex); `name` is
+/// for messages. A matching file already there is kept. `progress` gets the bytes so far.
+pub fn download_verified(url: &str, name: &str, expected_size: u64, sha256: &str, dest: &Path, mut progress: impl FnMut(u64)) -> Result<()> {
+    if dest.is_file() && file_sha256(dest).is_ok_and(|h| h == sha256) {
+        progress(expected_size);
         return Ok(());
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -144,8 +150,7 @@ pub fn download(installer: &Installer, dest: &Path, mut progress: impl FnMut(u64
         .timeout_recv_body(Some(Duration::from_secs(30 * 60)))
         .build()
         .into();
-    let mut response =
-        agent.get(&installer.url).header("User-Agent", USER_AGENT).call().with_context(|| format!("downloading {}", installer.name))?;
+    let mut response = agent.get(url).header("User-Agent", USER_AGENT).call().with_context(|| format!("downloading {name}"))?;
     let mut body = response.body_mut().as_reader();
     let partial = dest.with_extension("part");
     let mut file = File::create(&partial).with_context(|| format!("creating {}", partial.display()))?;
@@ -153,7 +158,7 @@ pub fn download(installer: &Installer, dest: &Path, mut progress: impl FnMut(u64
     let mut size = 0u64;
     let mut buf = vec![0; 256 * 1024];
     loop {
-        let n = body.read(&mut buf).with_context(|| format!("downloading {}", installer.name))?;
+        let n = body.read(&mut buf).with_context(|| format!("downloading {name}"))?;
         if n == 0 {
             break;
         }
@@ -165,8 +170,8 @@ pub fn download(installer: &Installer, dest: &Path, mut progress: impl FnMut(u64
     file.sync_all()?;
     drop(file);
     let check = || -> Result<()> {
-        ensure!(size == installer.size, "got {size} bytes of {}, expected {}", installer.name, installer.size);
-        ensure!(hex(&hasher.finalize()) == installer.sha256, "{} doesn't match its SHA-256", installer.name);
+        ensure!(size == expected_size, "got {size} bytes of {name}, expected {expected_size}");
+        ensure!(hex(&hasher.finalize()) == sha256, "{name} doesn't match its SHA-256");
         Ok(())
     };
     if let Err(e) = check() {
