@@ -8,6 +8,7 @@
 mod api;
 mod images;
 mod media;
+mod music;
 mod play;
 
 use std::collections::HashMap;
@@ -27,6 +28,11 @@ pub struct LibrarySnapshot {
     pub tree: Arc<Tree>,
     /// None while the library is still being organised into shows.
     pub catalog: Option<Arc<Catalog>>,
+    /// Music libraries: albums and artists, once the tags are read.
+    pub music: Option<Arc<flex_core::music::MusicCatalog>>,
+    /// Music: each album's cover by album key, as the app shows it: `file:<path>` for art
+    /// next to the tracks, or a Cover Art Archive URL.
+    pub covers: Arc<HashMap<String, String>>,
 }
 
 /// Everything the web UI shows. Cheap to build: the big parts are shared `Arc`s.
@@ -107,6 +113,8 @@ impl Server {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, config.port))
             .with_context(|| format!("listening on port {}", config.port))?;
         listener.set_nonblocking(true)?;
+        // The port actually bound (0 in the config picks any free one).
+        let port = listener.local_addr()?.port();
         let db = flex_core::Db::open(&config.db_path)?;
         let agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into();
         let state = Arc::new(State {
@@ -140,8 +148,8 @@ impl Server {
                 }
             });
         })?;
-        log::info!("web UI on port {}", config.port);
-        Ok(Self { state, shutdown: Some(shutdown), thread: Some(thread), port: config.port })
+        log::info!("web UI on port {port}");
+        Ok(Self { state, shutdown: Some(shutdown), thread: Some(thread), port })
     }
 
     /// Replaces what the web UI shows (call whenever the app's libraries change).

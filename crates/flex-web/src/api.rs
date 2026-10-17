@@ -25,6 +25,10 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/subtitles.js", get(|| asset(include_str!("../web/subtitles.js"), "text/javascript; charset=utf-8")))
         .route("/icon.png", get(icon))
         .route("/api/home", get(home))
+        .route("/api/music/{id}", get(crate::music::albums))
+        .route("/api/album/{id}", get(crate::music::album))
+        .route("/cover/{id}", get(crate::music::cover))
+        .route("/music.js", get(|| asset(include_str!("../web/music.js"), "text/javascript; charset=utf-8")))
         .route("/api/library/{id}", get(library))
         .route("/api/show/{library}/{show}", get(show))
         .route("/api/watched", post(set_watched))
@@ -87,6 +91,8 @@ struct LibrarySummary {
     kind: &'static str,
     videos: usize,
     organised: bool,
+    /// Music libraries: albums (not counting loose tracks), once the tags are read.
+    albums: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -121,7 +127,11 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
     // Like the app: per show for organised libraries, per folder for the rest.
     let organised = snapshot.libraries.iter().filter_map(|l| l.catalog.as_deref().map(|c| (&l.lib, &*l.tree, c)));
     let mut items = progress::continue_watching_shows(organised, MAX_CONTINUE);
-    let pending = snapshot.libraries.iter().filter(|l| l.catalog.is_none()).map(|l| (&l.lib, &*l.tree));
+    let pending = snapshot
+        .libraries
+        .iter()
+        .filter(|l| l.catalog.is_none() && l.lib.kind != flex_core::LibraryKind::Music)
+        .map(|l| (&l.lib, &*l.tree));
     items.extend(progress::continue_watching(pending, MAX_CONTINUE));
     // Removed on the TV (hold OK → Remove from Continue Watching): hidden here too.
     let hidden = state.db.lock().unwrap_or_else(|e| e.into_inner()).continue_hidden().unwrap_or_default();
@@ -163,7 +173,8 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
             name: l.lib.name.clone(),
             kind: l.lib.kind.as_str(),
             videos: l.tree.len(),
-            organised: l.catalog.is_some(),
+            organised: l.catalog.is_some() || l.music.is_some(),
+            albums: l.music.as_ref().map(|m| m.albums.iter().filter(|a| !a.singles).count()),
         })
         .collect();
     Json(HomePage { cont, libraries })
