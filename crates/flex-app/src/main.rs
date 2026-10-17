@@ -1,6 +1,7 @@
 // No console window for release builds on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod ambient;
 mod app;
 #[cfg(windows)]
 mod autostart;

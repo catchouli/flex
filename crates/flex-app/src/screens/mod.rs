@@ -13,6 +13,7 @@ pub mod options;
 pub mod picker;
 pub mod person;
 pub mod plex_import;
+pub mod plugins;
 pub mod text_entry;
 pub mod resume;
 pub mod screenshots;
@@ -71,6 +72,11 @@ pub trait Screen {
 
     fn is_player(&self) -> bool {
         false
+    }
+
+    /// For players: what's playing, for plugins subscribed to `playback`.
+    fn playback(&self) -> Option<flex_plugin::Playback> {
+        None
     }
 
     /// For the player: whether `pos` is on its on-screen controls, where a click

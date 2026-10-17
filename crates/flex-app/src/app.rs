@@ -404,6 +404,8 @@ impl eframe::App for FlexApp {
     /// Runs even while the window is hidden, so scans finish without anyone watching.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sh.poll_scans();
+        let playback = self.top().playback();
+        self.sh.poll_plugins(playback);
         self.handle_commands(ctx);
         self.install_update();
     }
@@ -521,6 +523,8 @@ impl eframe::App for FlexApp {
         while let Some(mut screen) = self.stack.pop() {
             screen.on_leave(&mut self.sh);
         }
+        // Gives plugins a moment to turn lights off.
+        self.sh.plugins.shutdown();
     }
 }
 

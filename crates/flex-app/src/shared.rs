@@ -17,6 +17,7 @@ use flex_core::parse::Parsed;
 use flex_core::progress::{self, ContinueItem, Progress};
 use flex_core::search::{Item, SearchIndex};
 use flex_core::{Db, Library, LibraryKind, Tree};
+use flex_plugin::{Playback, PlaybackState};
 
 use crate::mpv::GetProcAddress;
 
@@ -265,6 +266,12 @@ pub struct Shared {
     web_published: Vec<(i64, u64, String)>,
     web_tx: Sender<flex_web::Change>,
     web_rx: Receiver<flex_web::Change>,
+    /// Plugins found on disk (only switched-on ones run).
+    pub plugins: flex_core::plugins::Host,
+    /// Screen colours for plugins subscribed to `light`.
+    pub ambient: crate::ambient::Ambient,
+    /// The last playback state sent to plugins.
+    playback_sent: Option<Playback>,
 }
 
 impl Shared {
@@ -274,6 +281,9 @@ impl Shared {
         let db = Db::open(&db_path)?;
         let (scan_tx, scan_rx) = channel();
         let (web_tx, web_rx) = channel();
+        let waker = ctx.clone();
+        let plugins = flex_core::plugins::Host::new(&flex_core::plugins::plugin_dirs(), &db, move || waker.request_repaint());
+        let ambient = crate::ambient::Ambient::new(|key| db.setting(key).ok().flatten());
         let mut shared = Self {
             ctx: ctx.clone(),
             proc_address,
@@ -301,6 +311,9 @@ impl Shared {
             web_published: Vec::new(),
             web_tx,
             web_rx,
+            plugins,
+            ambient,
+            playback_sent: None,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
         shared.music_artists = Arc::new(shared.db.music_artists(i64::MAX).unwrap_or_default());
@@ -1296,6 +1309,48 @@ impl Shared {
     }
 
     /// Applies finished/progressing scans. Call once per frame.
+    /// Handles plugin messages, tells plugins about playback and updates lights.
+    /// `playback`: what the top screen is playing, if anything.
+    pub fn poll_plugins(&mut self, playback: Option<Playback>) {
+        let mut wait = self.plugins.poll(&self.db);
+        for toast in self.plugins.take_toasts() {
+            self.toast(toast);
+        }
+        let playback = playback.or_else(|| {
+            self.playback_sent.as_ref().map(|_| Playback { state: PlaybackState::Stopped, title: String::new(), kind: String::new() })
+        });
+        if playback != self.playback_sent {
+            if let Some(p) = &playback {
+                self.plugins.send_playback(p);
+            }
+            self.playback_sent = playback.filter(|p| p.state != PlaybackState::Stopped);
+        }
+        let video = self.playback_sent.as_ref().is_some_and(|p| p.kind == "video");
+        if let Some(lights) = self.ambient.tick(&self.plugins, video) {
+            wait = Some(wait.map_or(lights, |w| w.min(lights)));
+        }
+        if let Some(wait) = wait {
+            self.ctx.request_repaint_after(wait);
+        }
+    }
+
+    /// The plugin host with the database it saves settings in.
+    pub fn plugins_mut(&mut self) -> (&mut flex_core::plugins::Host, &Db) {
+        (&mut self.plugins, &self.db)
+    }
+
+    /// Looks for plugins installed since Flex started.
+    pub fn refresh_plugins(&mut self) {
+        self.plugins.refresh(&flex_core::plugins::plugin_dirs(), &self.db);
+    }
+
+    /// Sets Settings → Ambient light option `choice` to its `value`th option.
+    pub fn set_ambient(&mut self, choice: usize, value: usize) {
+        self.ambient.values[choice] = value;
+        self.set_setting(crate::ambient::CHOICES[choice].key, &value.to_string());
+        self.ambient.changed();
+    }
+
     pub fn poll_scans(&mut self) {
         self.auto_scan();
         self.poll_web();

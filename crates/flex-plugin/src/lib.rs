@@ -38,6 +38,8 @@ use std::io::{BufRead, Write};
 use std::sync::{Arc, Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
+/// For [`Settings`] values.
+pub use serde_json;
 
 /// Protocol version, sent in [`HostMessage::Hello`].
 pub const API: u32 = 1;
