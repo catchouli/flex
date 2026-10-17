@@ -116,6 +116,10 @@ only the one that changed.
   brightness (its brightest channel is 255, unless it's black). With several zones they
   go clockwise around the edge of the picture, starting at the bottom left: up the left
   side, across the top, down the right side and back along the bottom.
+- Colours and brightness are in **linear light**: the amount of light per channel,
+  which is what LEDs dimmed by PWM want (half the value gives half the light). Don't
+  send them to a device that expects screen colours as they are, or everything looks
+  washed out; convert each channel to sRGB first (roughly `c^(1/2.2)`).
 - `brightness` runs from 0.0 (off) to 1.0. The colour the user should see is each
   channel multiplied by it. It's sent separately because many lights dim more smoothly
   with their own brightness control than with dark colour values.
