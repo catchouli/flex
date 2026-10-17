@@ -5,6 +5,7 @@
 //! The streams come straight from YouTube's video servers, so there are no ads in them.
 
 pub mod feeds;
+pub mod sponsorblock;
 pub mod tools;
 
 use std::path::{Path, PathBuf};
