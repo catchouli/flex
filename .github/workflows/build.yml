@@ -21,8 +21,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # --workspace: the plugins in plugins/ too. The Trakt plugin's app credentials
-      # (repository secrets) are built in; without them it asks for its own in Settings.
+      # --workspace: the plugins in plugins/ too. The Trakt plugin's app ID (and secret, for
+      # an older Trakt app) come from repository secrets; without them it asks in Settings.
       - name: Build
         run: cargo build --release --locked --workspace
         env:

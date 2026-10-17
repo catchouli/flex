@@ -33,5 +33,6 @@ default = ""
 key = "client_secret"
 label = "Trakt app secret"
 type = "text"
+detail = "Only older Trakt apps have one; leave it empty otherwise"
 secret = true
 default = ""

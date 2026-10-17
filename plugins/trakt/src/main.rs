@@ -5,9 +5,11 @@
 //! Connecting uses Trakt's device sign-in: the plugin shows a code to enter at
 //! trakt.tv/activate on a phone, so nothing has to be typed on the TV.
 //!
-//! Trakt needs a registered app (an ID and secret, from trakt.tv/oauth/applications).
-//! Release builds bring their own (`FLEX_TRAKT_CLIENT_ID`/`_SECRET` at build time); the
-//! plugin's settings can give others. `FLEX_TRAKT_API` points it at another server (tests).
+//! Trakt needs a registered app (from trakt.tv/oauth/applications). New apps are public
+//! ones (PKCE) with only an ID; older apps also have a secret, which is sent when given.
+//! Release builds bring their own (`FLEX_TRAKT_CLIENT_ID`, and `_SECRET` for an older app,
+//! at build time); the plugin's settings can give others. `FLEX_TRAKT_API` points it at
+//! another server (tests).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -77,7 +79,8 @@ impl Auth {
 struct Client {
     base: String,
     id: String,
-    secret: String,
+    /// Only older Trakt apps have one; public (PKCE) apps don't.
+    secret: Option<String>,
 }
 
 struct DeviceCode {
@@ -95,6 +98,14 @@ enum Poll {
 }
 
 impl Client {
+    /// `body` with the app's secret added, if it has one.
+    fn with_secret(&self, mut body: Value) -> Value {
+        if let Some(secret) = &self.secret {
+            body["client_secret"] = json!(secret);
+        }
+        body
+    }
+
     fn agent() -> ureq::Agent {
         ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).build().into()
     }
@@ -143,7 +154,7 @@ impl Client {
     }
 
     fn poll_token(&self, device_code: &str) -> Result<Poll, String> {
-        let body = json!({ "code": device_code, "client_id": self.id, "client_secret": self.secret });
+        let body = self.with_secret(json!({ "code": device_code, "client_id": self.id }));
         let (status, v) = self.call("POST", "/oauth/device/token", Some(&body), None)?;
         match status {
             200 => Auth::from_token(&v).map(Poll::Done).ok_or_else(|| "Trakt sent no token".to_owned()),
@@ -153,15 +164,14 @@ impl Client {
             409 => Err("That code was already used".into()),
             410 => Err("The code expired: press Connect again".into()),
             418 => Err("Connecting was declined on Trakt".into()),
-            other => Err(format!("Trakt said {other} (is the app secret right?)")),
+            other => Err(format!("Trakt said {other} (is the app ID right?)")),
         }
     }
 
     fn refresh(&self, auth: &Auth) -> Result<Auth, String> {
-        let body = json!({
-            "refresh_token": auth.refresh, "client_id": self.id, "client_secret": self.secret,
-            "redirect_uri": REDIRECT, "grant_type": "refresh_token",
-        });
+        let body = self.with_secret(json!({
+            "refresh_token": auth.refresh, "client_id": self.id, "redirect_uri": REDIRECT, "grant_type": "refresh_token",
+        }));
         match self.call("POST", "/oauth/token", Some(&body), None)? {
             (200, v) => {
                 let fresh = Auth::from_token(&v).ok_or("Trakt sent no token")?;
@@ -177,7 +187,7 @@ impl Client {
     }
 
     fn revoke(&self, auth: &Auth) {
-        let body = json!({ "token": auth.access, "client_id": self.id, "client_secret": self.secret });
+        let body = self.with_secret(json!({ "token": auth.access, "client_id": self.id }));
         let _ = self.call("POST", "/oauth/revoke", Some(&body), None);
     }
 }
@@ -230,12 +240,12 @@ impl Trakt {
         Self { settings: Settings::new(), auth: Arc::default(), connecting: Arc::default(), base }
     }
 
-    /// The app's ID and secret: from the settings, else built in.
+    /// The app's ID (and secret, for an older app): from the settings, else built in.
     fn client(&self) -> Option<Client> {
         let setting = |k: &str| self.settings.get(k).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned);
         let built_in = |v: Option<&'static str>| v.filter(|v| !v.is_empty()).map(str::to_owned);
         let id = setting("client_id").or_else(|| built_in(option_env!("FLEX_TRAKT_CLIENT_ID")))?;
-        let secret = setting("client_secret").or_else(|| built_in(option_env!("FLEX_TRAKT_CLIENT_SECRET")))?;
+        let secret = setting("client_secret").or_else(|| built_in(option_env!("FLEX_TRAKT_CLIENT_SECRET")));
         Some(Client { base: self.base.clone(), id, secret })
     }
 
@@ -252,7 +262,7 @@ impl Trakt {
         match (self.auth(), self.client()) {
             (Some(a), _) if !a.username.is_empty() => host.status(true, format!("Connected as {}", a.username)),
             (Some(_), _) => host.status(true, "Connected"),
-            (None, None) => host.status(false, "Needs a Trakt app ID and secret (below)"),
+            (None, None) => host.status(false, "Needs a Trakt app ID (below)"),
             (None, Some(_)) => host.status(true, "Not connected: press Connect to Trakt"),
         }
     }
@@ -281,7 +291,7 @@ impl Trakt {
 
     fn connect(&self, host: &Host) {
         let Some(client) = self.client() else {
-            host.toast("Enter a Trakt app ID and secret first");
+            host.toast("Enter a Trakt app ID first");
             return;
         };
         if self.connecting.swap(true, Ordering::SeqCst) {
@@ -422,6 +432,22 @@ mod tests {
 
     /// A pretend Trakt: answers by path, the device token on the second try, and refuses
     /// the first scrobble with an expired token. Records (path, Authorization, body).
+    #[test]
+    fn public_apps_send_no_secret() {
+        let (base, log) = fake_trakt();
+        let host = Host::new(std::io::sink());
+        let mut trakt = Trakt { base, ..Trakt::new() };
+        let mut settings = Settings::new();
+        settings.insert("client_id".into(), json!("public-id"));
+        trakt.hello(&host, &settings);
+        let client = trakt.client().expect("an ID is enough");
+        assert_eq!(client.secret, None);
+        device_flow(&client, &host, &trakt.auth).unwrap();
+        let log = log.lock().unwrap();
+        let token = log.iter().find(|(p, _, _)| p == "/oauth/device/token").unwrap();
+        assert_eq!(token.2, json!({ "code": "dev1", "client_id": "public-id" }), "no client_secret");
+    }
+
     /// Requests the fake Trakt got: (path, Authorization header, body).
     type Requests = Arc<Mutex<Vec<(String, String, Value)>>>;
 
