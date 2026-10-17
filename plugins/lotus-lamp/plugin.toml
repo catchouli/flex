@@ -1,0 +1,39 @@
+name = "LED strip (Lotus Lamp)"
+description = "Lights a Bluetooth LED strip behind the TV with the colours on screen"
+version = "0.5.1"
+command = "flex-lotus-lamp"
+subscribe = ["light"]
+
+[light]
+zones = 1
+
+[[settings]]
+key = "device"
+label = "Strip"
+type = "choice"
+detail = "OK to change; use Find strips to list them"
+default = ""
+options = [{ id = "", label = "The first one found" }]
+
+[[settings]]
+key = "find"
+label = "Find strips"
+type = "button"
+detail = "Looks for strips nearby for 5 seconds"
+
+[[settings]]
+key = "max_brightness"
+label = "Strip brightness"
+type = "number"
+detail = "The strip's own brightness, before ambient light dims it"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "off_on_exit"
+label = "Turn off when Flex quits"
+type = "bool"
+default = true

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Packages a Windows release: flex.exe plus libmpv and ffmpeg, with every license and
-# where to get the source of the bundled GPL parts.
+# where to get the source of the bundled GPL parts, and the plugins in plugins/ (each
+# plugin's program is expected next to flex.exe).
 #
 #   package.sh <tag, e.g. v0.2.0> <path to flex.exe> <output dir>
 #
@@ -82,6 +83,16 @@ cp "$ROOT/crates/flex-web/web/vendor/jassub/LICENSE.txt" "$DIR/licenses/jassub-L
 JASSUB_VERSION=$(sed -n 's/^JASSUB \([0-9.]*\).*/\1/p' "$ROOT/crates/flex-web/web/vendor/jassub/README.txt")
 
 cp "$EXE" "$DIR/flex.exe"
+# Plugins: plugins/<id>/plugin.toml plus its program. They're off until switched on in
+# Settings → Plugins.
+for MANIFEST in "$ROOT"/plugins/*/plugin.toml; do
+    ID=$(basename "$(dirname "$MANIFEST")")
+    COMMAND=$(sed -n 's/^command *= *"\(.*\)"/\1/p' "$MANIFEST")
+    PROGRAM="$(dirname "$EXE")/$COMMAND.exe"
+    [[ -f $PROGRAM ]] || fail "plugin $ID: no $PROGRAM (build with --workspace)"
+    mkdir -p "$DIR/plugins/$ID"
+    cp "$MANIFEST" "$PROGRAM" "$DIR/plugins/$ID/"
+done
 cp "$LICENSE_FILE" "$DIR/LICENSE.txt"
 (cd "$ROOT" && cargo about generate --fail about.hbs) >"$DIR/licenses/rust-crates.txt"
 
@@ -97,7 +108,10 @@ with the zip: quit Flex (with "Close to system tray" on, right-click the tray ic
 choose Quit, or run "flex.exe --quit"), then replace these files with the new
 release's.
 
-Everything in this folder besides flex.exe is third-party software; see
+The plugins folder has optional add-ons (such as lighting an LED strip behind the TV);
+they only run once switched on in Settings → Plugins.
+
+Everything in this folder besides flex.exe and the plugins is third-party software; see
 THIRD-PARTY-NOTICES.txt.
 EOF
 
@@ -127,7 +141,7 @@ JASSUB $JASSUB_VERSION (built into flex.exe; draws subtitles in the web UI's pla
   dependencies; Liberation Sans (SIL Open Font License) is its default font.
   Source, including those libraries: https://github.com/ThaUnknown/jassub/tree/v$JASSUB_VERSION
 
-Rust crates compiled into flex.exe: licenses/rust-crates.txt
+Rust crates compiled into flex.exe and the plugins: licenses/rust-crates.txt
 EOF
 
 cat >"$OUT/release-notes.md" <<EOF
