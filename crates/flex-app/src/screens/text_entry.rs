@@ -16,6 +16,7 @@ pub enum Purpose {
     PluginSetting(usize, String, bool),
     YouTubeSearch,
     YouTubeChannel,
+    SyncName,
 }
 
 pub struct TextEntry {
@@ -81,6 +82,16 @@ impl TextEntry {
         }
     }
 
+    pub fn sync_name(sh: &Shared) -> Self {
+        Self {
+            purpose: Purpose::SyncName,
+            title: "Name this device".into(),
+            hint: "How other devices show it, e.g. \"TV\" or \"Projector\". Enter to save.".into(),
+            text: sh.sync_name(),
+            focus_pending: true,
+        }
+    }
+
     /// Where to go once saved: search results, or back.
     fn after_save(&self, sh: &mut Shared) -> Nav {
         match self.purpose {
@@ -103,6 +114,11 @@ impl TextEntry {
             }
             Purpose::YouTubeSearch => {
                 anyhow::ensure!(!self.text.trim().is_empty(), "Type something to search for");
+                Ok(())
+            }
+            Purpose::SyncName => {
+                anyhow::ensure!(!self.text.trim().is_empty(), "Type a name first");
+                sh.set_sync_name(&self.text);
                 Ok(())
             }
             Purpose::YouTubeChannel => {
