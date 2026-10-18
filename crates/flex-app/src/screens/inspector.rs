@@ -8,6 +8,7 @@ use flex_core::catalog::PlacedGroup;
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
+use crate::theme;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 fn season_label(season: i32) -> String {
@@ -184,7 +185,9 @@ impl Screen for ShowPicker {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, focused: bool) -> Nav {
+        // Without the top bar the screen gets the whole window: keep to the safe area.
+        let rect = theme::safe_rect(ui.ctx());
         let body = widgets::header(ui.painter(), rect, "Move to another show", &self.key, ui.style());
         let field = Rect::from_min_size(body.min, vec2(body.width().min(700.0), 56.0));
         let edit = egui::TextEdit::singleline(&mut self.filter)

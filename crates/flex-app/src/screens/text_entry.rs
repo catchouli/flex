@@ -7,7 +7,7 @@ use eframe::egui::{self, Key, Rect, TextStyle, Ui, vec2};
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
-use crate::widgets;
+use crate::{theme, widgets};
 
 pub enum Purpose {
     RenameLibrary(i64),
@@ -150,7 +150,9 @@ impl Screen for TextEntry {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, _focused: bool) -> Nav {
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, _focused: bool) -> Nav {
+        // Without the top bar the screen gets the whole window: keep to the safe area.
+        let rect = theme::safe_rect(ui.ctx());
         let body = widgets::header(ui.painter(), rect, &self.title, &self.hint, ui.style());
         let field = Rect::from_min_size(body.min, vec2(body.width().min(900.0), 64.0));
         let edit = egui::TextEdit::singleline(&mut self.text)
