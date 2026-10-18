@@ -1,6 +1,6 @@
 name = "Trakt"
 description = "Keeps your Trakt history up to date with what you watch in Flex"
-version = "0.10.0"
+version = "0.11.0"
 command = "flex-trakt"
 subscribe = ["playback"]
 
