@@ -87,6 +87,21 @@ YouTube also has the quality limit (1080p unless you change it), whether to show
 (hidden by default) and which SponsorBlock categories to skip (sponsors, self-promotion
 and "like and subscribe" reminders by default).
 
+## Picture: upscaling and 60fps
+
+Both are off until you switch them on in Settings → Picture, and then every video library
+uses them unless you switch them off in that library's options.
+
+- **Anime4K upscaling** ([Anime4K](https://github.com/bloc97/Anime4K), bundled with Flex)
+  sharpens lines when lower-resolution video is shown on a bigger screen. It's made for
+  anime but works on anything. *Fast* suits most GPUs; *high quality* needs a strong one.
+- **60fps smoothing** uses [SVP](https://www.svp-team.com) if you have it installed:
+  Flex plays through SVP's own copy of mpv and SVP adds the extra frames, so keep SVP
+  running. Switch it on and restart Flex once. If SVP isn't installed, Flex says so and
+  leaves it off. F2 while playing shows whether SVP has picked the video up.
+
+YouTube videos get neither.
+
 ## Themes
 
 Settings → Theme changes how Flex looks. As well as the usual dark look, there are a few

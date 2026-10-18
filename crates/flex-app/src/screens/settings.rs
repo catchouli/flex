@@ -6,6 +6,7 @@ use flex_core::LibraryKind;
 use super::picker::{FolderPicker, Purpose};
 use super::{Nav, Screen, plugins::Plugins, text_entry::TextEntry};
 use crate::input::{Action, Press};
+use crate::picture::{Upscale, svp};
 use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
@@ -23,9 +24,10 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        // Web access, Plugins, YouTube, skipping openings, Sync, Theme, "Close to system tray" where
-        // there's a tray, "Start with Windows", then "Update automatically" in installed copies.
-        let tray_row = libs + 13;
+        // Web access, Plugins, YouTube, skipping openings, Picture, Sync, Theme, "Close to system
+        // tray" where there's a tray, "Start with Windows", then "Update automatically" in
+        // installed copies.
+        let tray_row = libs + 14;
         let autostart_row = tray_row + usize::from(TRAY);
         let update = crate::update::installed();
         let rows = autostart_row + usize::from(cfg!(windows)) + usize::from(update);
@@ -70,8 +72,9 @@ impl Screen for Settings {
                 sh.set_skip_mode(next);
                 Nav::None
             }
-            ListInput::Activate(i) if i == libs + 11 => Nav::push(super::sync::SyncSettings::default()),
-            ListInput::Activate(i) if i == libs + 12 => Nav::push(super::themes::Themes::default()),
+            ListInput::Activate(i) if i == libs + 11 => Nav::push(PictureSettings::default()),
+            ListInput::Activate(i) if i == libs + 12 => Nav::push(super::sync::SyncSettings::default()),
+            ListInput::Activate(i) if i == libs + 13 => Nav::push(super::themes::Themes::default()),
             ListInput::Activate(i) if TRAY && i == tray_row => {
                 sh.set_close_to_tray(!sh.close_to_tray);
                 Nav::None
@@ -127,6 +130,7 @@ impl Screen for Settings {
             Row::new(Icon::None, format!("Skip openings and endings: {}", sh.skip_mode().label()))
                 .detail("For files with OP/ED chapters · OK to change"),
         );
+        rows.push(Row::new(Icon::None, format!("Picture: {}…", picture_summary(sh))).detail("Anime4K upscaling and 60fps (SVP)"));
         let sync = if sh.sync_dir().is_some() { "on" } else { "off" };
         rows.push(Row::new(Icon::None, format!("Sync with other devices: {sync}…")).detail("Share what you've watched through a shared folder"));
         rows.push(Row::new(Icon::None, format!("Theme: {}…", crate::theme::current().name)).detail("Dark, Final Fantasy VII, Old School RuneScape, Windows 95 and more"));
@@ -159,9 +163,63 @@ pub struct LibraryOptions {
     list: ListState,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum LibraryChoice {
+    Scan,
+    Rescan,
+    Rename,
+    Kind,
+    View,
+    Rematch,
+    Upscale,
+    Smooth,
+    Remove,
+}
+
 impl LibraryOptions {
     fn new(library_id: i64) -> Self {
         Self { library_id, confirm_remove: false, list: ListState::default() }
+    }
+
+    /// The rows, in order. The picture switches only show while they're on in Settings →
+    /// Picture (and not for music).
+    fn choices(&self, sh: &Shared) -> Vec<(Row, LibraryChoice)> {
+        let Some(state) = sh.lib(self.library_id) else { return Vec::new() };
+        let on_off = |on: bool| if on { "on" } else { "off" };
+        let mut out = vec![
+            (Row::new(Icon::Refresh, "Scan for changes").detail("New, moved and deleted files"), LibraryChoice::Scan),
+            (Row::new(Icon::Refresh, "Rescan from scratch").detail("Slower: looks at every file again"), LibraryChoice::Rescan),
+            (Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"), LibraryChoice::Rename),
+            (Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"), LibraryChoice::Kind),
+            (
+                Row::new(Icon::None, match sh.library_view(self.library_id) {
+                    LibraryView::Shows => "Opens in: Shows",
+                    LibraryView::Folders => "Opens in: Folders",
+                })
+                .detail("OK to change"),
+                LibraryChoice::View,
+            ),
+            (Row::new(Icon::Refresh, "Re-match online").detail("Redo automatic matches; keeps your fixes"), LibraryChoice::Rematch),
+        ];
+        if !state.is_music() {
+            if sh.picture_upscale() != Upscale::Off {
+                let on = sh.library_upscale(self.library_id);
+                let row = Row::new(Icon::None, format!("Anime4K upscaling here: {}", on_off(on))).detail("OK to change");
+                out.push((row, LibraryChoice::Upscale));
+            }
+            if sh.picture_smooth() {
+                let on = sh.library_smooth(self.library_id);
+                let row = Row::new(Icon::None, format!("60fps (SVP) here: {}", on_off(on))).detail("OK to change");
+                out.push((row, LibraryChoice::Smooth));
+            }
+        }
+        let remove = if self.confirm_remove {
+            "Press OK again to remove (your files are not touched)"
+        } else {
+            "Remove library"
+        };
+        out.push((Row::new(Icon::Remove, remove), LibraryChoice::Remove));
+        out
     }
 }
 
@@ -172,78 +230,118 @@ impl Screen for LibraryOptions {
         }
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let kind = state.lib.kind;
-        let input = self.list.handle(press, 7);
+        let choices: Vec<LibraryChoice> = self.choices(sh).into_iter().map(|c| c.1).collect();
+        let input = self.list.handle(press, choices.len());
         // Moving off "Remove" cancels a pending confirmation.
-        self.confirm_remove &= self.list.selected == 6;
-        match input {
-            ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::Activate(0) => {
-                sh.start_scan(self.library_id, false);
-                Nav::None
-            }
-            ListInput::Activate(1) => {
-                sh.start_scan(self.library_id, true);
-                Nav::None
-            }
-            ListInput::Activate(2) => Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
-            ListInput::Activate(3) => {
+        self.confirm_remove &= choices.get(self.list.selected) == Some(&LibraryChoice::Remove);
+        let choice = match input {
+            ListInput::AtTop => return Nav::FocusTopBar,
+            ListInput::Activate(i) => choices[i],
+            ListInput::None => return Nav::None,
+        };
+        match choice {
+            LibraryChoice::Scan => sh.start_scan(self.library_id, false),
+            LibraryChoice::Rescan => sh.start_scan(self.library_id, true),
+            LibraryChoice::Rename => return Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
+            LibraryChoice::Kind => {
                 let i = LibraryKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
                 let next = LibraryKind::ALL[(i + 1) % LibraryKind::ALL.len()];
                 if let Err(e) = sh.set_kind(self.library_id, next) {
                     sh.toast(format!("{e:#}"));
                 }
-                Nav::None
             }
-            ListInput::Activate(4) => {
+            LibraryChoice::View => {
                 let view = match sh.library_view(self.library_id) {
                     LibraryView::Shows => LibraryView::Folders,
                     LibraryView::Folders => LibraryView::Shows,
                 };
                 sh.set_library_view(self.library_id, view);
-                Nav::None
             }
-            ListInput::Activate(5) => {
+            LibraryChoice::Rematch => {
                 sh.rematch(self.library_id);
                 sh.toast("Re-matching… shows you fixed by hand are kept");
-                Nav::None
             }
-            ListInput::Activate(_) if !self.confirm_remove => {
-                self.confirm_remove = true;
-                Nav::None
+            LibraryChoice::Upscale => {
+                let on = !sh.library_upscale(self.library_id);
+                sh.set_library_upscale(self.library_id, on);
             }
-            ListInput::Activate(_) => {
+            LibraryChoice::Smooth => {
+                let on = !sh.library_smooth(self.library_id);
+                sh.set_library_smooth(self.library_id, on);
+            }
+            LibraryChoice::Remove if !self.confirm_remove => self.confirm_remove = true,
+            LibraryChoice::Remove => {
                 if let Err(e) = sh.remove_library(self.library_id) {
                     sh.toast(format!("{e:#}"));
                     return Nav::None;
                 }
                 sh.toast("Library removed");
-                Nav::Pop
+                return Nav::Pop;
             }
-            ListInput::None => Nav::None,
         }
+        Nav::None
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
         let subtitle = format!("{} · {}", state.lib.root.display(), state.status());
         let body = widgets::header(ui.painter(), rect, &state.lib.name, &subtitle, ui.style());
-        let remove = if self.confirm_remove {
-            "Press OK again to remove (your files are not touched)"
-        } else {
-            "Remove library"
+        let rows: Vec<Row> = self.choices(sh).into_iter().map(|c| c.0).collect();
+        widgets::list(ui, body, &rows, &mut self.list, focused);
+        Nav::None
+    }
+}
+
+/// "off", "Anime4K", "Anime4K + 60fps", "60fps".
+fn picture_summary(sh: &Shared) -> &'static str {
+    match (sh.picture_upscale() != Upscale::Off, sh.picture_smooth()) {
+        (false, false) => "off",
+        (true, false) => "Anime4K",
+        (true, true) => "Anime4K + 60fps",
+        (false, true) => "60fps",
+    }
+}
+
+/// Settings → Picture: Anime4K upscaling and 60fps smoothing through SVP, for every
+/// library (each can opt out in its options).
+#[derive(Default)]
+pub struct PictureSettings {
+    list: ListState,
+}
+
+impl Screen for PictureSettings {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        match self.list.handle(press, 2) {
+            ListInput::AtTop => Nav::FocusTopBar,
+            ListInput::Activate(0) => {
+                let next = sh.picture_upscale().next();
+                sh.set_picture_upscale(next);
+                Nav::None
+            }
+            ListInput::Activate(_) => {
+                let on = !sh.picture_smooth();
+                sh.set_picture_smooth(on);
+                Nav::None
+            }
+            ListInput::None => Nav::None,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        let body = widgets::header(ui.painter(), rect, "Picture", "For every library; switch them off in a library's options", ui.style());
+        let upscale = sh.picture_upscale();
+        let smooth = if sh.picture_smooth() { "on" } else { "off" };
+        let svp = match svp::find() {
+            Some(_) => "Adds frames with SVP, which must be running",
+            None => "Needs SVP (svp-team.com), which isn't installed",
         };
         let rows = [
-            Row::new(Icon::Refresh, "Scan for changes").detail("New, moved and deleted files"),
-            Row::new(Icon::Refresh, "Rescan from scratch").detail("Slower: looks at every file again"),
-            Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"),
-            Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"),
-            Row::new(Icon::None, match sh.library_view(self.library_id) {
-                LibraryView::Shows => "Opens in: Shows",
-                LibraryView::Folders => "Opens in: Folders",
-            })
-            .detail("OK to change"),
-            Row::new(Icon::Refresh, "Re-match online").detail("Redo automatic matches; keeps your fixes"),
-            Row::new(Icon::Remove, remove),
+            Row::new(Icon::None, format!("Anime4K upscaling: {}", upscale.label()))
+                .detail("Sharper lines on lower-resolution video, made for anime · OK to change"),
+            Row::new(Icon::None, format!("60fps smoothing: {smooth}")).detail(svp),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

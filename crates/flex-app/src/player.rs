@@ -22,6 +22,7 @@ use flex_plugin::{Light, Playback, PlaybackState};
 use crate::ambient::Margins;
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
+use crate::picture::Picture;
 use crate::screens::{Nav, Screen, up_next::UpNext};
 use crate::shared::{PlayRequest, Shared, SkipMode};
 use crate::theme;
@@ -87,6 +88,8 @@ pub struct Player {
     /// The part the "Skip" button is offering now, and where the button was drawn.
     skip_prompt: Option<Skip>,
     skip_button: Option<Rect>,
+    /// Upscaling and 60fps smoothing for this video.
+    picture: Picture,
 }
 
 struct YouTubePlay {
@@ -99,9 +102,15 @@ struct YouTubePlay {
 }
 
 impl Player {
-    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest) -> Result<Self> {
+    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture) -> Result<Self> {
         let extra = std::env::var(OPTS_ENV).unwrap_or_default();
-        let options: Vec<(&str, &str)> = extra.split(',').filter_map(|kv| kv.split_once('=')).collect();
+        let picture_options = picture.mpv_options();
+        // The test options last, so they win.
+        let options: Vec<(&str, &str)> = picture_options
+            .iter()
+            .map(|(k, v)| (*k, v.as_str()))
+            .chain(extra.split(',').filter_map(|kv| kv.split_once('=')))
+            .collect();
         let mpv = Arc::new(Mpv::new(ctx, &options)?);
         let renderer = Arc::new(Renderer::new(mpv.clone(), proc_address, ctx)?);
         if let Some(start) = req.start.filter(|s| *s > 0.0) {
@@ -138,6 +147,7 @@ impl Player {
             auto_skipped: Vec::new(),
             skip_prompt: None,
             skip_button: None,
+            picture,
         })
     }
 
@@ -327,7 +337,7 @@ impl Player {
         let f = |p: &str| self.mpv.get_f64(p);
         let i = |p: &str| self.mpv.get_i64(p).map_or("-".to_owned(), |v| v.to_string());
         let s = |p: &str| self.mpv.get_string(p).unwrap_or_else(|| "-".to_owned());
-        vec![
+        let mut lines = vec![
             format!("Video: {} {}x{}", s("video-codec"), i("width"), i("height")),
             format!("Decoder: hwdec {}", s("hwdec-current")),
             format!(
@@ -338,7 +348,17 @@ impl Player {
             format!("Sync: {} · speed {:.4}", s("video-sync"), f("speed").unwrap_or(1.0) * f("audio-speed-correction").unwrap_or(1.0)),
             format!("Dropped: {} by output · {} by decoder", i("frame-drop-count"), i("decoder-frame-drop-count")),
             format!("Late frames: {} · mistimed: {}", i("vo-delayed-frame-count"), i("mistimed-frame-count")),
-        ]
+        ];
+        if let Some(picture) = self.picture.describe() {
+            // SVP adds a VapourSynth filter once it has noticed the video.
+            let svp = match s("vf").contains("vapoursynth") {
+                _ if !self.picture.smooth => "",
+                true => " · SVP filter on",
+                false => " · SVP filter not added (is SVP running?)",
+            };
+            lines.push(format!("Picture: {picture}{svp}"));
+        }
+        lines
     }
 
     /// `light`: what the ambient light shows, with a swatch, when it's on.
