@@ -1,13 +1,14 @@
-# Every push and pull request: build and test on Windows and Linux (flex.exe and the
-# plugins, and a Linux .tar.gz, are kept as artifacts for two weeks). A vX.Y.Z tag also
-# packages the Windows build with libmpv and ffmpeg, as a zip and an installer, and
-# publishes them with the Linux .tar.gz as a GitHub release (see .github/scripts/package.sh,
-# package-linux.sh and flex.iss).
+# Every pull request and push to main: build and test on Windows and Linux (flex.exe and
+# the plugins, and a Linux .tar.gz, are kept as artifacts for two weeks). Other branches
+# build through their pull request (or by hand, from the Actions tab), so a branch with a
+# PR isn't built twice. A vX.Y.Z tag also packages the Windows build with libmpv and
+# ffmpeg, as a zip and an installer, and publishes them with the Linux .tar.gz as a
+# GitHub release (see .github/scripts/package.sh, package-linux.sh and flex.iss).
 name: Build
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
