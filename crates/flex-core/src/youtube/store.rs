@@ -75,7 +75,7 @@ impl Db {
 
     /// Saves what a channel's feed listed, and when it was read.
     pub fn save_yt_feed(&mut self, channel_id: &str, title: &str, videos: &[FeedVideo], now: i64) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO yt_videos (id, channel_id, title, channel, published, short) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
