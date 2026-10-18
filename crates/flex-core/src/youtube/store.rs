@@ -145,6 +145,22 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Videos actually played (not only marked watched), most recently first: (id, progress).
+    /// One entry per video, at the last time it was played.
+    pub fn yt_history(&self, limit: usize) -> Result<Vec<(String, WatchProgress)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, channel, position, duration, watched, updated_at FROM yt_progress
+             WHERE duration IS NOT NULL ORDER BY updated_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                WatchProgress { title: r.get(1)?, channel: r.get(2)?, position: r.get(3)?, duration: r.get(4)?, watched: r.get(5)?, updated_at: r.get(6)? },
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Records where playback got to. Past `threshold` (e.g. 0.9) of the way through, the
     /// video counts as watched and won't resume. Returns the saved progress.
     #[allow(clippy::too_many_arguments)]
@@ -268,5 +284,19 @@ mod tests {
         db.set_yt_watched("v", "T", "C", false, 14).unwrap();
         assert!(!db.yt_progress("v").unwrap().unwrap().watched);
         assert_eq!(db.yt_progress_all().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn history_lists_played_videos_newest_first() {
+        let db = Db::open_in_memory().unwrap();
+        db.record_yt_progress("a", "A", "C", 60.0, 600.0, 0.9, 10).unwrap();
+        db.record_yt_progress("b", "B", "C", 590.0, 600.0, 0.9, 20).unwrap();
+        // Marked watched from a list without being played: not history.
+        db.set_yt_watched("c", "C", "C", true, 30).unwrap();
+        let ids = |db: &Db| db.yt_history(10).unwrap().into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(&db), ["b", "a"]);
+        db.record_yt_progress("a", "A", "C", 120.0, 600.0, 0.9, 40).unwrap();
+        assert_eq!(ids(&db), ["a", "b"], "playing again moves it to the top");
+        assert_eq!(db.yt_history(1).unwrap().len(), 1);
     }
 }

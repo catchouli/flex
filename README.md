@@ -62,7 +62,7 @@ what you've watched: Settings → Sync with other devices, then pick a folder th
 reach, like a folder on your NAS. Each Flex keeps its own libraries (pointing at wherever
 the media is on that machine, as long as the libraries have the same names) and they
 swap watched state, resume points, history, the watchlist, matches you fixed by hand and
-YouTube subscriptions through that folder every 30 seconds or so.
+YouTube subscriptions and what you've watched there through that folder every 30 seconds or so.
 
 ## YouTube
 
@@ -77,7 +77,8 @@ Add channels under Channels by pasting a link or an @handle, or import your exis
 subscriptions from Google Takeout (`subscriptions.csv`), FreeTube, NewPipe or an OPML
 file. New videos are picked up from each channel's feed every half an hour, so there's no
 API key to set up. Search works too, either on the YouTube page or from the main search
-(pick the YouTube scope at the top of the results).
+(pick the YouTube scope at the top of the results). History lists the videos you've
+played, most recent first.
 
 Videos take a few seconds to start, since yt-dlp has to ask YouTube for them first, but
 Flex starts on whichever video you have highlighted, so it's usually ready by the time you

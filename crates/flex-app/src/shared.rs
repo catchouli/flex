@@ -1744,6 +1744,10 @@ impl Shared {
         self.db.yt_progress(id).ok().flatten()
     }
 
+    pub fn yt_history(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
+        self.db.yt_history(limit).unwrap_or_default()
+    }
+
     pub fn yt_progress_all(&self) -> HashMap<String, flex_core::youtube::store::WatchProgress> {
         self.db.yt_progress_all().unwrap_or_default()
     }
