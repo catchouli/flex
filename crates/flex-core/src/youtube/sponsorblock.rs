@@ -30,6 +30,21 @@ pub fn default_categories() -> Vec<String> {
     CATEGORIES.iter().filter(|c| c.2).map(|c| c.0.to_owned()).collect()
 }
 
+/// A category's colour on the seek bar (SponsorBlock's own defaults).
+pub fn category_colour(id: &str) -> [u8; 3] {
+    match id {
+        "sponsor" => [0x00, 0xd4, 0x00],
+        "selfpromo" => [0xff, 0xff, 0x00],
+        "interaction" => [0xcc, 0x00, 0xff],
+        "intro" => [0x00, 0xff, 0xff],
+        "outro" => [0x02, 0x02, 0xed],
+        "preview" => [0x00, 0x8f, 0xd6],
+        "filler" => [0x73, 0x00, 0xff],
+        "music_offtopic" => [0xff, 0x99, 0x00],
+        _ => [0xcc, 0xcc, 0xcc],
+    }
+}
+
 /// The name of a category, e.g. "Sponsors".
 pub fn category_name(id: &str) -> &str {
     CATEGORIES.iter().find(|c| c.0 == id).map_or(id, |c| c.1)
@@ -143,6 +158,9 @@ mod tests {
     fn default_categories_are_the_annoying_ones() {
         assert_eq!(default_categories(), ["sponsor", "selfpromo", "interaction"]);
         assert_eq!(category_name("interaction"), "Like/subscribe reminders");
+        // Every category has its own colour.
+        let colours: std::collections::HashSet<[u8; 3]> = CATEGORIES.iter().map(|c| category_colour(c.0)).collect();
+        assert_eq!(colours.len(), CATEGORIES.len());
     }
 
     /// Real network: `cargo test -p flex-core sponsorblock_online -- --ignored --nocapture`.
