@@ -23,6 +23,8 @@ use crate::ambient::Margins;
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
 use crate::picture::Picture;
+use crate::shared::TrackMemory;
+use flex_core::language;
 use crate::screens::{Nav, Screen, up_next::UpNext};
 use crate::shared::{PlayRequest, Shared, SkipMode};
 use crate::theme;
@@ -71,8 +73,11 @@ pub struct Player {
     message: Option<(Track, f64)>,
     /// The user changed subtitles: save the new choice once mpv has applied it.
     sub_changed: bool,
-    /// Where this show's own subtitle choice is kept (see [`Shared::subtitle_key`]).
-    sub_key: Option<String>,
+    /// Where this show's own subtitle and audio choices are kept, and its original
+    /// language.
+    tracks_memory: TrackMemory,
+    /// The user changed the audio track: save the new choice once mpv has applied it.
+    audio_changed: bool,
     /// When Up went down, and whether this hold already turned subtitles off.
     up_held: Option<(f64, bool)>,
     /// Display refresh rate last passed to mpv.
@@ -105,7 +110,7 @@ struct YouTubePlay {
 }
 
 impl Player {
-    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture, sub_key: Option<String>) -> Result<Self> {
+    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture, tracks_memory: TrackMemory) -> Result<Self> {
         let extra = std::env::var(OPTS_ENV).unwrap_or_default();
         let picture_options = picture.mpv_options();
         // The test options last, so they win.
@@ -140,7 +145,8 @@ impl Player {
             osd_until: now + OSD_SECS,
             message: None,
             sub_changed: false,
-            sub_key,
+            tracks_memory,
+            audio_changed: false,
             up_held: None,
             display_fps: None,
             show_stats: false,
@@ -255,6 +261,7 @@ impl Player {
             }
             Action::Down if !press.repeat => {
                 self.command(&["cycle", "audio"]);
+                self.audio_changed = true;
                 self.message = Some((Track::Audio, now + MESSAGE_SECS));
             }
             Action::Back if !press.repeat => {
@@ -297,35 +304,42 @@ impl Player {
         }
     }
 
-    /// The current subtitle choice as stored: "off" or title + SUB_SEP + language.
-    fn current_sub(&self) -> String {
-        if self.mpv.get_i64("current-tracks/sub/id").is_none() {
+    /// The current subtitle or audio choice (`kind` "sub" or "audio") as stored: "off" or
+    /// title + SUB_SEP + language.
+    fn current_choice(&self, kind: &str) -> String {
+        if self.mpv.get_i64(&format!("current-tracks/{kind}/id")).is_none() {
             return "off".to_owned();
         }
-        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/sub/{p}")).unwrap_or_default();
+        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/{kind}/{p}")).unwrap_or_default();
         format!("{}{SUB_SEP}{}", prop("title"), prop("lang"))
     }
 
-    /// Picks the subtitle track that best matches the remembered choice (this show's, else
-    /// the last one anywhere), if any does.
-    fn apply_saved_sub(&self, sh: &Shared) {
-        let saved = self.sub_key.as_deref().and_then(|key| sh.setting(key)).or_else(|| sh.setting(SUBTITLE_SETTING));
-        let Some(saved) = saved else { return };
-        if saved == "off" {
-            let _ = self.mpv.set_string("sid", "no");
-            return;
-        }
-        let (title, lang) = saved.split_once(SUB_SEP).unwrap_or((&saved, ""));
+    /// The file's tracks of one kind.
+    fn tracks(&self, kind: &str) -> Vec<language::Track> {
         let count = self.mpv.get_i64("track-list/count").unwrap_or(0);
+        (0..count)
+            .filter_map(|i| {
+                let prop = |p: &str| self.mpv.get_string(&format!("track-list/{i}/{p}")).unwrap_or_default();
+                if prop("type") != kind {
+                    return None;
+                }
+                Some(language::Track {
+                    id: self.mpv.get_i64(&format!("track-list/{i}/id"))?,
+                    lang: prop("lang"),
+                    title: prop("title"),
+                    default: self.mpv.get_flag(&format!("track-list/{i}/default")).unwrap_or(false),
+                })
+            })
+            .collect()
+    }
+
+    /// The track that best matches a stored choice (see [`Self::current_choice`]), if any does.
+    fn saved_track(&self, kind: &str, saved: &str) -> Option<i64> {
+        let (title, lang) = saved.split_once(SUB_SEP).unwrap_or((saved, ""));
         let mut best: Option<(u8, i64)> = None;
-        for i in 0..count {
-            let prop = |p: &str| self.mpv.get_string(&format!("track-list/{i}/{p}")).unwrap_or_default();
-            if prop("type") != "sub" {
-                continue;
-            }
-            let Some(id) = self.mpv.get_i64(&format!("track-list/{i}/id")) else { continue };
-            let same_title = !title.is_empty() && prop("title").eq_ignore_ascii_case(title);
-            let same_lang = !lang.is_empty() && prop("lang").eq_ignore_ascii_case(lang);
+        for track in self.tracks(kind) {
+            let same_title = !title.is_empty() && track.title.eq_ignore_ascii_case(title);
+            let same_lang = !lang.is_empty() && track.lang.eq_ignore_ascii_case(lang);
             // Same name matters most; a language-only match only counts if the saved
             // track had no name.
             let score = match (same_title, same_lang) {
@@ -335,11 +349,39 @@ impl Player {
                 _ => 0,
             };
             if score > 0 && best.is_none_or(|(s, _)| score > s) {
-                best = Some((score, id));
+                best = Some((score, track.id));
             }
         }
-        if let Some((_, id)) = best {
+        best.map(|(_, id)| id)
+    }
+
+    /// Picks the subtitle track that best matches the remembered choice (this show's, else
+    /// the last one anywhere), if any does.
+    fn apply_saved_sub(&self, sh: &Shared) {
+        let saved = self.tracks_memory.sub_key.as_deref().and_then(|key| sh.setting(key)).or_else(|| sh.setting(SUBTITLE_SETTING));
+        let Some(saved) = saved else { return };
+        if saved == "off" {
+            let _ = self.mpv.set_string("sid", "no");
+            return;
+        }
+        if let Some(id) = self.saved_track("sub", &saved) {
             let _ = self.mpv.set_string("sid", &id.to_string());
+        }
+    }
+
+    /// Picks the audio track this show was last switched to, else the one in its original
+    /// language (when the library wants that), else leaves the file's default.
+    fn apply_audio(&self, sh: &Shared) {
+        let memory = &self.tracks_memory;
+        let saved = memory.audio_key.as_deref().and_then(|key| sh.setting(key));
+        let id = match (saved, &memory.original_language) {
+            (Some(saved), _) => self.saved_track("audio", &saved),
+            (None, Some(lang)) => language::pick(&self.tracks("audio"), lang),
+            (None, None) => None,
+        };
+        if let Some(id) = id.filter(|id| self.mpv.get_i64("current-tracks/audio/id") != Some(*id)) {
+            log::info!("audio: track {id}");
+            let _ = self.mpv.set_string("aid", &id.to_string());
         }
     }
 
@@ -472,6 +514,7 @@ impl Player {
             match event {
                 mpv::Event::FileLoaded => {
                     self.loaded = true;
+                    self.apply_audio(sh);
                     self.apply_saved_sub(sh);
                 }
                 mpv::Event::EndFile { error: Some(e), .. } => {
@@ -499,11 +542,16 @@ impl Player {
 
         self.hold_up_for_subs_off(&ctx, now);
         if std::mem::take(&mut self.sub_changed) {
-            let current = self.current_sub();
-            if let Some(key) = &self.sub_key {
+            let current = self.current_choice("sub");
+            if let Some(key) = &self.tracks_memory.sub_key {
                 sh.set_setting(key, &current);
             }
             sh.set_setting(SUBTITLE_SETTING, &current);
+        }
+        if std::mem::take(&mut self.audio_changed)
+            && let Some(key) = &self.tracks_memory.audio_key
+        {
+            sh.set_setting(key, &self.current_choice("audio"));
         }
         // Tell mpv the real refresh rate (it can't see the display through the render API).
         if let Some(fps) = sh.display_fps

@@ -171,8 +171,8 @@ impl FlexApp {
             return;
         };
         let picture = self.sh.picture_for(&req);
-        let sub_key = self.sh.subtitle_key(&req);
-        match Player::open(ctx, proc_address, req, picture, sub_key) {
+        let tracks = self.sh.track_memory(&req);
+        match Player::open(ctx, proc_address, req, picture, tracks) {
             Ok(player) => {
                 if replace {
                     self.pop();

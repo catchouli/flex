@@ -7,7 +7,7 @@ use super::picker::{FolderPicker, Purpose};
 use super::{Nav, Screen, plugins::Plugins, text_entry::TextEntry};
 use crate::input::{Action, Press};
 use crate::picture::{Upscale, svp};
-use crate::shared::{LibraryView, Shared, WATCHED_THRESHOLDS};
+use crate::shared::{LibraryAudio, LibraryView, Shared, WATCHED_THRESHOLDS};
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 /// Whether this platform has a system tray (see [`crate::tray`]).
@@ -171,6 +171,7 @@ enum LibraryChoice {
     Kind,
     View,
     Rematch,
+    Audio,
     Upscale,
     Smooth,
     Remove,
@@ -202,6 +203,12 @@ impl LibraryOptions {
             (Row::new(Icon::Refresh, "Re-match online").detail("Redo automatic matches; keeps your fixes"), LibraryChoice::Rematch),
         ];
         if !state.is_music() {
+            let audio = match sh.library_audio(self.library_id) {
+                LibraryAudio::Original => "original language",
+                LibraryAudio::FileDefault => "file's default",
+            };
+            let row = Row::new(Icon::None, format!("Audio: {audio}")).detail("Changing it while watching is remembered per show · OK to change");
+            out.push((row, LibraryChoice::Audio));
             if sh.picture_upscale() != Upscale::Off {
                 let on = sh.library_upscale(self.library_id);
                 let row = Row::new(Icon::None, format!("Anime4K upscaling here: {}", on_off(on))).detail("OK to change");
@@ -260,6 +267,13 @@ impl Screen for LibraryOptions {
             LibraryChoice::Rematch => {
                 sh.rematch(self.library_id);
                 sh.toast("Re-matching… shows you fixed by hand are kept");
+            }
+            LibraryChoice::Audio => {
+                let next = match sh.library_audio(self.library_id) {
+                    LibraryAudio::Original => LibraryAudio::FileDefault,
+                    LibraryAudio::FileDefault => LibraryAudio::Original,
+                };
+                sh.set_library_audio(self.library_id, next);
             }
             LibraryChoice::Upscale => {
                 let on = !sh.library_upscale(self.library_id);

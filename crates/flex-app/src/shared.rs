@@ -158,6 +158,24 @@ pub struct PlayRequest {
     pub start: Option<f64>,
 }
 
+/// Where a video's show keeps its own track choices; see [`Shared::track_memory`].
+#[derive(Clone, Debug, Default)]
+pub struct TrackMemory {
+    pub sub_key: Option<String>,
+    pub audio_key: Option<String>,
+    /// ISO 639-1, when the audio should be in the original language.
+    pub original_language: Option<String>,
+}
+
+/// How a library picks a video's audio track.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LibraryAudio {
+    /// The show or film's original language, when a track is in it.
+    Original,
+    /// Whatever the file marks as its default.
+    FileDefault,
+}
+
 /// The "library" YouTube plays belong to: their path is `youtube:<video id>`.
 pub const YOUTUBE_LIBRARY: i64 = -2;
 const YOUTUBE_PREFIX: &str = "youtube:";
@@ -2163,16 +2181,35 @@ impl Shared {
             .collect()
     }
 
-    /// The setting that keeps a show's own subtitle choice: per show in organised
-    /// libraries, else per folder. None outside libraries (YouTube).
-    pub fn subtitle_key(&self, req: &PlayRequest) -> Option<String> {
-        let state = self.lib(req.library_id)?;
-        if let Some(entry) = state.catalog().and_then(|c| c.show_of_file(req.file_id)) {
-            return Some(format!("last_subtitle:{}:show:{}", req.library_id, entry.show.id));
+    /// Where a video's show keeps its own subtitle and audio choices (per show in
+    /// organised libraries, else per folder), and its original language when its library
+    /// picks audio by that. Nothing outside libraries (YouTube).
+    pub fn track_memory(&self, req: &PlayRequest) -> TrackMemory {
+        let Some(state) = self.lib(req.library_id) else { return TrackMemory::default() };
+        let entry = state.catalog().and_then(|c| c.show_of_file(req.file_id));
+        let place = match (entry, state.tree.file(req.file_id)) {
+            (Some(entry), _) => format!("{}:show:{}", req.library_id, entry.show.id),
+            (None, Some(file)) => format!("{}:dir:{}", req.library_id, file.rel_path.rsplit_once('/').map_or("", |(dir, _)| dir)),
+            (None, None) => return TrackMemory::default(),
+        };
+        let original_language = entry
+            .filter(|_| self.library_audio(req.library_id) == LibraryAudio::Original)
+            .and_then(|e| e.show.original_language.clone())
+            .filter(|l| !l.is_empty());
+        TrackMemory { sub_key: Some(format!("last_subtitle:{place}")), audio_key: Some(format!("last_audio:{place}")), original_language }
+    }
+
+    /// How a library picks the audio track (the original language unless changed).
+    pub fn library_audio(&self, library_id: i64) -> LibraryAudio {
+        match self.setting(&format!("audio:{library_id}")).as_deref() {
+            Some("file") => LibraryAudio::FileDefault,
+            _ => LibraryAudio::Original,
         }
-        let file = state.tree.file(req.file_id)?;
-        let folder = file.rel_path.rsplit_once('/').map_or("", |(dir, _)| dir);
-        Some(format!("last_subtitle:{}:dir:{folder}", req.library_id))
+    }
+
+    pub fn set_library_audio(&mut self, library_id: i64, audio: LibraryAudio) {
+        let value = if audio == LibraryAudio::FileDefault { "file" } else { "original" };
+        self.set_setting(&format!("audio:{library_id}"), value);
     }
 
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {
