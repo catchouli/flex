@@ -8,6 +8,7 @@ use flex_core::catalog::PlacedGroup;
 use super::{Nav, Screen};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
+use crate::theme;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 fn season_label(season: i32) -> String {
@@ -117,7 +118,9 @@ impl Screen for GroupEditor {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, focused: bool) -> Nav {
+        // Without the top bar the screen gets the whole window: keep to the safe area.
+        let rect = theme::safe_rect(ui.ctx());
         let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else { return Nav::Pop };
         if !groups.iter().any(|g| g.key == self.key) {
             return Nav::Pop; // moved elsewhere
