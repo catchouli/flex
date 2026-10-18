@@ -30,6 +30,8 @@ const OSD_SECS: f64 = 3.0;
 /// How often the playback position is saved while playing.
 const SAVE_EVERY_SECS: f64 = 10.0;
 const MESSAGE_SECS: f64 = 2.5;
+/// Holding Up this long turns subtitles off (quicker than cycling through dozens of tracks).
+const SUB_OFF_HOLD_SECS: f64 = 0.6;
 /// While dragging the seek bar, how often to seek to where the mouse is.
 const DRAG_SEEK_SECS: f64 = 0.1;
 /// How far above and below the seek bar it still takes the mouse.
@@ -67,6 +69,8 @@ pub struct Player {
     message: Option<(Track, f64)>,
     /// The user changed subtitles: save the new choice once mpv has applied it.
     sub_changed: bool,
+    /// When Up went down, and whether this hold already turned subtitles off.
+    up_held: Option<(f64, bool)>,
     /// Display refresh rate last passed to mpv.
     display_fps: Option<f64>,
     show_stats: bool,
@@ -124,6 +128,7 @@ impl Player {
             osd_until: now + OSD_SECS,
             message: None,
             sub_changed: false,
+            up_held: None,
             display_fps: None,
             show_stats: false,
             osd_panel: None,
@@ -251,6 +256,27 @@ impl Player {
             self.osd_until = now + OSD_SECS;
         }
         Nav::None
+    }
+
+    /// Turns subtitles off once Up has been held for `SUB_OFF_HOLD_SECS`.
+    fn hold_up_for_subs_off(&mut self, ctx: &egui::Context, now: f64) {
+        if !ctx.input(|i| i.key_down(egui::Key::ArrowUp)) {
+            self.up_held = None;
+            return;
+        }
+        let (since, fired) = self.up_held.get_or_insert((now, false));
+        if *fired {
+            return;
+        }
+        let held = now - *since;
+        if held >= SUB_OFF_HOLD_SECS {
+            *fired = true;
+            let _ = self.mpv.set_string("sid", "no");
+            self.sub_changed = true;
+            self.message = Some((Track::Sub, now + MESSAGE_SECS));
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(SUB_OFF_HOLD_SECS - held));
+        }
     }
 
     /// The current subtitle choice as stored: "off" or title + SUB_SEP + language.
@@ -441,6 +467,7 @@ impl Player {
             }
         }
 
+        self.hold_up_for_subs_off(&ctx, now);
         if std::mem::take(&mut self.sub_changed) {
             sh.set_setting(SUBTITLE_SETTING, &self.current_sub());
         }
