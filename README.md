@@ -156,6 +156,10 @@ Arrows to move, OK to select, Back to go back. Hold OK for more options, and hol
 to quit. Play/pause, stop and next/previous work if your remote has them, and on my
 remote zoom+ toggles fullscreen and zoom- jumps to search.
 
+While a video plays, OK pauses, Left/Right skip back and forward 10 seconds (30 while
+held), Up changes the subtitles and Down the audio track. Holding Up turns subtitles off,
+for when there are dozens of tracks to cycle back through. F2 shows playback stats.
+
 ## Your phone as a remote
 
 Switch on Settings → Web access, then open the address it shows on your phone and tap
