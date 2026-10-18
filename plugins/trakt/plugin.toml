@@ -26,13 +26,5 @@ type = "button"
 key = "client_id"
 label = "Trakt app ID"
 type = "text"
-detail = "Only if this copy of Flex wasn't built with one"
-default = ""
-
-[[settings]]
-key = "client_secret"
-label = "Trakt app secret"
-type = "text"
-detail = "Only older Trakt apps have one; leave it empty otherwise"
-secret = true
+detail = "Only to use your own Trakt app instead of Flex's"
 default = ""

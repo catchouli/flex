@@ -123,6 +123,9 @@ pub struct Media {
     pub season: Option<i32>,
     #[serde(default)]
     pub episode: Option<i32>,
+    /// It's in an Anime library.
+    #[serde(default)]
+    pub anime: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

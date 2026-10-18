@@ -55,7 +55,7 @@ overrides that. Optional:
 Flex runs under Wayland (including kiosk compositors like cage) or X11. There's no tray
 on Linux: closing the window quits.
 
-The plugins folder has optional add-ons (an LED strip behind the TV, Trakt); they only run
+The plugins folder has optional add-ons (an LED strip behind the TV, Trakt, AniList); they only run
 once switched on in Settings → Plugins. The Rust crates' licenses are in licenses/.
 EOF
 

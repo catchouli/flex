@@ -1883,7 +1883,8 @@ impl Shared {
 
     /// A file as plugins see it: the film or episode it's matched to online.
     pub fn media_info(&self, library_id: i64, file_id: i64) -> Option<flex_plugin::Media> {
-        let entry = self.lib(library_id)?.catalog()?.show_of_file(file_id)?;
+        let state = self.lib(library_id)?;
+        let entry = state.catalog()?.show_of_file(file_id)?;
         let (source, id) = entry.show.provider_id.as_deref()?.split_once(':')?;
         let id: u64 = id.parse().ok()?;
         let (tmdb, anilist) = match source {
@@ -1891,7 +1892,8 @@ impl Shared {
             "anilist" => (None, Some(id)),
             _ => return None,
         };
-        let media = flex_plugin::Media { title: entry.show.title.clone(), year: entry.show.year, tmdb, anilist, ..Default::default() };
+        let anime = state.lib.kind == LibraryKind::Anime;
+        let media = flex_plugin::Media { title: entry.show.title.clone(), year: entry.show.year, tmdb, anilist, anime, ..Default::default() };
         if entry.is_series() {
             let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
             Some(flex_plugin::Media { kind: "episode".into(), season: Some(ep.season), episode: ep.number, ..media })

@@ -145,6 +145,15 @@ There's also a [Trakt](https://trakt.tv) plugin, which keeps your Trakt history 
 date with what you watch: switch it on, choose "Connect to Trakt" and enter the code it
 shows at the address it gives (auth.trakt.tv/activate) on your phone.
 
+The [AniList](https://anilist.co) plugin keeps your anime list up to date: once you're
+80% through an episode in an Anime library, the show's progress moves on to it (never
+back), and it's marked completed after the last episode. It finds each show on AniList
+by title and year, then follows AniList's sequels for later seasons (and into "Part 2"
+entries when episode numbers run on). To sign in, switch it on, choose "Sign in to
+AniList" (it opens AniList in a browser on the PC), approve Flex and paste the token
+AniList shows into Token. Tokens last a year; the plugin says when one is about to run
+out.
+
 Flex works out the colour itself and only samples the screen while a light plugin is
 running, so a plugin for a different kind of light only has to pass it on. A plugin is
 just a program that reads and writes lines of JSON, so you can write one in whatever

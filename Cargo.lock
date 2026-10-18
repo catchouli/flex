@@ -1303,6 +1303,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "flex-anilist"
+version = "0.16.0"
+dependencies = [
+ "flex-plugin",
+ "ureq",
+]
+
+[[package]]
 name = "flex-core"
 version = "0.16.0"
 dependencies = [
