@@ -39,6 +39,7 @@ const DRAG_SEEK_SECS: f64 = 0.1;
 const BAR_GRAB: f32 = 20.0;
 /// Extra mpv options for testing, e.g. `FLEX_MPV_OPTS="hwdec=no,profile=fast"`.
 const OPTS_ENV: &str = "FLEX_MPV_OPTS";
+/// The last subtitle choice anywhere, for shows without their own yet.
 const SUBTITLE_SETTING: &str = "last_subtitle";
 /// Separates title and language in the saved subtitle choice.
 const SUB_SEP: char = '\u{1f}';
@@ -70,6 +71,8 @@ pub struct Player {
     message: Option<(Track, f64)>,
     /// The user changed subtitles: save the new choice once mpv has applied it.
     sub_changed: bool,
+    /// Where this show's own subtitle choice is kept (see [`Shared::subtitle_key`]).
+    sub_key: Option<String>,
     /// When Up went down, and whether this hold already turned subtitles off.
     up_held: Option<(f64, bool)>,
     /// Display refresh rate last passed to mpv.
@@ -102,7 +105,7 @@ struct YouTubePlay {
 }
 
 impl Player {
-    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture) -> Result<Self> {
+    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture, sub_key: Option<String>) -> Result<Self> {
         let extra = std::env::var(OPTS_ENV).unwrap_or_default();
         let picture_options = picture.mpv_options();
         // The test options last, so they win.
@@ -137,6 +140,7 @@ impl Player {
             osd_until: now + OSD_SECS,
             message: None,
             sub_changed: false,
+            sub_key,
             up_held: None,
             display_fps: None,
             show_stats: false,
@@ -302,9 +306,11 @@ impl Player {
         format!("{}{SUB_SEP}{}", prop("title"), prop("lang"))
     }
 
-    /// Picks the subtitle track that best matches the remembered choice, if any does.
+    /// Picks the subtitle track that best matches the remembered choice (this show's, else
+    /// the last one anywhere), if any does.
     fn apply_saved_sub(&self, sh: &Shared) {
-        let Some(saved) = sh.setting(SUBTITLE_SETTING) else { return };
+        let saved = self.sub_key.as_deref().and_then(|key| sh.setting(key)).or_else(|| sh.setting(SUBTITLE_SETTING));
+        let Some(saved) = saved else { return };
         if saved == "off" {
             let _ = self.mpv.set_string("sid", "no");
             return;
@@ -493,7 +499,11 @@ impl Player {
 
         self.hold_up_for_subs_off(&ctx, now);
         if std::mem::take(&mut self.sub_changed) {
-            sh.set_setting(SUBTITLE_SETTING, &self.current_sub());
+            let current = self.current_sub();
+            if let Some(key) = &self.sub_key {
+                sh.set_setting(key, &current);
+            }
+            sh.set_setting(SUBTITLE_SETTING, &current);
         }
         // Tell mpv the real refresh rate (it can't see the display through the render API).
         if let Some(fps) = sh.display_fps

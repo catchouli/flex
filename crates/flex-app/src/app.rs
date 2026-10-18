@@ -171,7 +171,8 @@ impl FlexApp {
             return;
         };
         let picture = self.sh.picture_for(&req);
-        match Player::open(ctx, proc_address, req, picture) {
+        let sub_key = self.sh.subtitle_key(&req);
+        match Player::open(ctx, proc_address, req, picture, sub_key) {
             Ok(player) => {
                 if replace {
                     self.pop();

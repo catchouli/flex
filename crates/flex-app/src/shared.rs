@@ -2161,6 +2161,18 @@ impl Shared {
             .collect()
     }
 
+    /// The setting that keeps a show's own subtitle choice: per show in organised
+    /// libraries, else per folder. None outside libraries (YouTube).
+    pub fn subtitle_key(&self, req: &PlayRequest) -> Option<String> {
+        let state = self.lib(req.library_id)?;
+        if let Some(entry) = state.catalog().and_then(|c| c.show_of_file(req.file_id)) {
+            return Some(format!("last_subtitle:{}:show:{}", req.library_id, entry.show.id));
+        }
+        let file = state.tree.file(req.file_id)?;
+        let folder = file.rel_path.rsplit_once('/').map_or("", |(dir, _)| dir);
+        Some(format!("last_subtitle:{}:dir:{folder}", req.library_id))
+    }
+
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {
         let state = self.lib(library_id)?;
         let file = state.tree.file(file_id)?;
