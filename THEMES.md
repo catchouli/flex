@@ -22,7 +22,7 @@ themes/
 ```
 
 The folder's name is the theme's id. A folder with the same name as a built-in theme
-(`dark`, `ff7`, `osrs`, `pokemon`, `win95`, `winxp`, `aqua`, `terminal`, `templeos`,
+(`dark`, `ff7`, `osrs`, `brick`, `pokemon`, `win95`, `winxp`, `aqua`, `terminal`, `templeos`,
 `farmyard`) replaces it. After adding one, use "Look for new themes" in Settings →
 Theme. If a theme has a mistake in it, Flex leaves it out of the list and says why in
 its log.
@@ -120,7 +120,8 @@ The patterns are drawn in code, using the background colour:
 
 | Pattern | Looks like |
 |---|---|
-| `stone` | uneven stone blocks (Old School RuneScape) |
+| `stone` | uneven stone blocks (Brick) |
+| `osrs` | a worn brown panel, framed by stone blocks along the top and bottom and a pillar down each side, in the screen's edges (Old School RuneScape) |
 | `pinstripes` | fine horizontal stripes (Aqua) |
 | `rain` | columns of falling green code (Terminal) |
 | `hills` | rolling hills under soft clouds, in `hill` and `hill_bottom` (Windows XP) |
@@ -128,6 +129,19 @@ The patterns are drawn in code, using the background colour:
 
 A picture is drawn over the gradient and pattern, so a see-through PNG works as a frame
 or overlay.
+
+### Messages and the player's controls
+
+Normally a rounded box in the `overlay` colour. An `[overlay]` section draws them like
+panels instead, with the same keys as `[panel]`, filled with `overlay`:
+
+```toml
+[overlay]
+radius = 0
+gradient = "#bfae86"
+border = { width = 3, colour = "#2b2318" }
+inner_border = { width = 2, colour = "#86745a" }
+```
 
 ### Text
 

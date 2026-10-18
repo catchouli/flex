@@ -325,7 +325,7 @@ impl Player {
             lines.push(format!("Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%", light.brightness * 100.0));
         }
         let rect = Rect::from_min_size(safe.min, vec2(860.0, 32.0 + 36.0 * lines.len() as f32));
-        painter.rect_filled(rect, CornerRadius::same(10), theme::overlay());
+        theme::paint_overlay(painter, rect, 10.0);
         for (n, line) in lines.iter().enumerate() {
             let pos = rect.min + vec2(20.0, 16.0 + 36.0 * n as f32);
             painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::overlay_text());
@@ -538,7 +538,7 @@ impl Player {
                     pos2(safe.center().x, safe.top() + 40.0),
                     galley.size() + vec2(48.0, 24.0),
                 );
-                painter.rect_filled(rect, CornerRadius::same(10), theme::overlay());
+                theme::paint_overlay(painter, rect, 10.0);
                 painter.galley(rect.center() - galley.size() / 2.0, galley, theme::overlay_text());
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(until - now));
             } else {
@@ -584,7 +584,7 @@ impl Player {
         let pos = self.drag.map(|(t, _)| t).or_else(|| self.mpv.get_f64("time-pos")).unwrap_or(0.0);
 
         let painter = ui.painter();
-        painter.rect_filled(panel, CornerRadius::same(14), theme::overlay());
+        theme::paint_overlay(painter, panel, 14.0);
         let mut title_pos = inner.left_top();
         if paused {
             // Pause symbol drawn as two bars: fonts don't reliably have a glyph for it.
@@ -619,7 +619,7 @@ impl Player {
                 let galley = painter.layout_no_wrap(theme::format_time(at(p.x)), font, theme::overlay_text());
                 let x = p.x.clamp(bar.left(), bar.right());
                 let label = Rect::from_center_size(pos2(x, panel.top() - 32.0), galley.size() + vec2(24.0, 12.0));
-                painter.rect_filled(label, CornerRadius::same(8), theme::overlay());
+                theme::paint_overlay(painter, label, 8.0);
                 painter.galley(label.center() - galley.size() / 2.0, galley, theme::overlay_text());
             }
         }

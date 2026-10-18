@@ -129,7 +129,7 @@ impl Screen for Settings {
         );
         let sync = if sh.sync_dir().is_some() { "on" } else { "off" };
         rows.push(Row::new(Icon::None, format!("Sync with other devices: {sync}…")).detail("Share what you've watched through a shared folder"));
-        rows.push(Row::new(Icon::None, format!("Theme: {}…", crate::theme::current().name)).detail("Dark, Final Fantasy VII, RuneScape, Windows 95 and more"));
+        rows.push(Row::new(Icon::None, format!("Theme: {}…", crate::theme::current().name)).detail("Dark, Final Fantasy VII, Old School RuneScape, Windows 95 and more"));
         if TRAY {
             let on = if sh.close_to_tray { "on" } else { "off" };
             rows.push(Row::new(Icon::None, format!("Close to system tray: {on}")).detail("Closing keeps Flex running in the tray, so it opens instantly"));

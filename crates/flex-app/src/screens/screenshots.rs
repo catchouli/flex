@@ -87,10 +87,10 @@ impl Screen for ScreenshotsView {
             }
             let label = format!("{} / {}  ·  {}", i + 1, shots::COUNT, titles.full());
             let font = TextStyle::Small.resolve(&style);
-            let galley = painter.layout_no_wrap(label, font, theme::text());
+            let galley = painter.layout_no_wrap(label, font, theme::overlay_text());
             let pill = Rect::from_min_size(rect.left_bottom() + vec2(40.0, -86.0), galley.size() + vec2(36.0, 20.0));
-            painter.rect_filled(pill, CornerRadius::same(10), theme::overlay());
-            painter.galley(pill.min + vec2(18.0, 10.0), galley, theme::text());
+            theme::paint_overlay(painter, pill, 10.0);
+            painter.galley(pill.min + vec2(18.0, 10.0), galley, theme::overlay_text());
             // A click on the picture goes back to the grid.
             if widgets::hit(ui, rect) == widgets::Hit::Click {
                 self.viewing = None;
