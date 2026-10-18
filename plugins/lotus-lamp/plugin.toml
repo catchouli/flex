@@ -1,6 +1,6 @@
 name = "LED strip (Lotus Lamp)"
 description = "Lights a Bluetooth LED strip behind the TV with the colours on screen"
-version = "0.8.1"
+version = "0.9.0"
 command = "flex-lotus-lamp"
 subscribe = ["light"]
 
