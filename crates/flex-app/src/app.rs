@@ -289,6 +289,49 @@ impl FlexApp {
     }
 
 
+    /// Carries out the phone remote's commands: presses go where the TV remote's would.
+    fn handle_remote(&mut self, ctx: &egui::Context) {
+        use flex_web::remote::{Key, Remote};
+        for command in std::mem::take(&mut self.sh.remote) {
+            match command {
+                Remote::Key(key) => {
+                    let action = match key {
+                        Key::Up => Action::Up,
+                        Key::Down => Action::Down,
+                        Key::Left => Action::Left,
+                        Key::Right => Action::Right,
+                        Key::Ok => Action::Ok,
+                        Key::Back => Action::Back,
+                        Key::PlayPause => Action::PlayPause,
+                        Key::Menu => Action::Menu,
+                    };
+                    let nav = self.route(ctx, Press { action, repeat: false });
+                    self.apply(ctx, nav);
+                }
+                Remote::Play { library_id, file_id } => match self.sh.play_request(library_id, file_id) {
+                    Some(req) => self.play_from_remote(ctx, req),
+                    None => log::warn!("remote: no file {file_id} in library {library_id}"),
+                },
+                Remote::YouTube { id, title } => {
+                    let req = PlayRequest::youtube(&id, &title, None);
+                    self.play_from_remote(ctx, req);
+                }
+                Remote::SubtitlesOff => {
+                    let sh = &mut self.sh;
+                    self.stack.last_mut().expect("never empty").subtitles_off(sh);
+                }
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    /// Plays on the TV, in place of whatever's playing there now.
+    fn play_from_remote(&mut self, ctx: &egui::Context, req: PlayRequest) {
+        self.show_window(ctx);
+        let replace = self.top().is_player();
+        self.play(ctx, req, replace);
+    }
+
     /// Sends a press to the top bar if it has focus, otherwise to the current screen.
     fn route(&mut self, ctx: &egui::Context, press: Press) -> Nav {
         if self.top_bar.focus.is_some() && self.top().shows_top_bar() {
@@ -459,6 +502,7 @@ impl eframe::App for FlexApp {
         let playing = self.top().playback().map(|p| (p, self.top().playing_file()));
         self.sh.poll_plugins(playing);
         self.handle_commands(ctx);
+        self.handle_remote(ctx);
         self.install_update();
     }
 

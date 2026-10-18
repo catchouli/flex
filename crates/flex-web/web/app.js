@@ -1,4 +1,5 @@
-// Flex web UI: Home, a library's shows, a show's episodes, and music (music.js). Plain
+// Flex web UI: Home, a library's shows, a show's episodes, music (music.js) and the phone
+// remote (remote.js). Plain
 // DOM, no framework, so it stays quick on a slow mini PC. Works by touch, mouse, or arrow keys + Enter
 // (a TV remote); Escape/Backspace goes back.
 "use strict";
@@ -227,7 +228,11 @@ function episode(show, e) {
       class: `w${e.watched ? " on" : ""}`, "data-key": `w${e.file}`, title: e.watched ? "Watched" : "Not watched",
       "aria-label": e.watched ? "Mark as unwatched" : "Mark as watched", "aria-pressed": e.watched ? "true" : "false",
       onclick: () => mark(show.library, [e.file], !e.watched),
-    }, "✓"));
+    }, "✓"),
+    h("button", {
+      class: "w tv", "data-key": `tv${e.file}`, title: "Play on the TV", "aria-label": "Play on the TV",
+      onclick: () => Remote.playOnTv(show.library, e.file),
+    }, "📺"));
 }
 
 /** "Resume S1E3", "Play S1E4" or "Play": the show's next episode (or the film). */
@@ -237,7 +242,10 @@ function playNext(data, all) {
   const season = data.seasons.find((s) => s.episodes.includes(next))?.season;
   const code = data.series && next.number !== null && season ? ` S${season}E${next.number} · ${next.title}` : "";
   const verb = next.remaining !== null ? "Resume" : "Play";
-  return h("a", { class: "btn primary", href: `#/play/${data.library}/${next.file}`, "data-key": "play" }, `▶ ${verb}${code}`);
+  return [
+    h("a", { class: "btn primary", href: `#/play/${data.library}/${next.file}`, "data-key": "play" }, `▶ ${verb}${code}`),
+    h("button", { class: "btn", "data-key": "tv", onclick: () => Remote.playOnTv(data.library, next.file) }, "📺 On the TV"),
+  ];
 }
 
 async function mark(library, files, watched) {
@@ -258,6 +266,7 @@ const ROUTES = [
   [/^#\/show\/(\d+)\/(\d+)$/, (m) => showPage(m[1], m[2])],
   [/^#\/music\/(\d+)$/, (m) => Music.albumsPage(m[1])],
   [/^#\/album\/(\d+)\/(.+)$/, (m) => Music.albumPage(m[1], decodeURIComponent(m[2]))],
+  [/^#\/remote$/, () => Remote.page()],
   [/^#\/play\/(\d+)\/(\d+)(?:\?t=([\d.]+))?$/, (m) => Player.page(m[1], m[2], m[3] === undefined ? null : Number(m[3]))],
 ];
 
@@ -371,5 +380,11 @@ addEventListener("keydown", (e) => {
   }
 });
 addEventListener("pointerdown", () => (usingKeys = false));
+
+// Installable as an app (Chrome only allows this over HTTPS, or for an address marked
+// as secure in chrome://flags; see the README).
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 
 render();

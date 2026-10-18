@@ -87,6 +87,9 @@ pub trait Screen {
         None
     }
 
+    /// For the video player: turns subtitles off (the phone remote's button).
+    fn subtitles_off(&mut self, _sh: &mut Shared) {}
+
     /// For the player: whether `pos` is on its on-screen controls, where a click
     /// shouldn't pause or play.
     fn on_controls(&self, _pos: Pos2) -> bool {

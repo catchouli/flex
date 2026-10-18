@@ -159,3 +159,28 @@ remote zoom+ toggles fullscreen and zoom- jumps to search.
 While a video plays, OK pauses, Left/Right skip back and forward 10 seconds (30 while
 held), Up changes the subtitles and Down the audio track. Holding Up turns subtitles off,
 for when there are dozens of tracks to cycle back through. F2 shows playback stats.
+
+## Your phone as a remote
+
+Switch on Settings → Web access, then open the address it shows on your phone and tap
+📺 Remote. It has the remote's buttons (plus play/pause and "subtitles off"), shows
+what's playing, and searches like the TV does, one scope at a time (Movies & shows, each
+library, Episodes, and YouTube when it's on): tap an episode or video and it plays on
+the TV. Show pages in the web UI get a 📺 button on each episode too. Anyone on
+your home network can use it, as with the rest of the web UI.
+
+It can be installed as an app, so it gets its own icon and opens without the browser's
+bars. Chrome only installs apps from secure (HTTPS) addresses, and Flex's address on your
+home network isn't one, so on Android tell Chrome to trust it, once:
+
+1. In Chrome, open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. Enter Flex's address, e.g. `http://192.168.1.20:8484`, set the flag to Enabled and
+   relaunch Chrome.
+3. Open that address, then ⋮ → Add to home screen → Install.
+
+Without the flag, Add to home screen still makes a shortcut, but it opens in a normal
+Chrome tab.
+
+Firefox for Android only installs web apps from HTTPS addresses and has no such flag, so
+install it with Chrome even if you use Firefox otherwise: the installed app runs on its
+own, whichever browser is your default.

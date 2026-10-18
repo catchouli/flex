@@ -40,6 +40,8 @@ img { display: block; }
   background: var(--row); cursor: pointer;
 }
 .back:hover { background: var(--row-hover); }
+.remote-link { margin-left: 0; }
+.back[hidden] + .remote-link { margin-left: auto; }
 
 main { padding: 0 var(--gutter) 48px; }
 h1 { font-size: 28px; margin: 8px 0 16px; }
@@ -131,7 +133,7 @@ a.btn { display: inline-block; }
 
 .episodes { display: grid; gap: 10px; }
 .ep {
-  display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center;
+  display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center;
   padding: 10px; border-radius: 12px; background: var(--row);
 }
 .ep .play { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: center; border-radius: 8px; }
@@ -151,6 +153,7 @@ a.btn { display: inline-block; }
   cursor: pointer; font-size: 20px; line-height: 1; color: transparent;
 }
 .ep .w.on { border-color: var(--focus); background: var(--focus); color: #000; }
+.ep .w.tv { border-color: transparent; color: inherit; font-size: 20px; }
 
 .toast {
   position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -241,3 +244,30 @@ body.fullscreen main { padding: 0; }
 .pbox h2 { color: var(--text); margin: 4px 0 16px; }
 .pbox.options .optlist { display: grid; gap: 10px; margin: 16px 0; justify-items: start; }
 .pbox.options p { margin: 0; }
+
+/* The phone remote (remote.js) */
+.np { padding: 14px 16px; border-radius: 12px; background: var(--row); display: grid; gap: 6px; }
+.np .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np .bar { position: static; height: 4px; border-radius: 2px; background: #2a2d35; overflow: hidden; }
+.remote { display: grid; gap: 14px; justify-items: center; margin: 22px 0; }
+.dpad { display: grid; grid-template-columns: repeat(3, 76px); grid-template-rows: repeat(3, 76px); gap: 8px; }
+.keys { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.rk {
+  min-width: 76px; min-height: 56px; padding: 0 14px; border: 0; border-radius: 16px; cursor: pointer;
+  background: var(--row); font: inherit; font-size: 22px; color: var(--text);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.rk:active { background: var(--row-hover); transform: scale(.96); }
+.rk.ok { border-radius: 50%; background: var(--focus); color: #000; font-weight: 700; }
+.rk.small { font-size: 15px; min-height: 44px; }
+.scopes { flex-wrap: wrap; margin-bottom: 14px; }
+.hits { display: grid; gap: 8px; }
+.hit, .yt {
+  display: block; width: 100%; text-align: left; padding: 12px 14px; border: 0; border-radius: 12px;
+  background: var(--row); font: inherit; color: var(--text); cursor: pointer;
+}
+.hit:hover, .yt:hover { background: var(--row-hover); }
+.hit .t, .yt .t { font-weight: 600; }
+.hit .d, .yt .d { font-size: 14px; color: var(--dim); }
+.yt { display: grid; grid-template-columns: 128px 1fr; gap: 12px; align-items: center; padding: 8px; }
+.yt img { width: 128px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
