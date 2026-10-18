@@ -118,9 +118,7 @@ impl Screen for GroupEditor {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, focused: bool) -> Nav {
-        // Without the top bar the screen gets the whole window: keep to the safe area.
-        let rect = theme::safe_rect(ui.ctx());
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else { return Nav::Pop };
         if !groups.iter().any(|g| g.key == self.key) {
             return Nav::Pop; // moved elsewhere
@@ -187,7 +185,9 @@ impl Screen for ShowPicker {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, focused: bool) -> Nav {
+        // Without the top bar the screen gets the whole window: keep to the safe area.
+        let rect = theme::safe_rect(ui.ctx());
         let body = widgets::header(ui.painter(), rect, "Move to another show", &self.key, ui.style());
         let field = Rect::from_min_size(body.min, vec2(body.width().min(700.0), 56.0));
         let edit = egui::TextEdit::singleline(&mut self.filter)
