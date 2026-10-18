@@ -17,6 +17,8 @@ pub const QUALITY_SETTING: &str = "youtube_quality";
 pub const SHORTS_SETTING: &str = "youtube_shorts";
 pub const SPONSORBLOCK_SETTING: &str = "youtube_sponsorblock";
 pub const CONTINUE_SETTING: &str = "youtube_continue";
+/// Whether YouTube's page shows only focused channels' videos.
+pub const FOCUSED_SETTING: &str = "youtube_focused_only";
 /// How many part-watched videos Continue Watching keeps, as offered in Settings.
 pub const CONTINUE_LIMITS: [usize; 5] = [0, 3, 5, 10, 20];
 pub const DEFAULT_CONTINUE: usize = 10;

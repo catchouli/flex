@@ -1561,7 +1561,31 @@ impl Shared {
     }
 
     pub fn yt_latest(&self, limit: usize) -> Vec<flex_core::youtube::store::Video> {
-        self.db.yt_latest(limit, self.youtube_shorts()).unwrap_or_default()
+        self.db.yt_latest(limit, self.youtube_shorts(), self.youtube_focused_only()).unwrap_or_default()
+    }
+
+    /// Whether YouTube's page shows only focused channels' videos.
+    pub fn youtube_focused_only(&self) -> bool {
+        self.setting_bool(crate::youtube::FOCUSED_SETTING)
+    }
+
+    pub fn set_youtube_focused_only(&mut self, on: bool) {
+        self.set_setting_bool(crate::youtube::FOCUSED_SETTING, on);
+        self.youtube.version += 1;
+    }
+
+    /// Marks a subscription as one you watch regularly (or not), with a toast.
+    pub fn set_channel_focused(&mut self, id: &str, title: &str, focused: bool) {
+        match self.db.set_yt_channel_focused(id, focused, now_unix()) {
+            Ok(()) if focused => self.toast(format!("{title} is focused")),
+            Ok(()) => self.toast(format!("{title} is no longer focused")),
+            Err(e) => self.toast(format!("Couldn't change {title}: {e:#}")),
+        }
+        self.youtube.version += 1;
+    }
+
+    pub fn is_channel_focused(&self, channel_id: &str) -> bool {
+        self.yt_channels().iter().any(|c| c.id == channel_id && c.focused)
     }
 
     pub fn yt_channel_videos(&self, channel_id: &str, limit: usize) -> Vec<flex_core::youtube::store::Video> {
@@ -1636,15 +1660,21 @@ impl Shared {
         self.yt_channels().iter().any(|c| c.id == channel_id)
     }
 
-    /// Imports a subscription list (Takeout CSV, FreeTube, NewPipe or OPML).
+    /// Imports a subscription list (Takeout CSV, FreeTube, NewPipe, OPML, or the JSON from
+    /// the subscriptions page script). Channels it marks as focused become focused; it
+    /// never unfocuses any.
     pub fn import_subscriptions(&mut self, path: &Path) -> anyhow::Result<usize> {
         let text = std::fs::read_to_string(path)?;
         let found = flex_core::youtube::feeds::parse_subscriptions(&text);
         anyhow::ensure!(!found.is_empty(), "no YouTube channels in that file");
         let now = now_unix();
+        let focused: Vec<String> = self.yt_channels().into_iter().filter(|c| c.focused).map(|c| c.id).collect();
         let mut added = 0;
-        for (id, title) in &found {
-            added += usize::from(self.db.add_yt_channel(id, title, now)?);
+        for sub in &found {
+            added += usize::from(self.db.add_yt_channel(&sub.id, &sub.title, now)?);
+            if sub.focused && !focused.contains(&sub.id) {
+                self.db.set_yt_channel_focused(&sub.id, true, now)?;
+            }
         }
         self.youtube.version += 1;
         let ids = self.yt_channels().into_iter().map(|c| c.id).collect();

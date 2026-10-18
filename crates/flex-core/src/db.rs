@@ -206,7 +206,10 @@ const MIGRATIONS: &[&str] = &[
         key  TEXT NOT NULL,
         at   INTEGER NOT NULL,
         PRIMARY KEY (kind, key)
-    );"
+    );",
+    // 15: YouTube channels marked as focused (watched regularly), and when that changed
+    "ALTER TABLE yt_channels ADD COLUMN focused INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE yt_channels ADD COLUMN focused_at INTEGER NOT NULL DEFAULT 0;"
 ];
 
 /// Now, in SQL (Unix seconds).

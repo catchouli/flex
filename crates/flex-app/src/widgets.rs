@@ -16,6 +16,7 @@ pub enum Icon {
     Add,
     Refresh,
     Remove,
+    Star,
 }
 
 pub struct Row {
@@ -128,6 +129,16 @@ pub fn paint_icon(painter: &Painter, c: Pos2, icon: Icon, color: Color32) {
         Icon::Remove => {
             painter.line_segment([c + vec2(-10.0, -10.0), c + vec2(10.0, 10.0)], Stroke::new(5.0, color));
             painter.line_segment([c + vec2(10.0, -10.0), c + vec2(-10.0, 10.0)], Stroke::new(5.0, color));
+        }
+        Icon::Star => {
+            // A pentagon with a point on each side.
+            let at = |deg: f32, r: f32| c + vec2(0.0, 1.5) + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * r;
+            let inner: Vec<Pos2> = (0..5).map(|i| at(-54.0 + 72.0 * i as f32, 6.5)).collect();
+            painter.add(egui::Shape::convex_polygon(inner.clone(), color, Stroke::NONE));
+            for i in 0..5 {
+                let points = vec![inner[(i + 4) % 5], at(-90.0 + 72.0 * i as f32, 16.0), inner[i]];
+                painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+            }
         }
     }
 }

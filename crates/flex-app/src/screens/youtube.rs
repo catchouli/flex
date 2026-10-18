@@ -228,7 +228,10 @@ pub struct YouTubeHome {
     loaded: Option<u64>,
 }
 
-const HOME_BUTTONS: [&str; 2] = ["Search…", "Channels"];
+/// Search, Channels, and which channels' videos to show.
+fn home_buttons(sh: &Shared) -> [&'static str; 3] {
+    ["Search…", "Channels", if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" }]
+}
 
 impl YouTubeHome {
     fn refresh(&mut self, sh: &Shared) {
@@ -262,9 +265,14 @@ impl Screen for YouTubeHome {
             return Nav::Pop;
         }
         self.refresh(sh);
-        match self.view.handle(press, HOME_BUTTONS.len(), self.items.len()) {
+        match self.view.handle(press, home_buttons(sh).len(), self.items.len()) {
             GridInput::Button(0) => Nav::push(TextEntry::youtube_search()),
-            GridInput::Button(_) => Nav::push(ChannelList::default()),
+            GridInput::Button(1) => Nav::push(ChannelList::default()),
+            GridInput::Button(_) => {
+                let on = !sh.youtube_focused_only();
+                sh.set_youtube_focused_only(on);
+                Nav::None
+            }
             input => video_input(input, &self.items).unwrap_or(Nav::None),
         }
     }
@@ -281,8 +289,12 @@ impl Screen for YouTubeHome {
         };
         let body = widgets::header(ui.painter(), rect, "YouTube", &subtitle, ui.style());
         let items = std::mem::take(&mut self.items);
-        let empty = if channels == 0 { "Nothing here yet" } else { "No new videos" };
-        self.view.ui(ui, sh, body, &HOME_BUTTONS, &items, empty, focused);
+        let empty = match (channels, sh.youtube_focused_only()) {
+            (0, _) => "Nothing here yet",
+            (_, true) if !sh.yt_channels().iter().any(|c| c.focused) => "No focused channels yet: hold OK on one in Channels",
+            _ => "No new videos",
+        };
+        self.view.ui(ui, sh, body, &home_buttons(sh), &items, empty, focused);
         self.items = items;
         Nav::None
     }
@@ -316,7 +328,13 @@ impl Screen for ChannelPage {
             return Nav::Pop;
         }
         self.refresh(sh);
-        match self.view.handle(press, 1, self.items.len()) {
+        let buttons = if sh.is_subscribed(&self.id) { 2 } else { 1 };
+        match self.view.handle(press, buttons, self.items.len()) {
+            GridInput::Button(1) => {
+                let on = !sh.is_channel_focused(&self.id);
+                sh.set_channel_focused(&self.id, &self.title, on);
+                Nav::None
+            }
             GridInput::Button(_) => {
                 if sh.is_subscribed(&self.id) {
                     sh.unsubscribe(&self.id);
@@ -334,11 +352,21 @@ impl Screen for ChannelPage {
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.refresh(sh);
         let subscribed = sh.is_subscribed(&self.id);
-        let body = widgets::header(ui.painter(), rect, &self.title, if subscribed { "Subscribed" } else { "" }, ui.style());
-        let button = if subscribed { "Unsubscribe" } else { "Subscribe" };
+        let channel_focused = sh.is_channel_focused(&self.id);
+        let subtitle = match (subscribed, channel_focused) {
+            (true, true) => "Subscribed · focused",
+            (true, false) => "Subscribed",
+            _ => "",
+        };
+        let body = widgets::header(ui.painter(), rect, &self.title, subtitle, ui.style());
+        let buttons: &[&str] = match (subscribed, channel_focused) {
+            (true, true) => &["Unsubscribe", "Unfocus"],
+            (true, false) => &["Unsubscribe", "Focus"],
+            _ => &["Subscribe"],
+        };
         let empty = if subscribed { "No videos yet (they appear after the next check)" } else { "Subscribe to see their latest videos" };
         let items = std::mem::take(&mut self.items);
-        self.view.ui(ui, sh, body, &[button], &items, empty, focused);
+        self.view.ui(ui, sh, body, buttons, &items, empty, focused);
         self.items = items;
         Nav::None
     }
@@ -415,6 +443,7 @@ enum VideoChoice {
     Watched(bool),
     Channel,
     Subscribe(bool),
+    Focus(bool),
     RemoveFromContinue,
 }
 
@@ -454,6 +483,11 @@ impl VideoOptions {
             let subscribed = sh.is_subscribed(&self.item.channel_id);
             let label = if subscribed { format!("Unsubscribe from {}", self.item.channel) } else { format!("Subscribe to {}", self.item.channel) };
             out.push((Row::new(if subscribed { Icon::Remove } else { Icon::Add }, label), VideoChoice::Subscribe(!subscribed)));
+            if subscribed {
+                let on = sh.is_channel_focused(&self.item.channel_id);
+                let label = if on { format!("Unfocus {}", self.item.channel) } else { format!("Focus {}", self.item.channel) };
+                out.push((Row::new(Icon::Star, label).detail("Channels you watch regularly"), VideoChoice::Focus(!on)));
+            }
         }
         if continuing && sh.yt_continue(usize::MAX).iter().any(|(id, _)| *id == self.item.id) {
             out.push((Row::new(Icon::Remove, "Remove from Continue Watching").detail("Until you watch it again"), VideoChoice::RemoveFromContinue));
@@ -486,6 +520,10 @@ impl Screen for VideoOptions {
                 sh.toast(format!("Unsubscribed from {}", item.channel));
                 Nav::Pop
             }
+            Some(VideoChoice::Focus(on)) => {
+                sh.set_channel_focused(&item.channel_id, &item.channel, on);
+                Nav::Pop
+            }
             Some(VideoChoice::RemoveFromContinue) => {
                 sh.hide_continue(&format!("yt:{}", item.id));
                 Nav::Pop
@@ -502,10 +540,24 @@ impl Screen for VideoOptions {
     }
 }
 
-/// Subscriptions: add one, import a list, or open a channel.
+/// Subscriptions: add one, import a list, show all or only focused ones, or open a
+/// channel. Focused channels come first; holding OK on one focuses or unfocuses it.
 #[derive(Default)]
 pub struct ChannelList {
     list: ListState,
+}
+
+/// Rows above the channels.
+const CHANNEL_LIST_TOP: usize = 3;
+
+/// The channels the list shows: focused ones first, then (unless only focused ones are
+/// shown) the rest, each by name.
+fn listed_channels(sh: &Shared) -> Vec<flex_core::youtube::store::Channel> {
+    let (mut focused, rest): (Vec<_>, Vec<_>) = sh.yt_channels().into_iter().partition(|c| c.focused);
+    if !sh.youtube_focused_only() {
+        focused.extend(rest);
+    }
+    focused
 }
 
 impl Screen for ChannelList {
@@ -513,12 +565,28 @@ impl Screen for ChannelList {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        let channels = sh.yt_channels();
-        match self.list.handle(press, 2 + channels.len()) {
+        let channels = listed_channels(sh);
+        if press.is(Action::Menu) {
+            if let Some(c) = self.list.selected.checked_sub(CHANNEL_LIST_TOP).and_then(|i| channels.get(i)) {
+                sh.set_channel_focused(&c.id, &c.title, !c.focused);
+                // It moves (focused ones come first, or it's no longer shown): keep it
+                // selected if it's still there.
+                if let Some(i) = listed_channels(sh).iter().position(|n| n.id == c.id) {
+                    self.list.select(CHANNEL_LIST_TOP + i);
+                }
+            }
+            return Nav::None;
+        }
+        match self.list.handle(press, CHANNEL_LIST_TOP + channels.len()) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => Nav::push(TextEntry::youtube_channel()),
             ListInput::Activate(1) => Nav::push(FolderPicker::with_purpose(sh, Purpose::YouTubeImport)),
-            ListInput::Activate(i) => match channels.get(i - 2) {
+            ListInput::Activate(2) => {
+                let on = !sh.youtube_focused_only();
+                sh.set_youtube_focused_only(on);
+                Nav::None
+            }
+            ListInput::Activate(i) => match channels.get(i - CHANNEL_LIST_TOP) {
                 Some(c) => Nav::push(ChannelPage::new(&c.id, &c.title)),
                 None => Nav::None,
             },
@@ -527,20 +595,24 @@ impl Screen for ChannelList {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let channels = sh.yt_channels();
-        let subtitle = match channels.len() {
+        let all = sh.yt_channels();
+        let focused_count = all.iter().filter(|c| c.focused).count();
+        let subtitle = match all.len() {
             0 => "No subscriptions yet".to_owned(),
-            n => count(n, "subscription"),
+            n => format!("{} · {focused_count} focused · hold OK on a channel to focus it", count(n, "subscription")),
         };
         let body = widgets::header(ui.painter(), rect, "Channels", &subtitle, ui.style());
+        let show = if sh.youtube_focused_only() { "Show: focused channels" } else { "Show: all channels" };
         let mut rows = vec![
             Row::new(Icon::Add, "Add a channel…").detail("Paste a channel link or @handle"),
             Row::new(Icon::Add, "Import subscriptions…").detail("Google Takeout, FreeTube, NewPipe or OPML"),
+            Row::new(Icon::None, show).detail("OK to change (YouTube's page too)"),
         ];
         let now = now_unix();
-        rows.extend(channels.iter().map(|c| {
-            let detail = if c.checked_at == 0 { "Not checked yet".to_owned() } else { format!("Checked {}", ago(c.checked_at, now)) };
-            Row::new(Icon::Folder, &c.title).detail(detail)
+        rows.extend(listed_channels(sh).iter().map(|c| {
+            let checked = if c.checked_at == 0 { "Not checked yet".to_owned() } else { format!("Checked {}", ago(c.checked_at, now)) };
+            let detail = if c.focused { format!("Focused · {checked}") } else { checked };
+            Row::new(if c.focused { Icon::Star } else { Icon::Folder }, &c.title).detail(detail)
         }));
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
