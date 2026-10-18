@@ -23,6 +23,8 @@ use crate::{theme, widgets};
 
 const POSTER: egui::Vec2 = egui::vec2(320.0, 480.0);
 const BUTTON_H: f32 = 64.0;
+/// Space between the edges of a title's header panel and its text and buttons.
+const HEADER_PAD: f32 = 28.0;
 const SEASON_CARD: egui::Vec2 = egui::vec2(250.0, 100.0);
 const CAST_CARD: egui::Vec2 = egui::vec2(160.0, 300.0);
 const GAP: f32 = 22.0;
@@ -209,14 +211,13 @@ pub(super) fn paint_card(painter: &Painter, rect: Rect, title: &str, sub: &str, 
 }
 
 fn paint_button(painter: &Painter, rect: Rect, label: &str, focused: bool, primary: bool, style: &egui::Style) {
-    let color = if focused {
-        widgets::paint_focusable(painter, rect, true, false)
-    } else {
-        let fill = if primary { Color32::from_rgb(70, 56, 24) } else { theme::panel() };
-        painter.rect_filled(rect, CornerRadius::same(8), fill);
-        theme::text()
-    };
-    painter.text(rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
+    let color = widgets::paint_focusable(painter, rect, focused, false);
+    if primary && !focused {
+        // Play stands out a little: the panel tinted towards the accent.
+        let radius = theme::current().panel.radius.round().clamp(0.0, 255.0) as u8;
+        painter.rect_filled(rect, CornerRadius::same(radius), theme::accent().gamma_multiply(0.18));
+    }
+    theme::panel_shadow_text(painter, rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
 }
 
 fn button_width(painter: &Painter, label: &str, style: &egui::Style) -> f32 {
@@ -458,7 +459,7 @@ impl Screen for TitlePage {
         let mut y = header_h + SECTION_GAP;
         for (kind, _) in &rows {
             match kind {
-                RowKind::Buttons => row_tops.push((header_h - BUTTON_H, header_h)),
+                RowKind::Buttons => row_tops.push((header_h - HEADER_PAD - BUTTON_H, header_h)),
                 RowKind::Seasons => {
                     row_tops.push((y, y + ROW_LABEL_H + SEASON_CARD.y));
                     y += ROW_LABEL_H + SEASON_CARD.y + SECTION_GAP;
@@ -478,14 +479,14 @@ impl Screen for TitlePage {
         let origin = rect.min - vec2(0.0, self.nav.scroll);
         let painter = ui.painter().with_clip_rect(rect);
 
-        // Backdrop behind the header, darkened for legibility.
+        // The header: a panel, with the backdrop showing faintly through it.
+        let header = Rect::from_min_size(origin, vec2(rect.width(), header_h));
         if let Some(path) = &entry.show.backdrop
             && let Some(t) = sh.images.get(path, Size::Backdrop)
         {
-            let backdrop = Rect::from_min_size(origin, vec2(rect.width(), header_h));
-            paint_cover(&painter, backdrop, &t);
-            painter.rect_filled(backdrop, CornerRadius::same(8), Color32::from_black_alpha(205));
+            paint_cover(&painter, header, &t);
         }
+        theme::paint_scrim(&painter, header);
         let poster_rect = Rect::from_min_size(origin, POSTER);
         match entry.show.poster.as_deref().and_then(|p| sh.images.get(p, Size::Poster)) {
             Some(t) => paint_cover(&painter, poster_rect, &t),
@@ -493,16 +494,22 @@ impl Screen for TitlePage {
                 painter.rect_filled(poster_rect, CornerRadius::same(8), theme::panel());
             }
         }
+        // The panel's border goes over the poster's edges.
+        theme::paint_scrim_border(&painter, header);
 
-        // Title, facts, description.
+        // Title, facts, description: the poster fills the panel's left end, the rest is
+        // kept in from its edges.
         let text_left = poster_rect.right() + 44.0;
-        let text_rect = Rect::from_min_max(pos2(text_left, origin.y + 8.0), pos2(rect.right() - 20.0, origin.y + header_h - BUTTON_H - 20.0));
+        let text_rect = Rect::from_min_max(
+            pos2(text_left, origin.y + HEADER_PAD),
+            pos2(rect.right() - HEADER_PAD, origin.y + header_h - HEADER_PAD - BUTTON_H - 20.0),
+        );
         let clip = painter.with_clip_rect(text_rect.intersect(rect));
         let title = match entry.show.year {
             Some(y) => format!("{} ({y})", entry.show.title),
             None => entry.show.title.clone(),
         };
-        clip.text(text_rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(&style), theme::text());
+        clip.text(text_rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(&style), theme::panel_text());
         let mut facts = Vec::new();
         if entry.is_series() {
             let seasons = entry.seasons().iter().filter(|s| **s != 0).count();
@@ -518,11 +525,11 @@ impl Screen for TitlePage {
         if entry.show.state == "unmatched" {
             facts.push("not matched online".into());
         }
-        clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
+        clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::panel_dim());
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
             let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, 124.0), text_rect.max);
             let r = r.with_max_x(r.left() + r.width().min(1100.0));
-            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::text());
+            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::panel_text());
         }
 
         // Rows. `hovered` = (row, item) under the mouse; `arrow_row` = row whose scroll
@@ -540,7 +547,7 @@ impl Screen for TitlePage {
             match kind {
                 RowKind::Buttons => {
                     let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
-                    let row = Rect::from_min_max(pos2(text_left, origin.y + top), pos2(rect.right(), origin.y + top + BUTTON_H));
+                    let row = Rect::from_min_max(pos2(text_left, origin.y + top), pos2(rect.right() - HEADER_PAD, origin.y + top + BUTTON_H));
                     let arrow = button_row(ui, &painter, row, &labels, &mut self.nav.col[0], &mut self.nav.offset[0], &style, |i, r, _| {
                         hit(index, i, r);
                         paint_button(&painter, r, &labels[i], row_focus == Some(i), i == 0 && matches!(buttons[i], Button::Play { .. }), &style);

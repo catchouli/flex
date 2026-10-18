@@ -323,6 +323,9 @@ pub fn dim() -> Color32 {
 pub fn panel() -> Color32 {
     current().colours.panel.0
 }
+pub fn panel_text() -> Color32 {
+    current().panel_text()
+}
 pub fn panel_dim() -> Color32 {
     current().panel_dim()
 }
@@ -522,6 +525,28 @@ pub fn paint_panel(painter: &Painter, rect: Rect, focused: bool, selected: bool)
     }
 }
 
+/// A see-through panel over a picture (e.g. a show's backdrop), for panel text to sit on.
+/// Its border is drawn separately ([`paint_scrim_border`]), so it can go over what's put
+/// on the panel.
+pub fn paint_scrim(painter: &Painter, rect: Rect) {
+    let t = current();
+    let p = &t.panel;
+    let see_through = |c: Color32| {
+        let [r, g, b, _] = c.to_srgba_unmultiplied();
+        Color32::from_rgba_unmultiplied(r, g, b, 225)
+    };
+    rounded_gradient(painter, rect, p.radius, see_through(t.colours.panel.0), p.gradient.map(|c| see_through(c.0)));
+}
+
+/// The border of a [`paint_scrim`] panel (if the theme's panels have one).
+pub fn paint_scrim_border(painter: &Painter, rect: Rect) {
+    let p = &current().panel;
+    let radius = CornerRadius::same(p.radius.round().clamp(0.0, 255.0) as u8);
+    if let Some(b) = &p.border {
+        painter.rect_stroke(rect, radius, Stroke::new(b.width, b.colour.0), StrokeKind::Inside);
+    }
+}
+
 /// The box behind messages and the player's controls: the theme's `[overlay]` style, or a
 /// plain box rounded by `radius`, in the overlay colour.
 pub fn paint_overlay(painter: &Painter, rect: Rect, radius: f32) {
@@ -622,20 +647,30 @@ fn paint_hand(p: &Painter, tip: Pos2, fill: Color32) {
     const S: f32 = 1.35;
     let at = |x: f32, y: f32| tip + vec2(x * S, y * S);
     let rect = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(at(x, y), vec2(w * S, h * S));
-    let outline = Stroke::new(2.5, Color32::from_rgb(40, 40, 48));
+    let outline = Color32::from_rgb(40, 40, 48);
     let shade = Color32::from_rgb((fill.r() as f32 * 0.72) as u8, (fill.g() as f32 * 0.72) as u8, (fill.b() as f32 * 0.8) as u8);
     // Cuff, palm (with curled fingers), thumb and the pointing finger.
     let cuff = rect(-58.0, -11.0, 10.0, 22.0);
     let palm = rect(-50.0, -12.0, 26.0, 26.0);
     let thumb = rect(-36.0, -18.0, 14.0, 9.0);
-    let finger = rect(-32.0, -12.0, 32.0, 10.0);
-    for (r, radius, colour) in [(cuff, 3.0, shade), (palm, 9.0, fill), (thumb, 4.0, fill), (finger, 5.0, fill)] {
-        p.rect(r, CornerRadius::same((radius * S) as u8), colour, outline, StrokeKind::Outside);
+    let finger = rect(-34.0, -12.0, 34.0, 10.0);
+    let parts = [(cuff, 3.0, shade), (palm, 9.0, fill), (thumb, 4.0, fill), (finger, 5.0, fill)];
+    // One outline round the whole hand: every part grown in the outline colour, then
+    // every part filled on top, so the parts merge into one shape.
+    const LINE: f32 = 2.5;
+    for (r, radius, _) in parts {
+        p.rect_filled(r.expand(LINE), CornerRadius::same((radius * S + LINE) as u8), outline);
     }
-    // The curled fingers' edges.
+    for (r, radius, colour) in parts {
+        p.rect_filled(r, CornerRadius::same((radius * S) as u8), colour);
+    }
+    // Where the cuff meets the palm, and the curled fingers' edges under the pointing one.
+    let thin = Stroke::new(2.0, outline);
+    p.line_segment([pos2(palm.left(), palm.top() + 2.0), pos2(palm.left(), palm.bottom() - 2.0)], thin);
     for y in [1.5, 7.5] {
-        p.line_segment([at(-40.0, y), at(-27.0, y)], Stroke::new(2.0, outline.color));
+        p.line_segment([at(-42.0, y), at(-27.0, y)], thin);
     }
+    p.line_segment([at(-34.0, -2.0), at(-12.0, -2.0)], thin);
 }
 
 /// Text with the theme's shadow (if it has one).
@@ -652,7 +687,8 @@ pub fn panel_shadow_text(painter: &Painter, pos: Pos2, align: Align2, s: &str, f
     if current().text.panel_shadow { shadow_text(painter, pos, align, s, font, colour) } else { painter.text(pos, align, s, font, colour) }
 }
 
-/// A screen's title: plain text, or on a title bar. Returns where the title went.
+/// A screen's title: plain text, or on a title bar. Returns where the title (or its bar)
+/// went.
 pub fn paint_title(painter: &Painter, rect: Rect, title: &str, font: FontId) -> Rect {
     let t = current();
     let title = &format!("{}{title}{}", t.header.prefix, t.header.suffix);
@@ -662,11 +698,13 @@ pub fn paint_title(painter: &Painter, rect: Rect, title: &str, font: FontId) -> 
             shadow_text(painter, rect.left_top(), Align2::LEFT_TOP, title, font, colour)
         }
         HeaderKind::Bar => {
-            let bar = Rect::from_min_size(rect.left_top() - vec2(0.0, 4.0), vec2(rect.width(), font.size + 16.0));
+            // Grows upwards, so the layout below stays put.
+            let bar = Rect::from_min_size(rect.left_top() - vec2(0.0, 10.0), vec2(rect.width(), font.size + 28.0));
             let top = t.header.colour.unwrap_or(t.colours.accent).0;
             rounded_gradient(painter, bar, t.header.radius, top, t.header.gradient.map(|c| c.0));
             let colour = t.header.text.unwrap_or(t.colours.on_accent).0;
-            shadow_text(painter, bar.left_center() + vec2(14.0, 0.0), Align2::LEFT_CENTER, title, font, colour)
+            shadow_text(painter, bar.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, title, font, colour);
+            bar
         }
     }
 }
