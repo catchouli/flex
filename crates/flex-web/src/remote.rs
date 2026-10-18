@@ -1,5 +1,6 @@
 //! The phone remote: buttons that press keys in the app, "Play on TV", search (the app's
-//! own search, plus YouTube's when it's on) and what's playing. Commands reach the app as
+//! own search in one scope at a time, like the TV's, or YouTube's when it's on) and what's
+//! playing. Commands reach the app as
 //! [`Change::Remote`]; searches are answered by the app through a reply channel.
 
 use std::sync::Arc;
@@ -37,6 +38,27 @@ pub enum Remote {
     YouTube { id: String, title: String },
     /// Turns subtitles off (holding Up on the TV remote).
     SubtitlesOff,
+}
+
+/// Where the remote searches, like the scopes along the top of the TV's search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// Shows and films in every library.
+    Titles,
+    /// Shows and films in one library.
+    Library(i64),
+    Episodes,
+}
+
+impl Scope {
+    /// "titles", "episodes" or "library:<id>".
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "titles" => Some(Self::Titles),
+            "episodes" => Some(Self::Episodes),
+            _ => s.strip_prefix("library:")?.parse().ok().map(Self::Library),
+        }
+    }
 }
 
 /// A search result from the app, for the remote.
@@ -112,17 +134,23 @@ pub(crate) async fn play(AxState(state): AxState<Arc<State>>, Json(body): Json<P
 #[derive(Deserialize)]
 pub(crate) struct SearchQuery {
     q: String,
+    /// See [`Scope::parse`]; shows and films if left out.
+    scope: Option<String>,
 }
 
-/// The app's search: shows and films, then episodes.
+/// The app's search, in one scope.
 pub(crate) async fn search(AxState(state): AxState<Arc<State>>, Query(query): Query<SearchQuery>) -> Result<Json<Vec<Hit>>, StatusCode> {
+    let scope = match query.scope.as_deref() {
+        None => Scope::Titles,
+        Some(s) => Scope::parse(s).ok_or(StatusCode::BAD_REQUEST)?,
+    };
     let q = query.q.trim().to_owned();
     if q.is_empty() {
         return Ok(Json(Vec::new()));
     }
     let hits = tokio::task::spawn_blocking(move || {
         let (reply, answer) = sync_channel(1);
-        (state.on_change)(Change::Search { query: q, reply });
+        (state.on_change)(Change::Search { query: q, scope, reply });
         // The app answers on its next frame; it may be busy for a moment.
         answer.recv_timeout(Duration::from_secs(5)).ok()
     })
@@ -184,8 +212,8 @@ mod tests {
         let seen: Arc<Mutex<Vec<String>>> = Arc::default();
         let log = seen.clone();
         let server = Server::start(config, Snapshot::default(), move |change| match change {
-            Change::Search { query, reply } => {
-                let hit = Hit { title: format!("Found {query}"), context: "Anime".into(), library: 1, show: None, file: Some(7) };
+            Change::Search { query, scope, reply } => {
+                let hit = Hit { title: format!("Found {query} in {scope:?}"), context: "Anime".into(), library: 1, show: None, file: Some(7) };
                 reply.send(vec![hit]).unwrap();
             }
             Change::Remote(command) => log.lock().unwrap().push(format!("{command:?}")),
@@ -218,7 +246,12 @@ mod tests {
         };
         let (status, body) = get("/api/search?q=frieren");
         assert_eq!(status, 200);
-        assert!(body.contains("Found frieren"), "{body}");
+        assert!(body.contains("Found frieren in Titles"), "{body}");
+        let (_, body) = get("/api/search?q=frieren&scope=library:3");
+        assert!(body.contains("in Library(3)"), "{body}");
+        let (_, body) = get("/api/search?q=frieren&scope=episodes");
+        assert!(body.contains("in Episodes"), "{body}");
+        assert_eq!(get("/api/search?q=frieren&scope=music").0, 400);
 
         server.set_status(Status { playing: Some(NowPlaying { title: "Frieren · S1E3".into(), paused: true, position: Some(60.0), duration: Some(1440.0) }), youtube: false });
         let (_, body) = get("/api/remote");

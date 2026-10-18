@@ -1,5 +1,6 @@
 // The phone remote (#/remote): what's playing on the TV, buttons that press keys in Flex,
-// and search across the libraries (and YouTube, when it's on) with "Play on TV".
+// and search with "Play on TV", in one scope at a time like the TV's search (YouTube is
+// only searched when it's the scope picked).
 "use strict";
 
 const Remote = (() => {
@@ -91,57 +92,62 @@ const Remote = (() => {
       h("div", {}, h("div", { class: "t" }, v.title), h("div", { class: "d" }, `${v.channel}${mins}`)));
   }
 
+  /** The scopes along the top of the results, like the TV's search. */
+  function scopes(libraries, youtube) {
+    return [
+      ["titles", "Movies & shows"],
+      ...libraries.filter((l) => l.kind !== "music").map((l) => [`library:${l.id}`, l.name]),
+      ["episodes", "Episodes"],
+      ...(youtube ? [["youtube", "YouTube"]] : []),
+    ];
+  }
+
   async function page() {
-    let status = await api("/api/remote");
+    let [status, home] = await Promise.all([api("/api/remote"), api("/api/home")]);
     const np = h("div", {}, nowPlaying(status));
-    const local = h("div", { class: "hits" });
-    const youtube = h("div", { class: "hits" });
+    const results = h("div", { class: "hits" });
+    const tabs = h("div", { class: "seasons scopes" });
+    const all = scopes(home.libraries, status.youtube);
+    let scope = all.some(([k]) => k === store("remoteScope")) ? store("remoteScope") : "titles";
     let query = store("remoteQuery") || "";
     let typed = 0;
+    let timer;
 
-    const searchLocal = async (q, mine) => {
-      if (!q) return local.replaceChildren();
+    const run = async (mine) => {
+      if (!query) return results.replaceChildren();
+      const youtube = scope === "youtube";
+      if (youtube) results.replaceChildren(h("p", { class: "empty" }, "Searching YouTube…"));
       try {
-        const hits = await api(`/api/search?q=${encodeURIComponent(q)}`);
+        const found = youtube
+          ? await api(`/api/youtube/search?q=${encodeURIComponent(query)}`)
+          : await api(`/api/search?q=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope)}`);
         if (mine !== typed) return;
-        local.replaceChildren(
-          h("h2", {}, "In your libraries"),
-          hits.length ? hits.map(hitRow) : h("p", { class: "empty" }, "Nothing found."));
+        results.replaceChildren(...(found.length ? found.map(youtube ? videoRow : hitRow) : [h("p", { class: "empty" }, "Nothing found.")]));
       } catch (err) {
-        if (mine === typed) local.replaceChildren(h("p", { class: "empty" }, `Search failed: ${err.message}`));
+        if (mine === typed) results.replaceChildren(h("p", { class: "empty" }, `Search failed: ${err.message}`));
       }
     };
-    const searchYouTube = async (q, mine) => {
-      if (!q || !status.youtube) return youtube.replaceChildren();
-      youtube.replaceChildren(h("h2", {}, "YouTube"), h("p", { class: "empty" }, "Searching YouTube…"));
-      try {
-        const videos = await api(`/api/youtube/search?q=${encodeURIComponent(q)}`);
-        if (mine !== typed) return;
-        youtube.replaceChildren(
-          h("h2", {}, "YouTube"),
-          videos.length ? videos.map(videoRow) : h("p", { class: "empty" }, "Nothing found."));
-      } catch (err) {
-        if (mine === typed) youtube.replaceChildren(h("h2", {}, "YouTube"), h("p", { class: "empty" }, `Search failed: ${err.message}`));
-      }
-    };
-    let localTimer;
-    const changed = (q, now) => {
-      query = q.trim();
-      store("remoteQuery", query);
+    /** Searches the current scope: straight away, or once typing pauses (longer for
+     * YouTube, which is slow because yt-dlp has to ask YouTube). */
+    const search = (now) => {
       const mine = ++typed;
-      clearTimeout(localTimer);
-      localTimer = setTimeout(() => searchLocal(query, mine), now ? 0 : 250);
-      // YouTube is slow (yt-dlp asks YouTube), so it waits for Enter or a pause in typing.
-      if (now) searchYouTube(query, mine);
-      else youtube.replaceChildren(query && status.youtube ? h("p", { class: "empty dim" }, "Press Enter to search YouTube too") : "");
+      clearTimeout(timer);
+      timer = setTimeout(() => run(mine), now ? 0 : scope === "youtube" ? 900 : 250);
     };
+    const showTabs = () =>
+      tabs.replaceChildren(...all.map(([key, label]) =>
+        h("button", {
+          class: `btn${key === scope ? " on" : ""}`, "data-key": `sc-${key}`,
+          onclick: () => { scope = key; store("remoteScope", key); showTabs(); search(true); },
+        }, label)));
+    showTabs();
+
     const box = h("input", {
-      type: "search", placeholder: status.youtube ? "Search your libraries and YouTube" : "Search your libraries",
-      "aria-label": "Search", enterkeyhint: "search", value: query,
-      oninput: (e) => changed(e.target.value, false),
-      onkeydown: (e) => { if (e.key === "Enter") { e.target.blur(); changed(e.target.value, true); } },
+      type: "search", placeholder: "Search", "aria-label": "Search", enterkeyhint: "search", value: query,
+      oninput: (e) => { query = e.target.value.trim(); store("remoteQuery", query); search(false); },
+      onkeydown: (e) => { if (e.key === "Enter") { e.target.blur(); search(true); } },
     });
-    if (query) changed(query, true);
+    if (query) search(true);
 
     // What's playing, every couple of seconds while this page is open.
     const poll = setInterval(async () => {
@@ -154,8 +160,8 @@ const Remote = (() => {
 
     return {
       title: "Remote",
-      content: [h("h1", {}, "Remote"), np, pad(), h("div", { class: "tools" }, box), local, youtube],
-      destroy: () => { clearInterval(poll); clearTimeout(localTimer); typed++; },
+      content: [h("h1", {}, "Remote"), np, pad(), h("div", { class: "tools" }, box), tabs, results],
+      destroy: () => { clearInterval(poll); clearTimeout(timer); typed++; },
     };
   }
 

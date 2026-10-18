@@ -260,6 +260,7 @@ body.fullscreen main { padding: 0; }
 .rk:active { background: var(--row-hover); transform: scale(.96); }
 .rk.ok { border-radius: 50%; background: var(--focus); color: #000; font-weight: 700; }
 .rk.small { font-size: 15px; min-height: 44px; }
+.scopes { flex-wrap: wrap; margin-bottom: 14px; }
 .hits { display: grid; gap: 8px; }
 .hit, .yt {
   display: block; width: 100%; text-align: left; padding: 12px 14px; border: 0; border-radius: 12px;

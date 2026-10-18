@@ -55,7 +55,7 @@ pub enum Change {
     /// From the phone remote.
     Remote(remote::Remote),
     /// The remote's search: the app answers through `reply`.
-    Search { query: String, reply: std::sync::mpsc::SyncSender<Vec<remote::Hit>> },
+    Search { query: String, scope: remote::Scope, reply: std::sync::mpsc::SyncSender<Vec<remote::Hit>> },
 }
 
 pub struct Config {

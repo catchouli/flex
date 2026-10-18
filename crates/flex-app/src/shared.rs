@@ -531,8 +531,8 @@ impl Shared {
                     log::info!("remote: {command:?}");
                     self.remote.push(command);
                 }
-                flex_web::Change::Search { query, reply } => {
-                    let _ = reply.try_send(self.remote_search(&query));
+                flex_web::Change::Search { query, scope, reply } => {
+                    let _ = reply.try_send(self.remote_search(&query, scope));
                 }
             }
         }
@@ -2139,12 +2139,16 @@ impl Shared {
         items
     }
 
-    /// The phone remote's search: shows and films, then episodes.
-    fn remote_search(&mut self, query: &str) -> Vec<flex_web::remote::Hit> {
+    /// The phone remote's search, in one of the scopes the TV's search has.
+    fn remote_search(&mut self, query: &str, scope: flex_web::remote::Scope) -> Vec<flex_web::remote::Hit> {
         use flex_core::search::{Scope, Target};
-        let mut items = self.search(query, Scope::Titles, 25);
-        items.extend(self.search(query, Scope::Episodes, 25));
-        items
+        use flex_web::remote::Scope as Remote;
+        let scope = match scope {
+            Remote::Titles => Scope::Titles,
+            Remote::Library(id) => Scope::Library(id),
+            Remote::Episodes => Scope::Episodes,
+        };
+        self.search(query, scope, 50)
             .into_iter()
             .filter_map(|item| {
                 let (library, show, file) = match item.target {
