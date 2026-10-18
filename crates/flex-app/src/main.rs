@@ -3,6 +3,7 @@
 
 mod ambient;
 mod app;
+mod awake;
 #[cfg(windows)]
 mod autostart;
 mod images;
