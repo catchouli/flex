@@ -209,7 +209,10 @@ const MIGRATIONS: &[&str] = &[
     );",
     // 15: YouTube channels marked as focused (watched regularly), and when that changed
     "ALTER TABLE yt_channels ADD COLUMN focused INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE yt_channels ADD COLUMN focused_at INTEGER NOT NULL DEFAULT 0;"
+    ALTER TABLE yt_channels ADD COLUMN focused_at INTEGER NOT NULL DEFAULT 0;",
+    // 16: a show or film's original language (ISO 639-1; '' when TMDB doesn't say), for
+    // picking its audio track. NULL until the details are next fetched.
+    "ALTER TABLE shows ADD COLUMN original_language TEXT;"
 ];
 
 /// Now, in SQL (Unix seconds).
@@ -263,6 +266,8 @@ pub struct Show {
     pub backdrop: Option<String>,
     /// When details were last fetched (Unix seconds).
     pub details_at: Option<i64>,
+    /// ISO 639-1, e.g. "ja" (empty when TMDB doesn't say).
+    pub original_language: Option<String>,
 }
 
 /// TMDB's title etc. for one episode.
@@ -363,7 +368,7 @@ impl Db {
     pub fn shows(&self, library_id: i64) -> Result<Vec<Show>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, library_id, title, year, provider, provider_id, overview, poster, state,
-                    release_date, runtime, genres, backdrop, details_at
+                    release_date, runtime, genres, backdrop, details_at, original_language
              FROM shows WHERE library_id = ?1",
         )?;
         let rows = stmt.query_map([library_id], |r| {
@@ -382,6 +387,7 @@ impl Db {
                 genres: r.get(11)?,
                 backdrop: r.get(12)?,
                 details_at: r.get(13)?,
+                original_language: r.get(14)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -531,13 +537,15 @@ impl Db {
     }
 
     /// Matched shows whose details are missing or older than `max_age` seconds, or whose
-    /// cast was saved without person ids: (show id, provider id, title, whole details
-    /// needed). When only the cast is needed, episodes needn't be fetched again.
+    /// cast was saved without person ids or original language not yet saved: (show id,
+    /// provider id, title, whole details needed). When only those are needed, episodes
+    /// needn't be fetched again.
     pub fn shows_needing_details(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String, bool)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, provider_id, title, details_at IS NULL OR details_at < strftime('%s', 'now') - ?2 AS stale
              FROM shows
-             WHERE library_id = ?1 AND provider_id IS NOT NULL AND (stale OR cast_ids IS NULL)",
+             WHERE library_id = ?1 AND provider_id IS NOT NULL
+             AND (stale OR cast_ids IS NULL OR original_language IS NULL)",
         )?;
         let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -549,8 +557,9 @@ impl Db {
         let genres = (!d.genres.is_empty()).then(|| d.genres.join(", "));
         tx.execute(
             "UPDATE shows SET overview = ?2, release_date = ?3, runtime = ?4, genres = ?5, backdrop = ?6,
-             poster = COALESCE(?7, poster), details_at = strftime('%s', 'now'), cast_ids = 1 WHERE id = ?1",
-            params![show_id, d.overview, d.release_date, d.runtime, genres, d.backdrop_path, d.poster_path],
+             poster = COALESCE(?7, poster), details_at = strftime('%s', 'now'), cast_ids = 1,
+             original_language = COALESCE(?8, '') WHERE id = ?1",
+            params![show_id, d.overview, d.release_date, d.runtime, genres, d.backdrop_path, d.poster_path, d.original_language],
         )?;
         Self::replace_credits(&tx, provider_id, "cast", &d.cast)?;
         tx.execute("DELETE FROM tv_seasons WHERE provider_id = ?1", [provider_id])?;
@@ -1187,6 +1196,35 @@ mod tests {
     }
 
     #[test]
+    fn original_language_is_filled_in_once() {
+        use crate::metadata::{Candidate, Details, Kind};
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let show = db.create_show(lib, "Show", None).unwrap();
+        let found = Candidate {
+            kind: Kind::Tv,
+            id: 1,
+            title: "Show".into(),
+            original_title: String::new(),
+            year: None,
+            overview: String::new(),
+            poster_path: None,
+            popularity: 0.0,
+            genre_ids: vec![],
+            original_language: "ja".into(),
+        };
+        db.set_show_metadata(show, &found, "matched").unwrap();
+        // Details fetched before the language was saved: only the language is missing.
+        db.save_details(show, "tv:1", &Details { original_language: Some("ja".into()), ..Default::default() }).unwrap();
+        db.conn.execute("UPDATE shows SET original_language = NULL", []).unwrap();
+        assert_eq!(db.shows_needing_details(lib, 3600).unwrap(), [(show, "tv:1".to_owned(), "Show".to_owned(), false)]);
+        // TMDB not saying counts as done.
+        db.save_details(show, "tv:1", &Details::default()).unwrap();
+        assert!(db.shows_needing_details(lib, 3600).unwrap().is_empty());
+        assert_eq!(db.shows(lib).unwrap()[0].original_language.as_deref(), Some(""));
+    }
+
+    #[test]
     fn details_and_episodes_roundtrip() {
         use crate::metadata::{CastMember, Details, EpisodeInfo, SeasonInfo};
         let mut db = Db::open_in_memory().unwrap();
@@ -1198,11 +1236,13 @@ mod tests {
             genres: vec!["Animation".into(), "Comedy".into()],
             cast: vec![CastMember { name: "A".into(), role: "B".into(), image: None, person: Some("tmdb:7".into()) }],
             seasons: vec![SeasonInfo { number: 1, episode_count: 12 }, SeasonInfo { number: 2, episode_count: 12 }],
+            original_language: Some("ja".into()),
             ..Default::default()
         };
         db.save_details(show, "tv:1", &details).unwrap();
         let s = db.shows(lib).unwrap().into_iter().find(|s| s.id == show).unwrap();
         assert_eq!((s.genres.as_deref(), s.runtime), (Some("Animation, Comedy"), Some(24)));
+        assert_eq!(s.original_language.as_deref(), Some("ja"));
         assert!(s.details_at.is_some());
         assert_eq!(db.credits("tv:1", "cast").unwrap()[0].person.as_deref(), Some("tmdb:7"));
         assert_eq!(db.shows_needing_details(lib, 3600).unwrap().len(), 0);

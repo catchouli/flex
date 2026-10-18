@@ -159,7 +159,10 @@ remote zoom+ toggles fullscreen and zoom- jumps to search.
 While a video plays, OK pauses, Left/Right skip back and forward 10 seconds (30 while
 held), Up changes the subtitles and Down the audio track. Holding Up turns subtitles off,
 for when there are dozens of tracks to cycle back through. Each show remembers its own
-subtitle choice (a new show starts with the last one you picked). F2 shows playback stats.
+subtitle choice (a new show starts with the last one you picked) and audio track. Until
+you change it, the audio is in the show or film's original language when the file has
+it (anime in Japanese, say), going by TMDB; a library's options can switch that to the
+file's own default. F2 shows playback stats.
 
 ## Your phone as a remote
 

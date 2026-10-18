@@ -197,6 +197,8 @@ pub struct Details {
     pub cast: Vec<CastMember>,
     /// TV only.
     pub seasons: Vec<SeasonInfo>,
+    /// ISO 639-1, e.g. "ja".
+    pub original_language: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -259,6 +261,7 @@ impl Tmdb {
             genres: v["genres"].as_array().into_iter().flatten().map(|g| str_of(&g["name"])).collect(),
             poster_path: opt_str(&v["poster_path"]),
             backdrop_path: opt_str(&v["backdrop_path"]),
+            original_language: opt_str(&v["original_language"]),
             cast,
             seasons: v["seasons"]
                 .as_array()
