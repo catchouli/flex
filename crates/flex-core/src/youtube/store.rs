@@ -16,6 +16,10 @@ pub struct Channel {
     pub added_at: i64,
     /// When its feed was last read (0 = never).
     pub checked_at: i64,
+    /// One you watch regularly: listed first, and what the focused filter shows.
+    pub focused: bool,
+    /// When `focused` last changed (0 = never), for syncing.
+    pub focused_at: i64,
 }
 
 /// A video from a subscription.
@@ -51,8 +55,10 @@ const MIN_RESUME_SECS: f64 = 10.0;
 
 impl Db {
     pub fn yt_channels(&self) -> Result<Vec<Channel>> {
-        let mut stmt = self.conn.prepare("SELECT id, title, added_at, checked_at FROM yt_channels ORDER BY title COLLATE NOCASE")?;
-        let rows = stmt.query_map([], |r| Ok(Channel { id: r.get(0)?, title: r.get(1)?, added_at: r.get(2)?, checked_at: r.get(3)? }))?;
+        let mut stmt = self.conn.prepare("SELECT id, title, added_at, checked_at, focused, focused_at FROM yt_channels ORDER BY title COLLATE NOCASE")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Channel { id: r.get(0)?, title: r.get(1)?, added_at: r.get(2)?, checked_at: r.get(3)?, focused: r.get(4)?, focused_at: r.get(5)? })
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -64,6 +70,12 @@ impl Db {
         )?;
         self.conn.execute("DELETE FROM sync_removed WHERE kind = 'yt_channel' AND key = ?1", [id])?;
         Ok(added > 0)
+    }
+
+    /// Marks a subscription as focused (or not).
+    pub fn set_yt_channel_focused(&self, id: &str, focused: bool, now: i64) -> Result<()> {
+        self.conn.execute("UPDATE yt_channels SET focused = ?2, focused_at = ?3 WHERE id = ?1", params![id, focused, now])?;
+        Ok(())
     }
 
     pub fn remove_yt_channel(&self, id: &str) -> Result<()> {
@@ -94,14 +106,14 @@ impl Db {
         Ok(())
     }
 
-    /// The newest videos across subscriptions.
-    pub fn yt_latest(&self, limit: usize, shorts: bool) -> Result<Vec<Video>> {
+    /// The newest videos across subscriptions (only focused ones if `focused_only`).
+    pub fn yt_latest(&self, limit: usize, shorts: bool, focused_only: bool) -> Result<Vec<Video>> {
         let sql = format!(
-            "SELECT {VIDEO_COLUMNS} FROM yt_videos WHERE (?1 OR short = 0) AND channel_id IN (SELECT id FROM yt_channels)
+            "SELECT {VIDEO_COLUMNS} FROM yt_videos WHERE (?1 OR short = 0) AND channel_id IN (SELECT id FROM yt_channels WHERE focused OR NOT ?3)
              ORDER BY published DESC LIMIT ?2"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![shorts, limit as i64], video)?;
+        let rows = stmt.query_map(params![shorts, limit as i64, focused_only], video)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -205,12 +217,18 @@ mod tests {
         assert_eq!((channels[0].title.as_str(), channels[0].checked_at), ("A renamed", 50));
         assert_eq!(channels[1].title, "B", "an empty feed title keeps the name");
         let ids = |v: Vec<Video>| v.into_iter().map(|v| v.id).collect::<Vec<_>>();
-        assert_eq!(ids(db.yt_latest(10, true).unwrap()), ["v2", "v3", "v1"]);
-        assert_eq!(ids(db.yt_latest(10, false).unwrap()), ["v3", "v1"], "no Shorts");
+        assert_eq!(ids(db.yt_latest(10, true, false).unwrap()), ["v2", "v3", "v1"]);
+        assert_eq!(ids(db.yt_latest(10, false, false).unwrap()), ["v3", "v1"], "no Shorts");
         assert_eq!(ids(db.yt_channel_videos("UCa", 10, true).unwrap()), ["v2", "v1"]);
 
+        assert!(ids(db.yt_latest(10, true, true).unwrap()).is_empty(), "none focused yet");
+        db.set_yt_channel_focused("UCb", true, 70).unwrap();
+        assert_eq!(ids(db.yt_latest(10, true, true).unwrap()), ["v3"], "only focused channels");
+        let b = db.yt_channels().unwrap().into_iter().find(|c| c.id == "UCb").unwrap();
+        assert_eq!((b.focused, b.focused_at), (true, 70));
+
         db.remove_yt_channel("UCa").unwrap();
-        assert_eq!(ids(db.yt_latest(10, true).unwrap()), ["v3"]);
+        assert_eq!(ids(db.yt_latest(10, true, false).unwrap()), ["v3"]);
     }
 
     #[test]

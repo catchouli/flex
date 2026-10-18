@@ -121,15 +121,24 @@ fn parse_time(s: &str) -> Option<i64> {
     Some(t)
 }
 
-/// Channels in an exported subscription list, as (id, title): Google Takeout's
-/// subscriptions.csv, FreeTube's profiles/subscriptions export, NewPipe's JSON, or OPML.
-pub fn parse_subscriptions(text: &str) -> Vec<(String, String)> {
-    let mut found: Vec<(String, String)> = Vec::new();
-    let mut add = |id: Option<String>, title: &str| {
+/// A channel in an exported subscription list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Subscription {
+    pub id: String,
+    pub title: String,
+    /// Marked `"focused": true` in a JSON list (e.g. channels with the bell on).
+    pub focused: bool,
+}
+
+/// Channels in an exported subscription list: Google Takeout's subscriptions.csv,
+/// FreeTube's profiles/subscriptions export, NewPipe's JSON, or OPML.
+pub fn parse_subscriptions(text: &str) -> Vec<Subscription> {
+    let mut found: Vec<Subscription> = Vec::new();
+    let mut add = |id: Option<String>, title: &str, focused: bool| {
         if let Some(id) = id
-            && !found.iter().any(|(f, _)| *f == id)
+            && !found.iter().any(|f| f.id == id)
         {
-            found.push((id, title.trim().to_owned()));
+            found.push(Subscription { id, title: title.trim().to_owned(), focused });
         }
     };
     let trimmed = text.trim_start_matches('\u{feff}').trim();
@@ -146,7 +155,7 @@ pub fn parse_subscriptions(text: &str) -> Vec<(String, String)> {
         for item in lists.into_iter().flatten() {
             let id = ["id", "url", "channelId"].iter().find_map(|k| item.get(*k)?.as_str()).and_then(channel_id);
             let title = ["name", "title"].iter().find_map(|k| item.get(*k)?.as_str()).unwrap_or_default();
-            add(id, title);
+            add(id, title, item.get("focused").and_then(|f| f.as_bool()).unwrap_or(false));
         }
     }
     if !values.is_empty() {
@@ -158,7 +167,7 @@ pub fn parse_subscriptions(text: &str) -> Vec<(String, String)> {
     {
         for outline in doc.descendants().filter(|n| n.tag_name().name() == "outline") {
             let id = outline.attribute("xmlUrl").and_then(channel_id);
-            add(id, outline.attribute("title").or(outline.attribute("text")).unwrap_or_default());
+            add(id, outline.attribute("title").or(outline.attribute("text")).unwrap_or_default(), false);
         }
         return found;
     }
@@ -166,7 +175,7 @@ pub fn parse_subscriptions(text: &str) -> Vec<(String, String)> {
     for line in trimmed.lines().skip_while(|l| !l.contains("UC") && l.to_ascii_lowercase().starts_with("channel")) {
         let fields = csv_fields(line);
         let id = fields.first().and_then(|f| channel_id(f));
-        add(id, fields.get(2).map_or("", String::as_str));
+        add(id, fields.get(2).map_or("", String::as_str), false);
     }
     found
 }
@@ -322,22 +331,32 @@ mod tests {
     const A: &str = "UCSMOQeBJ2RAnuFungnQOxLg";
     const B: &str = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
 
+    fn sub(id: &str, title: &str) -> Subscription {
+        Subscription { id: id.into(), title: title.into(), focused: false }
+    }
+
+    #[test]
+    fn imports_focused_channels() {
+        let json = format!(r#"{{"subscriptions":[{{"id":"{A}","name":"Blender","focused":true}},{{"id":"{B}","name":"Google","focused":false}}]}}"#);
+        assert_eq!(parse_subscriptions(&json), vec![Subscription { focused: true, ..sub(A, "Blender") }, sub(B, "Google")]);
+    }
+
     #[test]
     fn imports_takeout_csv() {
         let csv = format!("Channel Id,Channel Url,Channel Title\n{A},http://www.youtube.com/channel/{A},Blender\n{B},http://www.youtube.com/channel/{B},\"Google, for Developers\"\n");
-        assert_eq!(parse_subscriptions(&csv), vec![(A.into(), "Blender".into()), (B.into(), "Google, for Developers".into())]);
+        assert_eq!(parse_subscriptions(&csv), vec![sub(A, "Blender"), sub(B, "Google, for Developers")]);
     }
 
     #[test]
     fn imports_newpipe_and_freetube() {
         let newpipe = format!(r#"{{"app_version":"0.27","subscriptions":[{{"service_id":0,"url":"https://www.youtube.com/channel/{A}","name":"Blender"}}]}}"#);
-        assert_eq!(parse_subscriptions(&newpipe), vec![(A.into(), "Blender".into())]);
+        assert_eq!(parse_subscriptions(&newpipe), vec![sub(A, "Blender")]);
         // FreeTube's profiles file: one JSON object per line; duplicates across profiles.
         let freetube = format!(
             "{{\"name\":\"All Channels\",\"subscriptions\":[{{\"id\":\"{A}\",\"name\":\"Blender\"}},{{\"id\":\"{B}\",\"name\":\"Google\"}}],\"_id\":\"allChannels\"}}\n\
              {{\"name\":\"Art\",\"subscriptions\":[{{\"id\":\"{A}\",\"name\":\"Blender\"}}],\"_id\":\"x\"}}\n"
         );
-        assert_eq!(parse_subscriptions(&freetube), vec![(A.into(), "Blender".into()), (B.into(), "Google".into())]);
+        assert_eq!(parse_subscriptions(&freetube), vec![sub(A, "Blender"), sub(B, "Google")]);
     }
 
     #[test]
@@ -345,7 +364,7 @@ mod tests {
         let opml = format!(
             r#"<opml version="1.1"><body><outline text="YouTube Subscriptions"><outline text="Blender" title="Blender" type="rss" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={A}"/></outline></body></opml>"#
         );
-        assert_eq!(parse_subscriptions(&opml), vec![(A.into(), "Blender".into())]);
+        assert_eq!(parse_subscriptions(&opml), vec![sub(A, "Blender")]);
     }
 
     #[test]

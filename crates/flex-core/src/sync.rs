@@ -144,6 +144,11 @@ pub struct Channel {
     pub title: String,
     pub removed: bool,
     pub at: i64,
+    /// Marked as focused, and when that last changed (0 = never), which syncs on its own.
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub focused_at: i64,
 }
 
 /// A YouTube video's progress.
@@ -347,12 +352,12 @@ pub fn export(db: &Db, device: &str, name: &str, now: i64) -> Result<Snapshot> {
     }
 
     for c in db.yt_channels()? {
-        snap.yt_channels.push(Channel { id: c.id, title: c.title, removed: false, at: c.added_at });
+        snap.yt_channels.push(Channel { id: c.id, title: c.title, removed: false, at: c.added_at, focused: c.focused, focused_at: c.focused_at });
     }
     let mut stmt = conn.prepare("SELECT key, at FROM sync_removed WHERE kind = 'yt_channel'")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
         let (id, at) = row?;
-        snap.yt_channels.push(Channel { id, title: String::new(), removed: true, at });
+        snap.yt_channels.push(Channel { id, title: String::new(), removed: true, at, focused: false, focused_at: 0 });
     }
     for (id, p) in db.yt_progress_all()? {
         snap.yt_videos.push(Video { id, title: p.title, channel: p.channel, position: p.position, duration: p.duration, watched: p.watched, at: p.updated_at });
@@ -537,6 +542,15 @@ pub fn apply(db: &mut Db, snapshots: &[Snapshot]) -> Result<Applied> {
         }
         applied.youtube = true;
     }
+    // Focus changes on their own: the newest wins, for channels subscribed here.
+    let focus = snapshots.iter().flat_map(|s| &s.yt_channels).filter(|c| !c.removed && c.focused_at > 0);
+    for c in newest(focus, |c| c.id.clone(), |c| c.focused_at) {
+        let changed = tx.execute(
+            "UPDATE yt_channels SET focused = ?2, focused_at = ?3 WHERE id = ?1 AND focused_at < ?3",
+            params![c.id, c.focused, c.focused_at],
+        )?;
+        applied.youtube |= changed > 0;
+    }
 
     for v in newest(snapshots.iter().flat_map(|s| &s.yt_videos), |v| v.id.clone(), |v| v.at) {
         let local: Option<i64> = tx.query_row("SELECT updated_at FROM yt_progress WHERE id = ?1", [&v.id], |r| r.get(0)).optional()?;
@@ -720,6 +734,18 @@ mod tests {
         apply(&mut tv, &[export(&mac, "mac", "Mac", 110).unwrap()]).unwrap();
         let ids: Vec<String> = tv.yt_channels().unwrap().into_iter().map(|c| c.id).collect();
         assert_eq!(ids, ["UCa"]);
+        // Focused on the TV, then unfocused on the Mac later: each change travels.
+        let focused = |db: &Db, id: &str| db.yt_channels().unwrap().into_iter().find(|c| c.id == id).unwrap().focused;
+        tv.set_yt_channel_focused("UCa", true, 120).unwrap();
+        let focused_on_tv = export(&tv, "tv", "TV", 130).unwrap();
+        apply(&mut mac, std::slice::from_ref(&focused_on_tv)).unwrap();
+        assert!(focused(&mac, "UCa"));
+        mac.set_yt_channel_focused("UCa", false, 140).unwrap();
+        apply(&mut tv, &[export(&mac, "mac", "Mac", 150).unwrap()]).unwrap();
+        assert!(!focused(&tv, "UCa"));
+        // The older change, read again, doesn't undo it.
+        apply(&mut tv, &[focused_on_tv]).unwrap();
+        assert!(!focused(&tv, "UCa"));
     }
 
     #[test]
