@@ -235,9 +235,9 @@ pub struct YouTubeHome {
     loaded: Option<u64>,
 }
 
-/// Search, Channels, and which channels' videos to show.
-fn home_buttons(sh: &Shared) -> [&'static str; 3] {
-    ["Search…", "Channels", if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" }]
+/// Search, Channels, History, and which channels' videos to show.
+fn home_buttons(sh: &Shared) -> [&'static str; 4] {
+    ["Search…", "Channels", "History", if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" }]
 }
 
 impl YouTubeHome {
@@ -275,6 +275,7 @@ impl Screen for YouTubeHome {
         match self.view.handle(press, home_buttons(sh).len(), self.items.len()) {
             GridInput::Button(0) => Nav::push(TextEntry::youtube_search()),
             GridInput::Button(1) => Nav::push(ChannelList::default()),
+            GridInput::Button(2) => Nav::push(YouTubeHistory::default()),
             GridInput::Button(_) => {
                 let on = !sh.youtube_focused_only();
                 sh.set_youtube_focused_only(on);
@@ -302,6 +303,59 @@ impl Screen for YouTubeHome {
             _ => "No new videos",
         };
         self.view.ui(ui, sh, body, &home_buttons(sh), &items, empty, focused);
+        self.items = items;
+        Nav::None
+    }
+}
+
+const HISTORY: usize = 500;
+
+/// Videos played, most recently first (synced like the rest of YouTube's progress).
+#[derive(Default)]
+pub struct YouTubeHistory {
+    view: VideoGrid,
+    items: Vec<VideoItem>,
+    loaded: Option<u64>,
+}
+
+impl YouTubeHistory {
+    fn refresh(&mut self, sh: &Shared) {
+        if self.loaded == Some(sh.youtube.version) {
+            return;
+        }
+        self.loaded = Some(sh.youtube.version);
+        let now = now_unix();
+        self.items = sh
+            .yt_history(HISTORY)
+            .into_iter()
+            .map(|(id, p)| {
+                let how = match (p.watched, p.position, p.duration) {
+                    (true, _, _) => "watched".to_owned(),
+                    (false, Some(pos), Some(dur)) => format!("{} left", theme::format_time(dur - pos)),
+                    _ => "started".to_owned(),
+                };
+                let detail = format!("{} · {} · {how}", p.channel, ago(p.updated_at, now));
+                let item = VideoItem { id, title: p.title.clone(), channel: p.channel.clone(), channel_id: String::new(), detail, fraction: None, watched: false };
+                with_progress(item, Some(&p))
+            })
+            .collect();
+    }
+}
+
+impl Screen for YouTubeHistory {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        self.refresh(sh);
+        video_input(self.view.handle(press, 0, self.items.len()), &self.items).unwrap_or(Nav::None)
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        self.refresh(sh);
+        let body = widgets::header(ui.painter(), rect, "History", "YouTube", ui.style());
+        let items = std::mem::take(&mut self.items);
+        self.view.ui(ui, sh, body, &[], &items, "Nothing watched yet", focused);
         self.items = items;
         Nav::None
     }
