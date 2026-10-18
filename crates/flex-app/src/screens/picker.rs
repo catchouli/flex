@@ -33,6 +33,8 @@ pub enum Purpose {
     PlexDatabase,
     /// A YouTube subscription list (Takeout CSV, FreeTube, NewPipe, OPML).
     YouTubeImport,
+    /// A shared folder to sync watch state through (see `crate::sync`).
+    SyncFolder,
 }
 
 fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
@@ -164,9 +166,9 @@ impl FolderPicker {
         self.pending = None;
     }
 
-    /// Row 0 is "Use this folder" when choosing a library folder inside a folder.
+    /// Row 0 is "Use this folder" when choosing a folder (a library's or the sync folder).
     fn offset(&self) -> usize {
-        usize::from(self.dir.is_some() && self.purpose == Purpose::Library)
+        usize::from(self.dir.is_some() && matches!(self.purpose, Purpose::Library | Purpose::SyncFolder))
     }
 }
 
@@ -184,6 +186,12 @@ impl Screen for FolderPicker {
         }
         match self.list.handle(press, self.dirs.len() + self.offset()) {
             ListInput::AtTop => Nav::FocusTopBar,
+            ListInput::Activate(0) if self.offset() == 1 && self.purpose == Purpose::SyncFolder => {
+                let dir = self.dir.clone().unwrap_or_default();
+                sh.set_sync_dir(Some(&dir));
+                sh.toast(format!("Syncing through {}", dir.display()));
+                Nav::Pop
+            }
             ListInput::Activate(0) if self.offset() == 1 => {
                 Nav::replace(KindPicker::new(self.dir.clone().unwrap_or_default()))
             }
@@ -219,6 +227,7 @@ impl Screen for FolderPicker {
             Purpose::Library => ("Add library", "Choose a drive or folder"),
             Purpose::PlexDatabase => ("Import from Plex", "Find com.plexapp.plugins.library.db"),
             Purpose::YouTubeImport => ("Import subscriptions", "Find subscriptions.csv (Google Takeout), or a FreeTube, NewPipe or OPML export"),
+            Purpose::SyncFolder => ("Sync folder", "Choose a folder every device can reach, e.g. an empty folder on the array"),
         };
         let location = self.dir.as_ref().map_or(prompt.to_owned(), |d| d.display().to_string());
         let subtitle = self.error.clone().unwrap_or(location);
@@ -229,7 +238,11 @@ impl Screen for FolderPicker {
         }
         let mut rows = Vec::new();
         if let Some(dir) = self.dir.as_ref().filter(|_| self.offset() == 1) {
-            rows.push(Row::new(Icon::Add, format!("Use “{}” as a library", name_of(dir))));
+            let label = match self.purpose {
+                Purpose::SyncFolder => format!("Sync through “{}”", name_of(dir)),
+                _ => format!("Use “{}” as a library", name_of(dir)),
+            };
+            rows.push(Row::new(Icon::Add, label));
         }
         rows.extend(self.dirs.iter().map(|e| {
             let name = if self.dir.is_none() { e.path.display().to_string() } else { name_of(&e.path) };
@@ -237,7 +250,7 @@ impl Screen for FolderPicker {
         }));
         if rows.is_empty() {
             let what = match self.purpose {
-                Purpose::Library => "No folders here",
+                Purpose::Library | Purpose::SyncFolder => "No folders here",
                 Purpose::PlexDatabase => "No folders or .db files here",
                 Purpose::YouTubeImport => "No folders or subscription files here",
             };

@@ -62,12 +62,14 @@ impl Db {
             "INSERT OR IGNORE INTO yt_channels (id, title, added_at) VALUES (?1, ?2, ?3)",
             params![id, title, now],
         )?;
+        self.conn.execute("DELETE FROM sync_removed WHERE kind = 'yt_channel' AND key = ?1", [id])?;
         Ok(added > 0)
     }
 
     pub fn remove_yt_channel(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM yt_videos WHERE channel_id = ?1", [id])?;
         self.conn.execute("DELETE FROM yt_channels WHERE id = ?1", [id])?;
+        self.removed("yt_channel", id)?;
         Ok(())
     }
 

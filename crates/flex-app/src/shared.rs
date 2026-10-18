@@ -324,6 +324,8 @@ pub struct Shared {
     pub youtube: crate::youtube::YouTube,
     /// Bumped when something is removed from Continue Watching, so Home refreshes.
     pub continue_version: u64,
+    /// Syncing with other devices, when a sync folder is set.
+    pub sync: Option<crate::sync::Sync>,
 }
 
 impl Shared {
@@ -369,6 +371,7 @@ impl Shared {
             playback_last: None,
             youtube: crate::youtube::YouTube::new(ctx),
             continue_version: 0,
+            sync: None,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
         if shared.youtube_enabled() {
@@ -377,6 +380,7 @@ impl Shared {
         }
         // Videos piled up before there was a limit (or since it was lowered).
         shared.trim_yt_continue();
+        shared.start_sync();
         shared.music_artists = Arc::new(shared.db.music_artists(i64::MAX).unwrap_or_default());
         if shared.auto_update() {
             shared.updater.set_enabled(true, ctx);
@@ -597,6 +601,8 @@ impl Shared {
 
     /// Adds a viewing session to the history.
     pub fn add_history(&mut self, req: &PlayRequest, played_at: i64, position: Option<f64>, completed: bool) {
+        // A viewing session just ended: tell other devices soon.
+        self.nudge_sync();
         if req.youtube_id().is_some() {
             return; // the history is per library
         }
@@ -639,6 +645,7 @@ impl Shared {
             return;
         }
         self.apply_watched(library_id, ids, watched);
+        self.nudge_sync();
     }
 
     /// Updates watched state in memory (the database is already up to date).
@@ -687,6 +694,82 @@ impl Shared {
         }
         self.continue_version += 1;
         self.youtube.version += 1;
+        self.nudge_sync();
+    }
+
+    /// Where sync files go, if syncing is on.
+    pub fn sync_dir(&self) -> Option<PathBuf> {
+        self.setting(crate::sync::DIR_SETTING).filter(|d| !d.is_empty()).map(PathBuf::from)
+    }
+
+    /// This device's name for other devices (its host name until renamed).
+    pub fn sync_name(&self) -> String {
+        self.setting(crate::sync::NAME_SETTING).filter(|n| !n.trim().is_empty()).unwrap_or_else(crate::sync::default_name)
+    }
+
+    /// Starts (or restarts, or with `None` stops) syncing through `dir`.
+    pub fn set_sync_dir(&mut self, dir: Option<&Path>) {
+        self.set_setting(crate::sync::DIR_SETTING, &dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        self.start_sync();
+    }
+
+    pub fn set_sync_name(&mut self, name: &str) {
+        self.set_setting(crate::sync::NAME_SETTING, name.trim());
+        self.start_sync();
+    }
+
+    fn start_sync(&mut self) {
+        self.sync = None;
+        let Some(dir) = self.sync_dir() else { return };
+        // A random id, made once: it names this device's file in the sync folder.
+        let device = match self.setting(crate::sync::DEVICE_SETTING) {
+            Some(id) if !id.is_empty() => id,
+            _ => {
+                let id = flex_core::sync::new_device_id();
+                self.set_setting(crate::sync::DEVICE_SETTING, &id);
+                id
+            }
+        };
+        log::info!("sync: on, through {} as {device}", dir.display());
+        self.sync = Some(crate::sync::Sync::start(self.db_path.clone(), dir, device, self.sync_name(), &self.ctx));
+    }
+
+    /// Syncs soon, if syncing is on (something here changed).
+    pub fn nudge_sync(&self) {
+        if let Some(sync) = &self.sync {
+            sync.nudge();
+        }
+    }
+
+    /// Reloads what other devices' changes touched.
+    pub fn poll_sync(&mut self) {
+        let Some(sync) = &mut self.sync else { return };
+        for applied in sync.poll() {
+            for id in &applied.files {
+                match self.db.files(*id) {
+                    Ok(files) => {
+                        if let Some(l) = self.lib_mut(*id) {
+                            l.tree = Arc::new(Tree::new(files));
+                            l.version += 1;
+                        }
+                    }
+                    Err(e) => log::warn!("sync: reloading library {id}: {e:#}"),
+                }
+            }
+            for id in &applied.matches {
+                self.organise(*id);
+            }
+            if applied.watchlist
+                && let Ok(list) = self.db.watchlist()
+            {
+                self.watchlist = list;
+                self.watchlist_version += 1;
+            }
+            if applied.continue_hidden || applied.youtube {
+                self.continue_version += 1;
+                self.youtube.version += 1;
+            }
+        }
     }
 
     pub fn library_view(&self, id: i64) -> LibraryView {
@@ -1119,6 +1202,7 @@ impl Shared {
             Ok(list) => {
                 self.watchlist = list;
                 self.watchlist_version += 1;
+                self.nudge_sync();
                 self.toast(if on { "Added to watchlist" } else { "Removed from watchlist" });
             }
             Err(e) => self.toast(format!("Couldn't update the watchlist: {e:#}")),

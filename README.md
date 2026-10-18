@@ -53,6 +53,15 @@ Then:
 If something gets matched to the wrong show or album, open it and pick "Match online…"
 (or "Folders & seasons…" for shows) to fix it.
 
+## Several devices
+
+If you run Flex on more than one machine (say the TV and a projector), they can share
+what you've watched: Settings → Sync with other devices, then pick a folder they can all
+reach, like a folder on your NAS. Each Flex keeps its own libraries (pointing at wherever
+the media is on that machine, as long as the libraries have the same names) and they
+swap watched state, resume points, history, the watchlist, matches you fixed by hand and
+YouTube subscriptions through that folder every 30 seconds or so.
+
 ## YouTube
 
 <a href="screenshots/youtube.jpg"><img src="screenshots/youtube-thumb.jpg" width="49%"></a>

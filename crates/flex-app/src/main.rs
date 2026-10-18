@@ -14,6 +14,7 @@ mod music_player;
 mod player;
 mod screens;
 mod shared;
+mod sync;
 mod shots;
 mod theme;
 mod topbar;
