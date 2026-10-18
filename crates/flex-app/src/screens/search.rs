@@ -1,6 +1,7 @@
 //! Search results for the query typed in the top bar, with a row of scopes along the top:
 //! Movies & shows (default), each library, Episodes, Music (with a music library), Folders
-//! & files. Up from the first result reaches the scopes; Left/Right switches.
+//! & files, YouTube (when it's on; it searches only once chosen). Up from the first result
+//! reaches the scopes; Left/Right switches.
 
 use eframe::egui::{Align2, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::search::{Item, Scope, Target};
@@ -8,6 +9,7 @@ use flex_core::search::{Item, Scope, Target};
 use super::details::{EpisodePage, TitlePage, open_file};
 use super::music::{AlbumPage, ArtistPage, play_album};
 use super::options::{self, OptionsMenu};
+use super::youtube::VideoResults;
 use super::{Nav, Screen, library::open_folder};
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -19,24 +21,34 @@ const SCOPE_H: f32 = 60.0;
 #[derive(Default)]
 pub struct SearchView {
     /// (query, scope) the results are for.
-    searched: Option<(String, Scope)>,
+    searched: Option<(String, Tab)>,
     results: Vec<Item>,
+    /// YouTube's results, for the YouTube scope.
+    youtube: Option<VideoResults>,
     scope: usize,
     /// Focus is on the scope row.
     on_scopes: bool,
     list: ListState,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    Local(Scope),
+    YouTube,
+}
 
 /// The scopes in order, with labels.
-fn scopes(sh: &Shared) -> Vec<(Scope, String)> {
-    let mut out = vec![(Scope::Titles, "Movies & shows".to_owned())];
-    out.extend(sh.libs.iter().filter(|l| !l.is_music()).map(|l| (Scope::Library(l.lib.id), l.lib.name.clone())));
-    out.push((Scope::Episodes, "Episodes".to_owned()));
+fn scopes(sh: &Shared) -> Vec<(Tab, String)> {
+    let mut out = vec![(Tab::Local(Scope::Titles), "Movies & shows".to_owned())];
+    out.extend(sh.libs.iter().filter(|l| !l.is_music()).map(|l| (Tab::Local(Scope::Library(l.lib.id)), l.lib.name.clone())));
+    out.push((Tab::Local(Scope::Episodes), "Episodes".to_owned()));
     if sh.libs.iter().any(|l| l.is_music()) {
-        out.push((Scope::Music, "Music".to_owned()));
+        out.push((Tab::Local(Scope::Music), "Music".to_owned()));
     }
-    out.push((Scope::Paths, "Folders & files".to_owned()));
+    out.push((Tab::Local(Scope::Paths), "Folders & files".to_owned()));
+    if sh.youtube_enabled() {
+        out.push((Tab::YouTube, "YouTube".to_owned()));
+    }
     out
 }
 
@@ -51,9 +63,25 @@ impl SearchView {
                 self.scope = 0;
                 return self.refresh(sh);
             }
-            self.results = sh.search(&key.0, key.1, MAX_RESULTS);
+            self.results = match key.1 {
+                Tab::Local(scope) => sh.search(&key.0, scope, MAX_RESULTS),
+                Tab::YouTube => {
+                    if self.youtube.as_ref().is_none_or(|yt| yt.key() != key.0.trim()) {
+                        self.youtube = Some(VideoResults::search(sh, &key.0));
+                    }
+                    Vec::new()
+                }
+            };
             self.searched = Some(key);
             self.list.select(0);
+        }
+    }
+
+    /// The YouTube results, when the YouTube scope is chosen.
+    fn youtube_shown(&mut self) -> Option<&mut VideoResults> {
+        match self.searched {
+            Some((_, Tab::YouTube)) => self.youtube.as_mut(),
+            _ => None,
         }
     }
 
@@ -89,6 +117,15 @@ impl Screen for SearchView {
             }
             return Nav::None;
         }
+        if let Some(youtube) = self.youtube_shown() {
+            return match youtube.handle(sh, press) {
+                Nav::FocusTopBar => {
+                    self.on_scopes = true;
+                    Nav::None
+                }
+                nav => nav,
+            };
+        }
         if press.is(Action::Menu) {
             let Some(item) = self.results.get(self.list.selected) else { return Nav::None };
             let target = match &item.target {
@@ -114,10 +151,12 @@ impl Screen for SearchView {
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.refresh(sh);
-        let subtitle = match self.results.len() {
-            0 => String::new(),
-            MAX_RESULTS => format!("Top {MAX_RESULTS} matches"),
-            n => format!("{n} matches"),
+        let subtitle = match (self.youtube_shown().map(|yt| yt.len()), self.results.len()) {
+            (Some(None), _) => "Searching YouTube…".to_owned(),
+            (Some(Some(n)), _) => format!("{n} videos on YouTube"),
+            (None, 0) => String::new(),
+            (None, MAX_RESULTS) => format!("Top {MAX_RESULTS} matches"),
+            (None, n) => format!("{n} matches"),
         };
         let title = format!("“{}”", sh.search_query.trim());
         let style = ui.style().clone();
@@ -138,6 +177,13 @@ impl Screen for SearchView {
             x += w + 14.0;
         }
         let list_rect = Rect::from_min_max(pos2(body.left(), body.top() + SCOPE_H + 24.0), body.max);
+        let on_scopes = self.on_scopes;
+        if let Some(youtube) = self.youtube_shown() {
+            if youtube.ui(ui, sh, list_rect, &[], focused && !on_scopes) {
+                self.on_scopes = false;
+            }
+            return Nav::None;
+        }
         if self.results.is_empty() {
             widgets::message(ui.painter(), list_rect, "Nothing found here. Up, then Left/Right to search elsewhere", &style);
             return Nav::None;
@@ -165,6 +211,9 @@ impl Screen for SearchView {
 
     fn activate_first(&mut self, sh: &mut Shared) -> Nav {
         self.refresh(sh);
+        if let Some(youtube) = self.youtube_shown() {
+            return youtube.play_first();
+        }
         if self.results.is_empty() { Nav::None } else { self.open(sh, 0) }
     }
 }
