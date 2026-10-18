@@ -603,6 +603,13 @@ impl Player {
             let mut done = bar;
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
             painter.rect_filled(done, CornerRadius::same(5), theme::FOCUS);
+            // YouTube: where SponsorBlock's segments are, in their categories' colours.
+            for segment in self.youtube.as_ref().and_then(|yt| yt.segments.as_deref()).unwrap_or_default() {
+                let x = |t: f64| bar.left() + bar.width() * (t / duration).clamp(0.0, 1.0) as f32;
+                let mark = Rect::from_min_max(pos2(x(segment.start), bar.top()), pos2(x(segment.end).max(x(segment.start) + 3.0), bar.bottom()));
+                let [r, g, b] = sponsorblock::category_colour(&segment.category);
+                painter.rect_filled(mark, CornerRadius::same(2), Color32::from_rgb(r, g, b));
+            }
             if response.hovered() || self.drag.is_some() {
                 painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::FOCUS);
             }
