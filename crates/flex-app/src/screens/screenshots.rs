@@ -87,10 +87,10 @@ impl Screen for ScreenshotsView {
             }
             let label = format!("{} / {}  ·  {}", i + 1, shots::COUNT, titles.full());
             let font = TextStyle::Small.resolve(&style);
-            let galley = painter.layout_no_wrap(label, font, theme::TEXT);
+            let galley = painter.layout_no_wrap(label, font, theme::text());
             let pill = Rect::from_min_size(rect.left_bottom() + vec2(40.0, -86.0), galley.size() + vec2(36.0, 20.0));
-            painter.rect_filled(pill, CornerRadius::same(10), theme::OSD_BG);
-            painter.galley(pill.min + vec2(18.0, 10.0), galley, theme::TEXT);
+            painter.rect_filled(pill, CornerRadius::same(10), theme::overlay());
+            painter.galley(pill.min + vec2(18.0, 10.0), galley, theme::text());
             // A click on the picture goes back to the grid.
             if widgets::hit(ui, rect) == widgets::Hit::Click {
                 self.viewing = None;
@@ -108,22 +108,20 @@ impl Screen for ScreenshotsView {
                 Shot::Ready(path) => match images.get(path, Size::Shot) {
                     Some(t) => paint_cover(painter, r, &t),
                     None => {
-                        painter.rect_filled(r, CornerRadius::same(8), theme::ROW);
+                        painter.rect_filled(r, CornerRadius::same(8), theme::panel());
                     }
                 },
                 Shot::Pending => {
-                    painter.rect_filled(r, CornerRadius::same(8), theme::ROW);
-                    painter.text(r.center(), Align2::CENTER_CENTER, "…", TextStyle::Heading.resolve(&style), theme::DIM);
+                    painter.rect_filled(r, CornerRadius::same(8), theme::panel());
+                    painter.text(r.center(), Align2::CENTER_CENTER, "…", TextStyle::Heading.resolve(&style), theme::dim());
                 }
                 Shot::Failed(e) => {
-                    painter.rect_filled(r, CornerRadius::same(8), theme::ROW);
-                    let galley = painter.layout(format!("Couldn't take this one: {e}"), TextStyle::Small.resolve(&style), theme::DIM, r.width() - 40.0);
-                    painter.with_clip_rect(r.shrink(12.0)).galley(r.center() - galley.size() / 2.0, galley, theme::DIM);
+                    painter.rect_filled(r, CornerRadius::same(8), theme::panel());
+                    let galley = painter.layout(format!("Couldn't take this one: {e}"), TextStyle::Small.resolve(&style), theme::dim(), r.width() - 40.0);
+                    painter.with_clip_rect(r.shrink(12.0)).galley(r.center() - galley.size() / 2.0, galley, theme::dim());
                 }
             }
-            if focus {
-                painter.rect_stroke(r, CornerRadius::same(8), egui::Stroke::new(5.0, theme::FOCUS), egui::StrokeKind::Inside);
-            }
+            theme::paint_picture_frame(painter, r, focus);
         });
         Nav::None
     }

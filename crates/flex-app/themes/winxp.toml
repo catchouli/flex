@@ -1,0 +1,48 @@
+# Windows XP style: glossy blue title bars, cream windows with rounded blue-edged
+# buttons, an orange glow on the focused one, green progress bars, and rolling green
+# hills under a blue sky (drawn by Flex).
+name = "Windows XP"
+description = "Blue title bars and green hills under a blue sky"
+dark = false
+
+[colours]
+background = "#2f6fd6"
+text = "#ffffff"
+dim = "#e8f0ff"
+panel = "#fdfdf8"
+panel_text = "#000000"
+panel_dim = "#555555"
+accent = "#4d8ef0"
+on_accent = "#ffffff"
+highlight = "#ffc83c"
+progress = "#3cbf3c"
+overlay = "#ece9d8f2"
+overlay_text = "#000000"
+
+[panel]
+radius = 6
+gradient = "#e6e2d2"
+border = { width = 1.5, colour = "#003c74" }
+
+[focus]
+style = "fill"
+gradient = "#1f56c0"
+ring = { width = 3, colour = "#ffc83c" }
+
+[header]
+style = "bar"
+colour = "#3a8cf6"
+gradient = "#0646cf"
+radius = 8
+text = "#ffffff"
+
+[background]
+gradient = "#a8d0f8"
+pattern = "hills"
+hill = "#74c043"
+hill_bottom = "#2c7a1a"
+
+[text]
+shadow = "#0000006a"
+shadow_offset = 2
+panel_shadow = false

@@ -1,0 +1,20 @@
+# Flex's own look. Copy this file to start a theme of your own: see THEMES.md.
+name = "Dark (default)"
+description = "Flex's own look: dark grey, with amber for focus"
+dark = true
+
+[colours]
+background = "#0e0f12"
+text = "#ebebeb"
+dim = "#9696a0"
+panel = "#1c1e24"
+accent = "#ebaa28"
+on_accent = "#000000"
+overlay = "#000000be"
+
+[panel]
+radius = 8
+
+[focus]
+style = "fill"
+ring = { width = 3, colour = "#ffffff" }

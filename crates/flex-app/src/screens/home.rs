@@ -1,7 +1,7 @@
 //! Home: a Continue Watching row (when there's anything to continue: library files and,
 //! with YouTube on, part-watched videos) above a grid of library cards.
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, Style, TextStyle, TextureHandle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Style, TextStyle, TextureHandle, Ui, pos2, vec2};
 use flex_core::library::display_name;
 use flex_core::progress::{ContinueItem, ContinueKind};
 use flex_core::youtube::store::WatchProgress;
@@ -159,10 +159,8 @@ fn continue_card(ui: &Ui, rect: Rect, text: &CardText, image: Option<&TextureHan
             // The picture, darkened so the text reads over it.
             paint_cover(painter, rect, t);
             painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(if focused { 140 } else { 175 }));
-            if focused {
-                painter.rect_stroke(rect, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-            }
-            theme::TEXT
+            theme::paint_picture_frame(painter, rect, focused);
+            Color32::WHITE
         }
         None => widgets::paint_focusable(painter, rect, focused, false),
     };
@@ -172,7 +170,7 @@ fn continue_card(ui: &Ui, rect: Rect, text: &CardText, image: Option<&TextureHan
     clip.text(inner.left_top() + vec2(0.0, 44.0), Align2::LEFT_TOP, &text.episode, TextStyle::Small.resolve(style), color);
     clip.text(inner.left_bottom() - vec2(0.0, 8.0), Align2::LEFT_BOTTOM, &text.status, TextStyle::Small.resolve(style), color);
     if let Some(f) = text.fraction {
-        let bar = if focused && image.is_none() { Color32::BLACK } else { theme::FOCUS };
+        let bar = if image.is_none() { theme::progress_on_panel(focused) } else { theme::accent() };
         widgets::paint_progress(painter, rect, f as f32, bar);
     }
 }

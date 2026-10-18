@@ -98,7 +98,7 @@ impl TopBar {
         }
         let painter = ui.painter().clone();
         let (heading, small) = (TextStyle::Heading.resolve(ui.style()), TextStyle::Small.resolve(ui.style()));
-        let name = painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", heading.clone(), theme::FOCUS);
+        let name = painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", heading.clone(), theme::highlight());
         // The version beside the name, smaller and dimmer, on the same baseline (fonts
         // descend about a fifth of their size below it).
         let baseline = name.bottom() - heading.size * 0.2;
@@ -107,16 +107,18 @@ impl TopBar {
             Align2::LEFT_BOTTOM,
             concat!("v", env!("CARGO_PKG_VERSION")),
             small,
-            theme::DIM,
+            theme::dim(),
         );
 
         let search_left = (rect.left() + 170.0).max(version.right() + 36.0);
         let search_rect = Rect::from_min_size(pos2(search_left, rect.center().y - 30.0), vec2(700.0, 60.0));
+        // A panel in the theme's style, with the text box on it.
+        theme::paint_panel(&painter, search_rect, false, false);
         let edit = egui::TextEdit::singleline(&mut sh.search_query)
             .id(search_id())
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(18, 10)))
             .hint_text("Search")
             .font(TextStyle::Body)
-            .margin(vec2(18.0, 10.0))
             .desired_width(search_rect.width());
         let had_focus = std::mem::replace(&mut self.text_focused_last, false);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
@@ -137,7 +139,7 @@ impl TopBar {
                 event = Event::FocusContent;
             }
         } else if self.focus == Some(Item::Search) {
-            painter.rect_stroke(search_rect, CornerRadius::same(6), Stroke::new(3.0, theme::FOCUS), StrokeKind::Outside);
+            painter.rect_stroke(search_rect, CornerRadius::same(6), Stroke::new(3.0, theme::accent()), StrokeKind::Outside);
         }
         if response.lost_focus() && enter {
             self.focus = None;

@@ -1,7 +1,7 @@
 //! A music library: a grid of albums (or artists), each album's page (tracks and
 //! artists), and each artist's page (their albums and the ones they're on).
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::music::{Album, Artist, MusicCatalog};
 use flex_core::musicbrainz::ReleaseGroup;
 use flex_core::natural::natural_cmp;
@@ -64,19 +64,17 @@ fn paint_card(painter: &Painter, sh: &mut Shared, rect: Rect, title: &str, cover
     match cover.and_then(|c| sh.images.get(c, Size::Poster)) {
         Some(t) => paint_cover(painter, tile, &t),
         None => {
-            painter.rect_filled(tile, CornerRadius::same(8), theme::ROW);
-            let galley = painter.layout(title.to_owned(), TextStyle::Body.resolve(style), theme::DIM, tile.width() - 30.0);
-            painter.galley(tile.center() - galley.size() / 2.0, galley, theme::DIM);
+            painter.rect_filled(tile, CornerRadius::same(8), theme::panel());
+            let galley = painter.layout(title.to_owned(), TextStyle::Body.resolve(style), theme::dim(), tile.width() - 30.0);
+            painter.galley(tile.center() - galley.size() / 2.0, galley, theme::dim());
         }
     }
-    if focused {
-        painter.rect_stroke(tile, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-    }
+    theme::paint_picture_frame(painter, tile, focused);
     let text = Rect::from_min_max(pos2(rect.left(), tile.bottom() + 8.0), rect.max);
     let clip = painter.with_clip_rect(text);
-    let color = if focused { theme::FOCUS } else { theme::TEXT };
+    let color = if focused { theme::highlight() } else { theme::text() };
     clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
 }
 
 /// When any of the album's tracks was last played (0 = never).
@@ -428,21 +426,21 @@ impl Screen for AlbumPage {
         match cover_path(sh, self.library_id, album).and_then(|c| sh.images.get(&c, Size::Poster)) {
             Some(t) => paint_cover(ui.painter(), cover, &t),
             None => {
-                ui.painter().rect_filled(cover, CornerRadius::same(8), theme::ROW);
-                let galley = ui.painter().layout(album.title.clone(), TextStyle::Body.resolve(&style), theme::DIM, PAGE_COVER - 60.0);
-                ui.painter().galley(cover.center() - galley.size() / 2.0, galley, theme::DIM);
+                ui.painter().rect_filled(cover, CornerRadius::same(8), theme::panel());
+                let galley = ui.painter().layout(album.title.clone(), TextStyle::Body.resolve(&style), theme::dim(), PAGE_COVER - 60.0);
+                ui.painter().galley(cover.center() - galley.size() / 2.0, galley, theme::dim());
             }
         }
         let painter = ui.painter().with_clip_rect(left);
         let mut y = cover.bottom() + 20.0;
-        let title = painter.layout(album.title.clone(), TextStyle::Body.resolve(&style), theme::TEXT, PAGE_COVER);
+        let title = painter.layout(album.title.clone(), TextStyle::Body.resolve(&style), theme::text(), PAGE_COVER);
         let title_h = title.size().y.min(80.0);
-        painter.with_clip_rect(Rect::from_min_size(pos2(left.left(), y), vec2(PAGE_COVER, title_h))).galley(pos2(left.left(), y), title, theme::TEXT);
+        painter.with_clip_rect(Rect::from_min_size(pos2(left.left(), y), vec2(PAGE_COVER, title_h))).galley(pos2(left.left(), y), title, theme::text());
         y += title_h + 6.0;
         let mut facts = vec![album.artist.clone()];
         facts.extend(album.year.map(|y| y.to_string()));
         facts.push(format!("{} tracks · {}", album.tracks.len(), duration_text(album.duration())));
-        painter.text(pos2(left.left(), y), Align2::LEFT_TOP, facts.join(" · "), TextStyle::Small.resolve(&style), theme::DIM);
+        painter.text(pos2(left.left(), y), Align2::LEFT_TOP, facts.join(" · "), TextStyle::Small.resolve(&style), theme::dim());
         y += 44.0;
 
         let mut rows = vec![Row::new(Icon::Video, "Play"), Row::new(Icon::Refresh, "Shuffle")];

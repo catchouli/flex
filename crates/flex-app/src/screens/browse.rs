@@ -3,7 +3,7 @@
 //!
 //! Up from the top row reaches the toolbar; OK on a setting opens a small dropdown.
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::natural::natural_cmp;
 
 use super::history::HistoryView;
@@ -387,7 +387,7 @@ impl ShowsView {
         let Some(rect) = self.popup_rect(toolbar) else { return };
         let Some((tool, list)) = &mut self.popup else { return };
         let (options, current) = tool.options(&self.prefs);
-        ui.painter().rect_filled(rect.expand(6.0), CornerRadius::same(12), theme::OSD_BG);
+        ui.painter().rect_filled(rect.expand(6.0), CornerRadius::same(12), theme::overlay());
         let rows: Vec<Row> = options
             .iter()
             .enumerate()
@@ -403,9 +403,9 @@ fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::
         Some(texture) => paint_cover(painter, poster_rect, texture),
         None => {
             // No poster (yet): the title on a plain tile.
-            painter.rect_filled(poster_rect, CornerRadius::same(8), theme::ROW);
-            let galley = painter.layout(item.title.clone(), TextStyle::Body.resolve(style), theme::DIM, poster_rect.width() - 30.0);
-            painter.galley(poster_rect.center() - galley.size() / 2.0, galley, theme::DIM);
+            painter.rect_filled(poster_rect, CornerRadius::same(8), theme::panel());
+            let galley = painter.layout(item.title.clone(), TextStyle::Body.resolve(style), theme::dim(), poster_rect.width() - 30.0);
+            painter.galley(poster_rect.center() - galley.size() / 2.0, galley, theme::dim());
         }
     }
     // Watched state: an unwatched-episode count, a tick when all watched, or progress.
@@ -415,19 +415,17 @@ fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::
     } else if item.series && item.unwatched > 0 {
         let text = thousands(item.unwatched);
         let font = TextStyle::Small.resolve(style);
-        let galley = painter.layout_no_wrap(text, font, Color32::BLACK);
+        let galley = painter.layout_no_wrap(text, font, theme::on_accent());
         let badge = Rect::from_center_size(badge_c, vec2(galley.size().x.max(18.0) + 18.0, 36.0));
         let badge = badge.translate(vec2(18.0 - badge.width() / 2.0, 0.0));
-        painter.rect_filled(badge, CornerRadius::same(18), theme::FOCUS);
-        painter.galley(badge.center() - galley.size() / 2.0, galley, Color32::BLACK);
+        painter.rect_filled(badge, CornerRadius::same(18), theme::accent());
+        painter.galley(badge.center() - galley.size() / 2.0, galley, theme::on_accent());
     }
     if let Some(fraction) = item.progress {
-        widgets::paint_progress(painter, poster_rect, fraction as f32, theme::FOCUS);
+        widgets::paint_progress(painter, poster_rect, fraction as f32, theme::progress());
     }
-    if focused {
-        painter.rect_stroke(poster_rect, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-    }
-    let text_color = if focused { theme::FOCUS } else { theme::TEXT };
+    theme::paint_picture_frame(painter, poster_rect, focused);
+    let text_color = if focused { theme::highlight() } else { theme::text() };
     let text_rect = Rect::from_min_max(pos2(rect.left(), poster_rect.bottom() + 8.0), rect.max);
     let clip = painter.with_clip_rect(text_rect);
     clip.text(text_rect.left_top(), Align2::LEFT_TOP, &item.title, TextStyle::Small.resolve(style), text_color);
@@ -438,7 +436,7 @@ fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::
         (None, false) => String::new(),
     };
     let sub = if item.unmatched { format!("{sub} · not matched") } else { sub };
-    clip.text(text_rect.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text_rect.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
 }
 
 impl Screen for ShowsView {

@@ -1,0 +1,37 @@
+# Inspired by early Mac OS X: pinstriped windows, glossy white buttons and a gel-blue
+# focused one, with engraved titles.
+name = "Aqua"
+description = "Pinstripes and glossy gel-blue buttons"
+dark = false
+
+[colours]
+background = "#ededed"
+text = "#1a1a1a"
+dim = "#666666"
+panel = "#ffffff"
+panel_text = "#111111"
+panel_dim = "#6a6a6a"
+accent = "#9fd0ff"
+on_accent = "#000000"
+highlight = "#1f63d0"
+progress = "#3b8de8"
+overlay = "#f4f4f4ee"
+overlay_text = "#111111"
+
+[panel]
+radius = 16
+gradient = "#dedede"
+border = { width = 1, colour = "#8e8e8e" }
+gloss = "#ffffffb0"
+
+[focus]
+style = "fill"
+gradient = "#1764d8"
+
+[background]
+pattern = "pinstripes"
+
+[text]
+shadow = "#ffffffd0"
+shadow_offset = 1.5
+panel_shadow = false

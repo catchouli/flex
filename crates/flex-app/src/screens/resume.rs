@@ -41,11 +41,11 @@ impl Screen for ResumePrompt {
         let painter = ui.painter();
         let style = ui.style();
         let safe = theme::safe_rect(ui.ctx());
-        painter.rect_filled(rect, 0, theme::BG);
+        theme::paint_background(painter, rect);
 
         let clip = painter.with_clip_rect(safe);
         let top = safe.top() + 220.0;
-        clip.text(pos2(safe.left(), top), Align2::LEFT_TOP, &self.req.title, TextStyle::Heading.resolve(style), theme::TEXT);
+        clip.text(pos2(safe.left(), top), Align2::LEFT_TOP, &self.req.title, TextStyle::Heading.resolve(style), theme::text());
 
         let size = vec2(480.0, 76.0);
         let resume = Rect::from_min_size(pos2(safe.left(), top + 120.0), size);

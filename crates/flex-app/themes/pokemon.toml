@@ -1,0 +1,36 @@
+# Inspired by the text boxes of handheld monster-catching RPGs: white boxes with a
+# thick double frame, dark text with a soft shadow, and a ▶ cursor. Drawn by Flex;
+# nothing is taken from any game.
+name = "Pokémon"
+description = "White text boxes with a double frame and a ▶ cursor"
+dark = false
+
+[colours]
+background = "#f4f4ee"
+text = "#383838"
+dim = "#787878"
+panel = "#ffffff"
+panel_text = "#383838"
+panel_dim = "#808080"
+accent = "#e03c30"
+on_accent = "#ffffff"
+overlay = "#fcfcfcf0"
+overlay_text = "#383838"
+
+[panel]
+radius = 10
+border = { width = 4, colour = "#404a5a" }
+inner_border = { width = 2, colour = "#88a0b8" }
+inner_gap = 2
+
+[focus]
+style = "pointer"
+pointer = "triangle"
+pointer_colour = "#383838"
+
+[background]
+gradient = "#d6e2ee"
+
+[text]
+shadow = "#d0d0c8"
+shadow_offset = 2

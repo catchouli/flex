@@ -1,0 +1,36 @@
+# Inspired by Old School RuneScape's interface: bevelled brown panels on stone, orange
+# text and yellow titles with a hard black shadow. Drawn by Flex (the stone is made
+# in code); nothing is taken from the game.
+name = "Old School RuneScape"
+description = "Brown stone panels, orange text and yellow titles"
+dark = true
+
+[colours]
+background = "#34312b"
+text = "#ff981f"
+dim = "#c8aa78"
+panel = "#3b3226"
+panel_text = "#ff981f"
+panel_dim = "#bfa27a"
+accent = "#ffff00"
+on_accent = "#000000"
+overlay = "#2b2419ee"
+overlay_text = "#ff981f"
+
+[panel]
+radius = 0
+border = { width = 1, colour = "#000000" }
+bevel = { light = "#5d523f", dark = "#1a150f", width = 3 }
+
+[focus]
+style = "outline"
+
+[header]
+text = "#ffff00"
+
+[background]
+pattern = "stone"
+
+[text]
+shadow = "#000000"
+shadow_offset = 2

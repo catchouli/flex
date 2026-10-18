@@ -1,0 +1,36 @@
+# Inspired by Final Fantasy VII's menus: blue gradient windows with a light grey
+# frame, white text with a shadow, and a pointing hand. Drawn by Flex; nothing is
+# taken from the game.
+name = "Final Fantasy VII"
+description = "Blue gradient windows and a pointing-hand cursor"
+dark = true
+
+[colours]
+background = "#000000"
+text = "#f0f0f0"
+dim = "#a8b0d8"
+panel = "#3c56c8"
+panel_text = "#f4f4f4"
+panel_dim = "#b4bce4"
+accent = "#78d0ff"
+on_accent = "#000020"
+overlay = "#1c2c8ce8"
+overlay_text = "#f4f4f4"
+
+[panel]
+radius = 9
+gradient = "#0a1450"
+border = { width = 3, colour = "#d0d0dc" }
+inner_border = { width = 1, colour = "#50506a" }
+
+[focus]
+style = "pointer"
+pointer = "hand"
+pointer_colour = "#f4f4f4"
+
+[background]
+gradient = "#080818"
+
+[text]
+shadow = "#101020"
+shadow_offset = 2
