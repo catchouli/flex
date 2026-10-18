@@ -1,0 +1,11 @@
+[package]
+name = "flex-anilist"
+description = "Flex plugin: keeps your AniList progress up to date with the anime you watch"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flex-plugin = { version = "0.15.0", path = "../../crates/flex-plugin" }
+ureq = { version = "3", features = ["json"] }

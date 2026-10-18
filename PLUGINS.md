@@ -145,7 +145,8 @@ resumes or stops (not continuously):
   `stopped` for the first before `playing` for the next.
 - `media` says what it is, for films and episodes Flex has matched online: `kind` is
   `movie` or `episode`, with the film or show's `title` and `year`, its `tmdb` id (films
-  and TV) or `anilist` id (anime), and for episodes the `season` and `episode` number.
+  and TV) or `anilist` id (anime), for episodes the `season` and `episode` number, and
+  `anime: true` when it's in an Anime library.
   It's missing for unmatched files, music and YouTube. The Trakt plugin in
   [`plugins/trakt`](plugins/trakt) uses it.
 

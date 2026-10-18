@@ -1,0 +1,38 @@
+name = "AniList"
+description = "Updates your AniList progress as you watch anime in Flex"
+version = "0.15.0"
+command = "flex-anilist"
+subscribe = ["playback"]
+
+[[settings]]
+key = "sign_in"
+label = "Sign in to AniList"
+type = "button"
+detail = "Opens AniList in a browser on this PC: approve Flex, then copy the token it shows into Token"
+
+[[settings]]
+key = "token"
+label = "Token"
+type = "text"
+detail = "From AniList's sign-in page. It lasts a year"
+secret = true
+default = ""
+
+[[settings]]
+key = "sync"
+label = "Update my list"
+type = "bool"
+detail = "Anime libraries only, once you're 80% through an episode"
+default = true
+
+[[settings]]
+key = "sign_out"
+label = "Sign out"
+type = "button"
+
+[[settings]]
+key = "client_id"
+label = "AniList app ID"
+type = "text"
+detail = "Only to use your own AniList app instead of Flex's"
+default = ""
