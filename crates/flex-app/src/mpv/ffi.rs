@@ -173,6 +173,23 @@ fn candidates() -> Vec<PathBuf> {
     out
 }
 
+/// Windows: a libmpv given by full path finds its own DLLs (VapourSynth, for SVP's copy)
+/// in its folder, not only next to flex.exe.
+#[cfg(windows)]
+unsafe fn load(path: &std::path::Path) -> Result<Library, libloading::Error> {
+    use libloading::os::windows::{LOAD_WITH_ALTERED_SEARCH_PATH, Library as WinLibrary};
+    if path.is_absolute() {
+        unsafe { WinLibrary::load_with_flags(path, LOAD_WITH_ALTERED_SEARCH_PATH).map(Library::from) }
+    } else {
+        unsafe { Library::new(path) }
+    }
+}
+
+#[cfg(not(windows))]
+unsafe fn load(path: &std::path::Path) -> Result<Library, libloading::Error> {
+    unsafe { Library::new(path) }
+}
+
 /// Loads libmpv once. Returns a human-readable error listing what was tried on failure.
 pub fn api() -> Result<&'static Api, String> {
     static API: OnceLock<Result<Api, String>> = OnceLock::new();
@@ -180,7 +197,7 @@ pub fn api() -> Result<&'static Api, String> {
         let mut errors = Vec::new();
         for path in candidates() {
             // Safety: loading libmpv runs its (trusted) initialisers only.
-            match unsafe { Library::new(&path) } {
+            match unsafe { load(&path) } {
                 Ok(lib) => {
                     log::info!("libmpv: {}", path.display());
                     let _ = LOADED.set(path.clone());
