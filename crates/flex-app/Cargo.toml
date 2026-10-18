@@ -21,7 +21,7 @@ ureq = "3"
 winit = { version = "0.30", default-features = false }
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_System_Registry", "Win32_System_Threading"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Power"] }
 
 [target."cfg(target_os = \"linux\")".dependencies]
 # Remote buttons egui doesn't report (media keys), read from /dev/input.

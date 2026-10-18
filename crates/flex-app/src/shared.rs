@@ -341,6 +341,8 @@ pub struct Shared {
     playback_sent: Option<Playback>,
     /// The latest playback seen (with its library file), for where a stop happened.
     playback_last: Option<(Playback, Option<(i64, i64)>)>,
+    /// Stops the computer sleeping while something plays.
+    awake: crate::awake::KeepAwake,
     pub youtube: crate::youtube::YouTube,
     /// Bumped when something is removed from Continue Watching, so Home refreshes.
     pub continue_version: u64,
@@ -390,6 +392,7 @@ impl Shared {
             ambient,
             playback_sent: None,
             playback_last: None,
+            awake: Default::default(),
             youtube: crate::youtube::YouTube::new(ctx),
             continue_version: 0,
             sync: None,
@@ -1828,7 +1831,8 @@ impl Shared {
         }
     }
 
-    /// Handles plugin messages, tells plugins about playback and updates lights.
+    /// Handles plugin messages, tells plugins about playback, keeps the computer awake
+    /// while something plays and updates lights.
     /// `playing`: what the top screen is playing, if anything, and the library file.
     pub fn poll_plugins(&mut self, playing: Option<(Playback, Option<(i64, i64)>)>) {
         if let Some(web) = &self.web {
@@ -1842,6 +1846,10 @@ impl Shared {
             let youtube = self.youtube.tools.is_some() && self.youtube_enabled();
             web.set_status(flex_web::remote::Status { playing: now_playing, youtube });
         }
+        let need = playing.as_ref().filter(|(p, _)| p.state == PlaybackState::Playing).map(|(p, _)| {
+            if p.kind == "video" { crate::awake::Need::Screen } else { crate::awake::Need::System }
+        });
+        self.awake.set(need);
         let mut wait = self.plugins.poll(&self.db);
         let plugin_toasts = self.plugins.take_toasts();
         self.toasts.extend(plugin_toasts);
