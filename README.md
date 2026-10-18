@@ -176,3 +176,7 @@ home network isn't one, so on Android tell Chrome to trust it, once:
 
 Without the flag, Add to home screen still makes a shortcut, but it opens in a normal
 Chrome tab.
+
+Firefox for Android only installs web apps from HTTPS addresses and has no such flag, so
+install it with Chrome even if you use Firefox otherwise: the installed app runs on its
+own, whichever browser is your default.
