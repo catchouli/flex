@@ -1,7 +1,7 @@
 //! Reusable TV-style building blocks: focusable lists, cards and buttons.
 
 use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, TextStyle, Ui,
+    self, Align, Align2, Color32, Painter, Pos2, Rect, Sense, Stroke, TextStyle, Ui,
     vec2,
 };
 
@@ -63,8 +63,8 @@ pub fn paint_progress(painter: &Painter, rect: Rect, fraction: f32, color: Color
 pub fn paint_tick(painter: &Painter, c: Pos2) {
     painter.circle_filled(c, 18.0, Color32::from_black_alpha(190));
     let tick = [c + vec2(-8.0, 0.0), c + vec2(-2.0, 7.0), c + vec2(9.0, -7.0)];
-    painter.line_segment([tick[0], tick[1]], Stroke::new(3.5, theme::FOCUS));
-    painter.line_segment([tick[1], tick[2]], Stroke::new(3.5, theme::FOCUS));
+    painter.line_segment([tick[0], tick[1]], Stroke::new(3.5, theme::accent()));
+    painter.line_segment([tick[1], tick[2]], Stroke::new(3.5, theme::accent()));
 }
 
 const ROW_HEIGHT: f32 = 64.0;
@@ -132,21 +132,10 @@ pub fn paint_icon(painter: &Painter, c: Pos2, icon: Icon, color: Color32) {
     }
 }
 
-/// Background + focus ring shared by rows, cards and buttons. Returns the text colour to use.
+/// Background + focus look shared by rows, cards and buttons (from the theme). Returns
+/// the text colour to use.
 pub fn paint_focusable(painter: &Painter, rect: Rect, focused: bool, selected: bool) -> Color32 {
-    let radius = CornerRadius::same(8);
-    if focused {
-        painter.rect_filled(rect, radius, theme::FOCUS);
-        // Inside the rect: an outside ring gets clipped at list and screen edges.
-        painter.rect_stroke(rect, radius, Stroke::new(3.0, Color32::WHITE), StrokeKind::Inside);
-        Color32::BLACK
-    } else {
-        painter.rect_filled(rect, radius, theme::ROW);
-        if selected {
-            painter.rect_stroke(rect, radius, Stroke::new(2.0, theme::FOCUS), StrokeKind::Inside);
-        }
-        theme::TEXT
-    }
+    theme::paint_panel(painter, rect, focused, selected)
 }
 
 /// The mouse over something selectable.
@@ -268,10 +257,10 @@ impl ScrollHints {
     pub fn paint(&self, painter: &Painter) {
         for &(side, rect, over) in &self.arrows {
             let c = rect.center();
-            painter.circle_filled(c, HINT_RADIUS, theme::OSD_BG);
+            painter.circle_filled(c, HINT_RADIUS, theme::overlay());
             let dir = if side == Side::Left { -1.0 } else { 1.0 };
             let points = vec![c + vec2(-5.0 * dir, -11.0), c + vec2(6.0 * dir, 0.0), c + vec2(-5.0 * dir, 11.0)];
-            let color = if over { theme::FOCUS } else { theme::TEXT };
+            let color = if over { theme::accent() } else { theme::text() };
             painter.add(egui::Shape::line(points, Stroke::new(4.0, color)));
         }
     }
@@ -310,9 +299,9 @@ pub fn list(ui: &mut Ui, rect: Rect, rows: &[Row], state: &mut ListState, focuse
                 }
                 let selected = i == state.selected;
                 let color = paint_focusable(ui.painter(), r, focused && selected, selected);
-                let color = if row.dim && !(focused && selected) { theme::DIM } else { color };
+                let color = if row.dim && !(focused && selected) { theme::panel_dim() } else { color };
                 if let Some(fraction) = row.progress {
-                    let bar_color = if focused && selected { Color32::BLACK } else { theme::FOCUS };
+                    let bar_color = theme::progress_on_panel(focused && selected);
                     paint_progress(ui.painter(), r, fraction, bar_color);
                 }
                 let text_x = if row.icon == Icon::None { 24.0 } else { 68.0 };
@@ -328,7 +317,8 @@ pub fn list(ui: &mut Ui, rect: Rect, rows: &[Row], state: &mut ListState, focuse
                     w + 32.0
                 };
                 let title_clip = Rect::from_min_max(r.min, egui::pos2(r.right() - detail_w - 12.0, r.bottom()));
-                ui.painter().with_clip_rect(title_clip.intersect(r.shrink(8.0))).text(
+                theme::panel_shadow_text(
+                    &ui.painter().with_clip_rect(title_clip.intersect(r.shrink(8.0))),
                     r.left_center() + vec2(text_x, 0.0),
                     Align2::LEFT_CENTER,
                     &row.title,
@@ -350,10 +340,10 @@ pub fn card(painter: &Painter, rect: Rect, title: &str, lines: &[&str], focused:
     let color = paint_focusable(painter, rect, focused, false);
     let inner = rect.shrink(24.0);
     let clip = painter.with_clip_rect(rect.shrink(8.0));
-    clip.text(inner.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(style), color);
+    theme::panel_shadow_text(&clip, inner.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(style), color);
     let mut y = inner.bottom();
     for line in lines.iter().rev() {
-        clip.text(egui::pos2(inner.left(), y), Align2::LEFT_BOTTOM, *line, TextStyle::Body.resolve(style), color);
+        theme::panel_shadow_text(&clip, egui::pos2(inner.left(), y), Align2::LEFT_BOTTOM, line, TextStyle::Body.resolve(style), color);
         y -= 40.0;
     }
 }
@@ -361,16 +351,16 @@ pub fn card(painter: &Painter, rect: Rect, title: &str, lines: &[&str], focused:
 /// A centred-label button.
 pub fn button(painter: &Painter, rect: Rect, label: &str, focused: bool, style: &egui::Style) {
     let color = paint_focusable(painter, rect, focused, false);
-    painter.text(rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
+    theme::panel_shadow_text(painter, rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
 }
 
 /// Screen title with an optional dim subtitle; returns the rect left below it.
 pub fn header(painter: &Painter, rect: Rect, title: &str, subtitle: &str, style: &egui::Style) -> Rect {
     let clip = painter.with_clip_rect(rect);
-    clip.text(rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(style), theme::TEXT);
+    theme::paint_title(&clip, rect, title, TextStyle::Heading.resolve(style));
     let mut top = rect.top() + 70.0;
     if !subtitle.is_empty() {
-        clip.text(egui::pos2(rect.left(), top), Align2::LEFT_TOP, subtitle, TextStyle::Small.resolve(style), theme::DIM);
+        theme::shadow_text(&clip, egui::pos2(rect.left(), top), Align2::LEFT_TOP, subtitle, TextStyle::Small.resolve(style), theme::dim());
         top += 40.0;
     }
     Rect::from_min_max(egui::pos2(rect.left(), top + 10.0), rect.max)
@@ -380,10 +370,10 @@ pub fn header(painter: &Painter, rect: Rect, title: &str, subtitle: &str, style:
 pub fn paragraph(painter: &Painter, rect: Rect, text: &str, max_lines: usize, style: &egui::Style) -> f32 {
     let font = TextStyle::Small.resolve(style);
     let line_h = font.size * 1.35;
-    let galley = painter.layout(text.to_owned(), font, theme::DIM, rect.width().min(1400.0));
+    let galley = painter.layout(text.to_owned(), font, theme::dim(), rect.width().min(1400.0));
     let height = galley.size().y.min(line_h * max_lines as f32);
     let clip = Rect::from_min_size(rect.min, vec2(rect.width(), height));
-    painter.with_clip_rect(clip).galley(rect.min, galley, theme::DIM);
+    painter.with_clip_rect(clip).galley(rect.min, galley, theme::dim());
     height
 }
 
@@ -397,7 +387,7 @@ pub fn text_block(painter: &Painter, rect: Rect, text: &str, font: egui::FontId,
 
 /// Dim centred message, for empty states.
 pub fn message(painter: &Painter, rect: Rect, text: &str, style: &egui::Style) {
-    painter.text(rect.center_top() + vec2(0.0, 80.0), Align2::CENTER_TOP, text, TextStyle::Body.resolve(style), theme::DIM);
+    painter.text(rect.center_top() + vec2(0.0, 80.0), Align2::CENTER_TOP, text, TextStyle::Body.resolve(style), theme::dim());
 }
 
 /// Selection and scroll position for a [`grid`].

@@ -1,0 +1,32 @@
+# Windows 95 style: grey raised 3D panels on a teal desktop, navy selection and a
+# navy title bar.
+name = "Windows 95"
+description = "Grey 3D buttons on the teal desktop"
+dark = false
+
+[colours]
+background = "#008080"
+text = "#ffffff"
+dim = "#b8e0e0"
+panel = "#c0c0c0"
+panel_text = "#000000"
+panel_dim = "#505050"
+accent = "#000080"
+on_accent = "#ffffff"
+highlight = "#ffff00"
+overlay = "#c0c0c0f2"
+overlay_text = "#000000"
+
+[panel]
+radius = 0
+bevel = { light = "#ffffff", dark = "#000000", width = 2 }
+inner_border = { width = 1, colour = "#808080" }
+inner_gap = 1
+
+[focus]
+style = "fill"
+
+[header]
+style = "bar"
+colour = "#000080"
+text = "#ffffff"

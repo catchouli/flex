@@ -1,0 +1,35 @@
+# A green-screen hacker terminal: fixed-width green text on black, inverse-video
+# focus, and code raining down behind everything.
+name = "Terminal"
+description = "Green on black, with code raining down behind"
+dark = true
+
+[colours]
+background = "#000000"
+text = "#39ff6a"
+dim = "#22b04a"
+panel = "#010d04"
+panel_text = "#39ff6a"
+panel_dim = "#22b04a"
+accent = "#39ff6a"
+on_accent = "#000000"
+highlight = "#b8ffc8"
+overlay = "#000000e8"
+overlay_text = "#39ff6a"
+
+[panel]
+radius = 0
+border = { width = 1, colour = "#1e9a40" }
+
+[focus]
+style = "fill"
+
+[header]
+prefix = "> "
+suffix = "_"
+
+[background]
+pattern = "rain"
+
+[text]
+font = "monospace"

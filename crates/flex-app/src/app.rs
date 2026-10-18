@@ -59,9 +59,9 @@ impl FlexApp {
     /// `start` may be a video to play immediately (handy for testing playback).
     /// `hidden` starts Flex in the tray (when it starts with Windows).
     pub fn new(cc: &eframe::CreationContext<'_>, start: Option<PathBuf>, windowed: bool, hidden: bool) -> anyhow::Result<Self> {
-        theme::install(&cc.egui_ctx);
         input::os::set_context(&cc.egui_ctx);
         let mut sh = Shared::new(&cc.egui_ctx, cc.get_proc_address.clone())?;
+        theme::install(&cc.egui_ctx, sh.setting(crate::screens::themes::THEME_SETTING).as_deref());
         sh.start_web_if_enabled();
         let (command_tx, commands) = channel();
         crate::instance::listen(command_tx.clone(), cc.egui_ctx.clone());
@@ -381,13 +381,13 @@ impl FlexApp {
             let screen = ctx.content_rect();
             let rect = Rect::from_center_size(screen.center(), vec2(560.0, 150.0));
             let painter = ui.painter();
-            painter.rect_filled(rect, CornerRadius::same(14), theme::OSD_BG);
+            painter.rect_filled(rect, CornerRadius::same(14), theme::overlay());
             let prompt = if self.tray.is_some() { "Keep holding to close" } else { "Keep holding to quit" };
-            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, prompt, TextStyle::Body.resolve(ui.style()), theme::TEXT);
+            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, prompt, TextStyle::Body.resolve(ui.style()), theme::text());
             let bar = Rect::from_min_size(pos2(rect.left() + 40.0, rect.bottom() - 46.0), vec2(rect.width() - 80.0, 10.0));
-            painter.rect_filled(bar, CornerRadius::same(5), egui::Color32::from_white_alpha(50));
+            painter.rect_filled(bar, CornerRadius::same(5), theme::overlay_text().gamma_multiply(0.22));
             let t = ((held - QUIT_PROMPT_SECS) / (QUIT_HOLD_SECS - QUIT_PROMPT_SECS)) as f32;
-            painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * t, bar.height())), CornerRadius::same(5), theme::FOCUS);
+            painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * t, bar.height())), CornerRadius::same(5), theme::accent());
         }
         ctx.request_repaint();
     }
@@ -407,13 +407,13 @@ impl FlexApp {
         let font = TextStyle::Body.resolve(ui.style());
         let mut bottom = safe.bottom();
         for msg in sticky.iter().chain(self.toasts.iter().rev().map(|(m, _, _)| m)) {
-            let galley = ui.painter().layout(msg.clone(), font.clone(), theme::TEXT, safe.width() * 0.7);
+            let galley = ui.painter().layout(msg.clone(), font.clone(), theme::text(), safe.width() * 0.7);
             let rect = Rect::from_center_size(
                 pos2(safe.center().x, bottom - galley.size().y / 2.0 - 16.0),
                 galley.size() + vec2(48.0, 32.0),
             );
-            ui.painter().rect_filled(rect, CornerRadius::same(12), theme::OSD_BG);
-            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT);
+            ui.painter().rect_filled(rect, CornerRadius::same(12), theme::overlay());
+            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::text());
             bottom = rect.top() - 12.0;
         }
         if let Some(next_expiry) = next_expiry {
@@ -438,13 +438,13 @@ impl FlexApp {
         let safe = theme::safe_rect(ui.ctx());
         let rect = Rect::from_min_size(pos2(safe.right() - 760.0, safe.top() + 90.0), vec2(760.0, 560.0));
         let painter = ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(12), theme::OSD_BG);
+        painter.rect_filled(rect, CornerRadius::same(12), theme::overlay());
         let mono = TextStyle::Monospace.resolve(ui.style());
         let mut y = rect.top() + 20.0;
-        painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, "Input log (F1 to hide)", mono.clone(), theme::FOCUS);
+        painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, "Input log (F1 to hide)", mono.clone(), theme::accent());
         for entry in self.input_log.entries() {
             y += 40.0;
-            painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, entry, mono.clone(), theme::TEXT);
+            painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, entry, mono.clone(), theme::text());
         }
     }
 }
@@ -510,7 +510,7 @@ impl eframe::App for FlexApp {
         }
         self.player_clicks(&ctx);
 
-        ui.painter().rect_filled(ctx.content_rect(), CornerRadius::ZERO, theme::BG);
+        theme::paint_background(ui.painter(), ctx.content_rect());
         let safe = theme::safe_rect(&ctx);
         let content = if self.top().shows_top_bar() {
             let bar = Rect::from_min_size(safe.min, vec2(safe.width(), topbar::HEIGHT));
@@ -540,6 +540,13 @@ impl eframe::App for FlexApp {
             ctx.content_rect()
         };
 
+        // Keep clear of the theme's foreground (e.g. the farmyard's flock).
+        let content = if self.top().is_player() {
+            content
+        } else {
+            let clear = ctx.content_rect().bottom() - theme::foreground_height();
+            content.with_max_y(content.max.y.min(clear))
+        };
         let focused = self.top_bar.focus.is_none() && !ctx.text_edit_focused();
         let sh = &mut self.sh;
         let nav = self.stack.last_mut().expect("never empty").ui(ui, sh, content, focused);
@@ -557,6 +564,9 @@ impl eframe::App for FlexApp {
             }
         }
 
+        if !self.top().is_player() {
+            theme::paint_foreground(ui.painter(), ctx.content_rect());
+        }
         self.update_cursor(&ctx, now);
         let status = self.update_status();
         self.draw_toasts(ui, now, status);
@@ -567,7 +577,7 @@ impl eframe::App for FlexApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        theme::BG.to_normalized_gamma_f32()
+        theme::bg().to_normalized_gamma_f32()
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

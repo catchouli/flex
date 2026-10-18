@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use eframe::egui::{self, Align2, Color32, CornerRadius, Rect, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, CornerRadius, Rect, TextStyle, Ui, pos2, vec2};
 
 use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
@@ -132,26 +132,26 @@ impl MusicPlayer {
         match self.cover.as_deref().and_then(|c| sh.images.get(c, Size::Poster)) {
             Some(t) => paint_cover(painter, cover, &t),
             None => {
-                painter.rect_filled(cover, CornerRadius::same(8), theme::ROW);
-                let galley = painter.layout(self.album.clone(), TextStyle::Body.resolve(&style), theme::DIM, COVER - 60.0);
-                painter.galley(cover.center() - galley.size() / 2.0, galley, theme::DIM);
+                painter.rect_filled(cover, CornerRadius::same(8), theme::panel());
+                let galley = painter.layout(self.album.clone(), TextStyle::Body.resolve(&style), theme::dim(), COVER - 60.0);
+                painter.galley(cover.center() - galley.size() / 2.0, galley, theme::dim());
             }
         }
         let entry = self.current.and_then(|i| self.entries.get(i));
         let text = Rect::from_min_max(pos2(rect.left(), cover.bottom() + 28.0), pos2(cover.right(), rect.bottom()));
         let clip = painter.with_clip_rect(text);
         let title = entry.map_or("", |e| e.title.as_str());
-        clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Body.resolve(&style), theme::TEXT);
+        clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Body.resolve(&style), theme::text());
         let by = match entry {
             Some(e) if !e.artists.is_empty() => e.artists.clone(),
             _ => self.album_artist.clone(),
         };
-        clip.text(text.left_top() + vec2(0.0, 44.0), Align2::LEFT_TOP, by, TextStyle::Small.resolve(&style), theme::TEXT);
+        clip.text(text.left_top() + vec2(0.0, 44.0), Align2::LEFT_TOP, by, TextStyle::Small.resolve(&style), theme::text());
         let album = match self.year {
             Some(y) => format!("{} · {y}", self.album),
             None => self.album.clone(),
         };
-        clip.text(text.left_top() + vec2(0.0, 78.0), Align2::LEFT_TOP, album, TextStyle::Small.resolve(&style), theme::DIM);
+        clip.text(text.left_top() + vec2(0.0, 78.0), Align2::LEFT_TOP, album, TextStyle::Small.resolve(&style), theme::dim());
 
         // Seek bar with times, clickable and draggable like the video player's.
         let bar = Rect::from_min_size(text.left_top() + vec2(0.0, 140.0), vec2(COVER, 10.0));
@@ -167,18 +167,18 @@ impl MusicPlayer {
             self.command(&["seek", &format!("{target:.3}"), "absolute"]);
         }
         let pos = self.drag.or_else(|| self.mpv.get_f64("time-pos")).unwrap_or(0.0);
-        painter.rect_filled(bar, CornerRadius::same(5), Color32::from_white_alpha(50));
+        painter.rect_filled(bar, CornerRadius::same(5), theme::text().gamma_multiply(0.22));
         if duration > 0.0 {
             let mut done = bar;
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
-            painter.rect_filled(done, CornerRadius::same(5), theme::FOCUS);
+            painter.rect_filled(done, CornerRadius::same(5), theme::progress());
             if response.hovered() || self.drag.is_some() {
-                painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::FOCUS);
+                painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::progress());
             }
         }
         let small = TextStyle::Small.resolve(&style);
-        painter.text(bar.left_bottom() + vec2(0.0, 14.0), Align2::LEFT_TOP, theme::format_time(pos), small.clone(), theme::DIM);
-        painter.text(bar.right_bottom() + vec2(0.0, 14.0), Align2::RIGHT_TOP, theme::format_time(duration), small, theme::DIM);
+        painter.text(bar.left_bottom() + vec2(0.0, 14.0), Align2::LEFT_TOP, theme::format_time(pos), small.clone(), theme::dim());
+        painter.text(bar.right_bottom() + vec2(0.0, 14.0), Align2::RIGHT_TOP, theme::format_time(duration), small, theme::dim());
 
         // Play/pause button: shows what clicking it does.
         let c = bar.center() + vec2(0.0, 96.0);
@@ -186,7 +186,7 @@ impl MusicPlayer {
         if button.clicked() {
             let _ = self.mpv.set_flag("pause", !self.paused());
         }
-        let (fill, icon) = if button.hovered() { (theme::FOCUS, Color32::BLACK) } else { (theme::ROW, theme::TEXT) };
+        let (fill, icon) = if button.hovered() { (theme::accent(), theme::on_accent()) } else { (theme::panel(), theme::text()) };
         painter.circle_filled(c, 42.0, fill);
         if self.paused() {
             let play = vec![c + vec2(-10.0, -16.0), c + vec2(18.0, 0.0), c + vec2(-10.0, 16.0)];

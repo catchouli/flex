@@ -39,7 +39,7 @@ impl Screen for UpNext {
         let painter = ui.painter();
         let style = ui.style();
         let safe = theme::safe_rect(ui.ctx());
-        painter.rect_filled(rect, 0, theme::BG);
+        theme::paint_background(painter, rect);
 
         let mut y = safe.top() + 180.0;
         let mut line = |text: &str, text_style: TextStyle, color, gap: f32| {
@@ -47,9 +47,9 @@ impl Screen for UpNext {
             clip.text(pos2(safe.left(), y), Align2::LEFT_TOP, text, text_style.resolve(style), color);
             y += gap;
         };
-        line(&format!("Finished: {}", self.finished), TextStyle::Small, theme::DIM, 90.0);
-        line("Up next", TextStyle::Body, theme::FOCUS, 48.0);
-        line(&self.next.title, TextStyle::Heading, theme::TEXT, 110.0);
+        line(&format!("Finished: {}", self.finished), TextStyle::Small, theme::dim(), 90.0);
+        line("Up next", TextStyle::Body, theme::highlight(), 48.0);
+        line(&self.next.title, TextStyle::Heading, theme::text(), 110.0);
 
         let size = vec2(300.0, 76.0);
         let play = Rect::from_min_size(pos2(safe.left(), y), size);

@@ -325,10 +325,10 @@ impl Player {
             lines.push(format!("Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%", light.brightness * 100.0));
         }
         let rect = Rect::from_min_size(safe.min, vec2(860.0, 32.0 + 36.0 * lines.len() as f32));
-        painter.rect_filled(rect, CornerRadius::same(10), theme::OSD_BG);
+        painter.rect_filled(rect, CornerRadius::same(10), theme::overlay());
         for (n, line) in lines.iter().enumerate() {
             let pos = rect.min + vec2(20.0, 16.0 + 36.0 * n as f32);
-            painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::TEXT);
+            painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::overlay_text());
         }
         if let Some(light) = light {
             // The colour as the strip shows it (colour scaled by brightness), turned from
@@ -495,7 +495,7 @@ impl Player {
         if !self.loaded {
             let asking = self.youtube.as_ref().is_some_and(|yt| !yt.loaded);
             let text = if asking { "Asking YouTube…" } else { "Loading…" };
-            painter.text(screen.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(ui.style()), theme::TEXT);
+            painter.text(screen.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(ui.style()), theme::overlay_text());
         }
 
         self.update_skips(sh);
@@ -533,13 +533,13 @@ impl Player {
             if now < until {
                 let text = self.track_label(track);
                 let font = TextStyle::Body.resolve(ui.style());
-                let galley = painter.layout_no_wrap(text, font, theme::TEXT);
+                let galley = painter.layout_no_wrap(text, font, theme::overlay_text());
                 let rect = Rect::from_center_size(
                     pos2(safe.center().x, safe.top() + 40.0),
                     galley.size() + vec2(48.0, 24.0),
                 );
-                painter.rect_filled(rect, CornerRadius::same(10), theme::OSD_BG);
-                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT);
+                painter.rect_filled(rect, CornerRadius::same(10), theme::overlay());
+                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::overlay_text());
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(until - now));
             } else {
                 self.message = None;
@@ -584,25 +584,25 @@ impl Player {
         let pos = self.drag.map(|(t, _)| t).or_else(|| self.mpv.get_f64("time-pos")).unwrap_or(0.0);
 
         let painter = ui.painter();
-        painter.rect_filled(panel, CornerRadius::same(14), theme::OSD_BG);
+        painter.rect_filled(panel, CornerRadius::same(14), theme::overlay());
         let mut title_pos = inner.left_top();
         if paused {
             // Pause symbol drawn as two bars: fonts don't reliably have a glyph for it.
             for x in [0.0, 14.0] {
                 let bar = Rect::from_min_size(title_pos + vec2(x, 6.0), vec2(8.0, 26.0));
-                painter.rect_filled(bar, CornerRadius::same(2), theme::TEXT);
+                painter.rect_filled(bar, CornerRadius::same(2), theme::overlay_text());
             }
             title_pos.x += 44.0;
         }
-        painter.text(title_pos, Align2::LEFT_TOP, &self.req.title, TextStyle::Body.resolve(ui.style()), theme::TEXT);
+        painter.text(title_pos, Align2::LEFT_TOP, &self.req.title, TextStyle::Body.resolve(ui.style()), theme::overlay_text());
         let time = format!("{} / {}", theme::format_time(pos), theme::format_time(duration));
-        painter.text(inner.right_bottom(), Align2::RIGHT_BOTTOM, &time, TextStyle::Body.resolve(ui.style()), theme::TEXT);
+        painter.text(inner.right_bottom(), Align2::RIGHT_BOTTOM, &time, TextStyle::Body.resolve(ui.style()), theme::overlay_text());
 
-        painter.rect_filled(bar, CornerRadius::same(5), Color32::from_white_alpha(50));
+        painter.rect_filled(bar, CornerRadius::same(5), theme::overlay_text().gamma_multiply(0.22));
         if duration > 0.0 {
             let mut done = bar;
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
-            painter.rect_filled(done, CornerRadius::same(5), theme::FOCUS);
+            painter.rect_filled(done, CornerRadius::same(5), theme::progress());
             // YouTube: where SponsorBlock's segments are, in their categories' colours.
             for segment in self.youtube.as_ref().and_then(|yt| yt.segments.as_deref()).unwrap_or_default() {
                 let x = |t: f64| bar.left() + bar.width() * (t / duration).clamp(0.0, 1.0) as f32;
@@ -611,16 +611,16 @@ impl Player {
                 painter.rect_filled(mark, CornerRadius::same(2), Color32::from_rgb(r, g, b));
             }
             if response.hovered() || self.drag.is_some() {
-                painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::FOCUS);
+                painter.circle_filled(pos2(done.right(), bar.center().y), 12.0, theme::progress());
             }
             // The time under the mouse, above the bar.
             if let Some(p) = response.hover_pos().filter(|_| self.drag.is_none()) {
                 let font = TextStyle::Body.resolve(ui.style());
-                let galley = painter.layout_no_wrap(theme::format_time(at(p.x)), font, theme::TEXT);
+                let galley = painter.layout_no_wrap(theme::format_time(at(p.x)), font, theme::overlay_text());
                 let x = p.x.clamp(bar.left(), bar.right());
                 let label = Rect::from_center_size(pos2(x, panel.top() - 32.0), galley.size() + vec2(24.0, 12.0));
-                painter.rect_filled(label, CornerRadius::same(8), theme::OSD_BG);
-                painter.galley(label.center() - galley.size() / 2.0, galley, theme::TEXT);
+                painter.rect_filled(label, CornerRadius::same(8), theme::overlay());
+                painter.galley(label.center() - galley.size() / 2.0, galley, theme::overlay_text());
             }
         }
     }

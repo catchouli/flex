@@ -1,7 +1,7 @@
 //! A library organised into shows: Shows → Show (seasons) → Season (episodes).
 //! Movies libraries list movies, which play directly.
 
-use eframe::egui::{self, Align2, CornerRadius, Rect, Stroke, StrokeKind, TextStyle, Ui};
+use eframe::egui::{self, Align2, CornerRadius, Rect, TextStyle, Ui};
 use flex_core::catalog::ShowEntry;
 
 use super::inspector::MatchInspector;
@@ -113,21 +113,19 @@ fn paint_tile(painter: &egui::Painter, rect: Rect, item: &EpisodeItem, still: Op
     match still {
         Some(t) => paint_cover(painter, still_rect, t),
         None => {
-            painter.rect_filled(still_rect, CornerRadius::same(8), theme::ROW);
+            painter.rect_filled(still_rect, CornerRadius::same(8), theme::panel());
         }
     }
     if item.progress.watched {
         widgets::paint_tick(painter, still_rect.right_top() + egui::vec2(-26.0, 26.0));
     }
     if let Some(fraction) = item.progress.fraction() {
-        widgets::paint_progress(painter, still_rect, fraction as f32, theme::FOCUS);
+        widgets::paint_progress(painter, still_rect, fraction as f32, theme::progress());
     }
-    if focused {
-        painter.rect_stroke(still_rect, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-    }
+    theme::paint_picture_frame(painter, still_rect, focused);
     let text = Rect::from_min_max(egui::pos2(rect.left(), still_rect.bottom() + 8.0), rect.max);
     let clip = painter.with_clip_rect(text);
-    let color = if focused { theme::FOCUS } else if item.progress.watched { theme::DIM } else { theme::TEXT };
+    let color = if focused { theme::highlight() } else if item.progress.watched { theme::dim() } else { theme::text() };
     clip.text(text.left_top(), Align2::LEFT_TOP, &item.title, TextStyle::Small.resolve(style), color);
     let p = item.progress;
     let sub = match p.remaining_secs() {
@@ -135,7 +133,7 @@ fn paint_tile(painter: &egui::Painter, rect: Rect, item: &EpisodeItem, still: Op
         None if p.watched => "Watched".to_owned(),
         None => item.air_date.clone().unwrap_or_default(),
     };
-    clip.text(text.left_top() + egui::vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text.left_top() + egui::vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
 }
 
 impl Screen for SeasonView {

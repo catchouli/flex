@@ -4,7 +4,7 @@
 //! The page is a stack of horizontal rows (buttons, seasons, cast): Up/Down moves between
 //! rows, Left/Right along them. Play/Pause anywhere plays the main button.
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::metadata::CastMember;
 use flex_core::progress::{NextUp, next_up};
 
@@ -197,26 +197,24 @@ pub(super) fn paint_card(painter: &Painter, rect: Rect, title: &str, sub: &str, 
     match photo {
         Some(t) => paint_cover(painter, photo_rect, t),
         None => {
-            painter.rect_filled(photo_rect, CornerRadius::same(8), theme::ROW);
+            painter.rect_filled(photo_rect, CornerRadius::same(8), theme::panel());
         }
     }
-    if focused {
-        painter.rect_stroke(photo_rect, CornerRadius::same(8), Stroke::new(4.0, theme::FOCUS), StrokeKind::Inside);
-    }
+    theme::paint_picture_frame(painter, photo_rect, focused);
     let text = Rect::from_min_max(pos2(rect.left(), photo_rect.bottom() + 6.0), rect.max);
     let clip = painter.with_clip_rect(text);
-    let color = if focused { theme::FOCUS } else { theme::TEXT };
+    let color = if focused { theme::highlight() } else { theme::text() };
     clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 30.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::DIM);
+    clip.text(text.left_top() + vec2(0.0, 30.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
 }
 
 fn paint_button(painter: &Painter, rect: Rect, label: &str, focused: bool, primary: bool, style: &egui::Style) {
     let color = if focused {
         widgets::paint_focusable(painter, rect, true, false)
     } else {
-        let fill = if primary { Color32::from_rgb(70, 56, 24) } else { theme::ROW };
+        let fill = if primary { Color32::from_rgb(70, 56, 24) } else { theme::panel() };
         painter.rect_filled(rect, CornerRadius::same(8), fill);
-        theme::TEXT
+        theme::text()
     };
     painter.text(rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
 }
@@ -492,7 +490,7 @@ impl Screen for TitlePage {
         match entry.show.poster.as_deref().and_then(|p| sh.images.get(p, Size::Poster)) {
             Some(t) => paint_cover(&painter, poster_rect, &t),
             None => {
-                painter.rect_filled(poster_rect, CornerRadius::same(8), theme::ROW);
+                painter.rect_filled(poster_rect, CornerRadius::same(8), theme::panel());
             }
         }
 
@@ -504,7 +502,7 @@ impl Screen for TitlePage {
             Some(y) => format!("{} ({y})", entry.show.title),
             None => entry.show.title.clone(),
         };
-        clip.text(text_rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(&style), theme::TEXT);
+        clip.text(text_rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(&style), theme::text());
         let mut facts = Vec::new();
         if entry.is_series() {
             let seasons = entry.seasons().iter().filter(|s| **s != 0).count();
@@ -520,11 +518,11 @@ impl Screen for TitlePage {
         if entry.show.state == "unmatched" {
             facts.push("not matched online".into());
         }
-        clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::DIM);
+        clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
             let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, 124.0), text_rect.max);
             let r = r.with_max_x(r.left() + r.width().min(1100.0));
-            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::TEXT);
+            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::text());
         }
 
         // Rows. `hovered` = (row, item) under the mouse; `arrow_row` = row whose scroll
@@ -552,7 +550,7 @@ impl Screen for TitlePage {
                     }
                 }
                 RowKind::Seasons => {
-                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, "Seasons", TextStyle::Body.resolve(&style), theme::TEXT);
+                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, "Seasons", TextStyle::Body.resolve(&style), theme::text());
                     let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
                     let arrow = hrow(ui, &painter, area, SEASON_CARD, *count, &mut self.nav.col[1], &mut self.nav.offset[1], |p, i, r, _| {
                         hit(index, i, r);
@@ -567,7 +565,7 @@ impl Screen for TitlePage {
                 }
                 RowKind::Cast => {
                     let label = if self.voice { "Voice cast (Japanese)" } else { "Cast" };
-                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, label, TextStyle::Body.resolve(&style), theme::TEXT);
+                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, label, TextStyle::Body.resolve(&style), theme::text());
                     let cast = self.cast.as_ref().map(|(_, c)| c.clone()).unwrap_or_default();
                     let images = &mut sh.images;
                     let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
@@ -665,11 +663,11 @@ impl Screen for EpisodePage {
         match meta.as_ref().and_then(|m| m.still.clone()).and_then(|p| sh.images.get(&p, Size::Still)) {
             Some(t) => paint_cover(&painter, still_rect, &t),
             None => {
-                painter.rect_filled(still_rect, CornerRadius::same(8), theme::ROW);
+                painter.rect_filled(still_rect, CornerRadius::same(8), theme::panel());
             }
         }
         if let Some(fraction) = sh.progress(self.library_id, self.file_id).and_then(|p| p.fraction()) {
-            widgets::paint_progress(&painter, still_rect, fraction as f32, theme::FOCUS);
+            widgets::paint_progress(&painter, still_rect, fraction as f32, theme::progress());
         }
         let left = still_rect.right() + 44.0;
         let text = Rect::from_min_max(pos2(left, rect.top()), pos2(rect.right(), still_rect.bottom()));
@@ -680,8 +678,8 @@ impl Screen for EpisodePage {
             Some(show) => show.clone(),
             None => String::new(),
         };
-        clip.text(text.left_top(), Align2::LEFT_TOP, show_line, TextStyle::Body.resolve(&style), theme::DIM);
-        clip.text(text.left_top() + vec2(0.0, 46.0), Align2::LEFT_TOP, &titles.name, TextStyle::Heading.resolve(&style), theme::TEXT);
+        clip.text(text.left_top(), Align2::LEFT_TOP, show_line, TextStyle::Body.resolve(&style), theme::dim());
+        clip.text(text.left_top() + vec2(0.0, 46.0), Align2::LEFT_TOP, &titles.name, TextStyle::Heading.resolve(&style), theme::text());
         let mut facts = Vec::new();
         if let Some(m) = &meta {
             facts.extend(m.air_date.clone());
@@ -694,11 +692,11 @@ impl Screen for EpisodePage {
                 facts.push(theme::format_remaining(left));
             }
         }
-        clip.text(text.left_top() + vec2(0.0, 120.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::DIM);
+        clip.text(text.left_top() + vec2(0.0, 120.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
         if let Some(overview) = meta.as_ref().map(|m| m.overview.clone()).filter(|o| !o.is_empty()) {
             let r = Rect::from_min_max(text.left_top() + vec2(0.0, 170.0), text.max);
             let r = r.with_max_x(r.left() + r.width().min(1000.0));
-            widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::TEXT);
+            widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::text());
         }
         let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
         let row = Rect::from_min_size(pos2(rect.left(), still_rect.bottom() + 40.0), vec2(rect.width(), BUTTON_H));

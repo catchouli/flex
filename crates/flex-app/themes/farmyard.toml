@@ -1,0 +1,38 @@
+# Maisy's farm: blue sky with blocky clouds, plants climbing both sides, and hens and
+# runner ducks by the pond. Colours after maisy.land; everything is drawn by Flex.
+name = "Maisy's Farm"
+description = "Sky, clouds, climbing plants, and hens and ducks by the pond"
+dark = false
+
+[colours]
+background = "#77b8e3"
+text = "#33422f"
+dim = "#46553f"
+panel = "#fbf6e9"
+panel_text = "#33422f"
+panel_dim = "#6b7a63"
+accent = "#c75b1e"
+on_accent = "#fbf6e9"
+highlight = "#b04a14"
+progress = "#e8752a"
+overlay = "#fbf6e9f2"
+overlay_text = "#33422f"
+
+[panel]
+radius = 0
+border = { width = 3, colour = "#6e4e33" }
+inner_border = { width = 1, colour = "#6e4e3373" }
+inner_gap = 1
+
+[focus]
+style = "outline"
+pointer = "hen"
+
+[header]
+text = "#c75b1e"
+
+[background]
+pattern = "farmyard"
+
+[text]
+font = "monospace"

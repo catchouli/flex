@@ -211,22 +211,22 @@ impl Screen for PersonPage {
         match photo.and_then(|p| sh.images.get(&p, Size::Profile)) {
             Some(t) => paint_cover(&painter, photo_rect, &t),
             None => {
-                painter.rect_filled(photo_rect, CornerRadius::same(8), theme::ROW);
+                painter.rect_filled(photo_rect, CornerRadius::same(8), theme::panel());
             }
         }
         let text = Rect::from_min_max(pos2(photo_rect.right() + 44.0, origin.y + 8.0), pos2(rect.right() - 20.0, origin.y + header_h));
         let clip = painter.with_clip_rect(text.intersect(rect));
-        clip.text(text.left_top(), Align2::LEFT_TOP, &self.member.name, TextStyle::Heading.resolve(&style), theme::TEXT);
+        clip.text(text.left_top(), Align2::LEFT_TOP, &self.member.name, TextStyle::Heading.resolve(&style), theme::text());
         let mut facts = Vec::new();
         if let Some(p) = person {
             facts.extend(p.born.as_ref().map(|b| format!("Born {b}")));
             facts.extend(p.birthplace.clone());
         }
-        clip.text(text.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::DIM);
+        clip.text(text.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
         if let Some(bio) = person.map(|p| p.biography.as_str()).filter(|b| !b.is_empty()) {
             let r = Rect::from_min_max(text.left_top() + vec2(0.0, 124.0), text.max);
             let r = r.with_max_x(r.left() + r.width().min(1100.0));
-            widgets::text_block(&painter, r, bio, TextStyle::Body.resolve(&style), theme::TEXT);
+            widgets::text_block(&painter, r, bio, TextStyle::Body.resolve(&style), theme::text());
         }
 
         // Rows of cards. `hovered` = (row, item) under the mouse; `arrow_row` = row whose
@@ -235,7 +235,7 @@ impl Screen for PersonPage {
         let mut arrow_row = None;
         for (index, (kind, label, cards)) in self.rows.iter().enumerate() {
             let top = tops[index];
-            painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, *label, TextStyle::Body.resolve(&style), theme::TEXT);
+            painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, *label, TextStyle::Body.resolve(&style), theme::text());
             let slot = PageNav::kind_index(*kind);
             let row_focus = focus.filter(|(k, _)| k == kind).map(|(_, i)| i);
             let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
@@ -254,7 +254,7 @@ impl Screen for PersonPage {
         }
         if let Some(status) = self.status() {
             let top = tops.last().map_or(header_h + SECTION_GAP, |t| t + ROW_LABEL_H + CARD.y + SECTION_GAP);
-            painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, status, TextStyle::Small.resolve(&style), theme::DIM);
+            painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, status, TextStyle::Small.resolve(&style), theme::dim());
         }
         if let Some((row, i)) = hovered {
             self.nav.row = row;

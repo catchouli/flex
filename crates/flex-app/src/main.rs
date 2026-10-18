@@ -12,6 +12,7 @@ mod logging;
 mod mpv;
 mod music_player;
 mod player;
+mod scenery;
 mod screens;
 mod shared;
 mod sync;

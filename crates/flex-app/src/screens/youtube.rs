@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::youtube::feeds::{Listed, thumbnail};
 use flex_core::youtube::sponsorblock::CATEGORIES;
 use flex_core::youtube::store::{Video, WatchProgress};
@@ -92,22 +92,20 @@ fn paint_video(painter: &Painter, rect: Rect, item: &VideoItem, thumb: Option<&e
     match thumb {
         Some(texture) => paint_cover(painter, thumb_rect, texture),
         None => {
-            painter.rect_filled(thumb_rect, CornerRadius::same(8), theme::ROW);
+            painter.rect_filled(thumb_rect, CornerRadius::same(8), theme::panel());
         }
     }
     if item.watched {
         painter.rect_filled(thumb_rect, CornerRadius::same(8), Color32::from_black_alpha(110));
         widgets::paint_tick(painter, thumb_rect.right_top() + vec2(-26.0, 26.0));
     } else if let Some(fraction) = item.fraction {
-        widgets::paint_progress(painter, thumb_rect, fraction, theme::FOCUS);
+        widgets::paint_progress(painter, thumb_rect, fraction, theme::progress());
     }
-    if focused {
-        painter.rect_stroke(thumb_rect, CornerRadius::same(8), Stroke::new(5.0, theme::FOCUS), StrokeKind::Inside);
-    }
-    let color = if focused { theme::FOCUS } else { theme::TEXT };
+    theme::paint_picture_frame(painter, thumb_rect, focused);
+    let color = if focused { theme::highlight() } else { theme::text() };
     let text = Rect::from_min_max(pos2(rect.left(), thumb_rect.bottom() + 8.0), rect.max);
     widgets::text_block(painter, Rect::from_min_size(text.min, vec2(text.width(), 44.0)), &item.title, TextStyle::Small.resolve(style), color);
-    painter.with_clip_rect(text).text(pos2(text.left(), text.bottom() - 4.0), Align2::LEFT_BOTTOM, &item.detail, TextStyle::Small.resolve(style), theme::DIM);
+    painter.with_clip_rect(text).text(pos2(text.left(), text.bottom() - 4.0), Align2::LEFT_BOTTOM, &item.detail, TextStyle::Small.resolve(style), theme::dim());
 }
 
 /// A row of buttons above a grid of videos, shared by the YouTube screens.

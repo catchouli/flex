@@ -1,0 +1,36 @@
+# TempleOS style: sixteen VGA colours, blue text on white, double-line borders, blue
+# title bars and a fixed-width font.
+name = "TempleOS"
+description = "Sixteen colours: blue on white, with double-line borders"
+dark = false
+
+[colours]
+background = "#ffffff"
+text = "#0000aa"
+dim = "#555555"
+panel = "#ffffff"
+panel_text = "#0000aa"
+panel_dim = "#555555"
+accent = "#0000aa"
+on_accent = "#ffff55"
+highlight = "#aa0000"
+progress = "#00aa00"
+overlay = "#ffffffee"
+overlay_text = "#0000aa"
+
+[panel]
+radius = 0
+border = { width = 2, colour = "#0000aa" }
+inner_border = { width = 2, colour = "#0000aa" }
+inner_gap = 3
+
+[focus]
+style = "fill"
+
+[header]
+style = "bar"
+colour = "#0000aa"
+text = "#ffffff"
+
+[text]
+font = "monospace"

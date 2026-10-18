@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "flex"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1294,6 +1294,8 @@ dependencies = [
  "image",
  "libloading 0.9.0",
  "log",
+ "serde",
+ "toml 0.8.2",
  "tray-icon",
  "ureq",
  "windows-sys 0.61.2",
@@ -1302,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "flex-core"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -1327,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "flex-lotus-lamp"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "flex-plugin",
  "lotus-lamp",
@@ -1336,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "flex-plugin"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1344,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "flex-trakt"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "flex-plugin",
  "ureq",
@@ -1352,7 +1354,7 @@ dependencies = [
 
 [[package]]
 name = "flex-web"
-version = "0.9.2"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "axum",

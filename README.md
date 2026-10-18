@@ -88,6 +88,28 @@ YouTube also has the quality limit (1080p unless you change it), whether to show
 (hidden by default) and which SponsorBlock categories to skip (sponsors, self-promotion
 and "like and subscribe" reminders by default).
 
+## Themes
+
+Settings → Theme changes how Flex looks. As well as the usual dark look, there are a few
+for fun, mostly after games and old computers we like: Final Fantasy VII's blue windows
+and pointing hand, Old School RuneScape's stone and bevels, Pokémon's text boxes,
+Windows 95 and XP, early Mac OS X, a green-on-black hacker terminal with code raining
+down, TempleOS, and Maisy's farm, with hens and runner ducks by the pond. Everything is
+drawn by Flex; no pictures are taken from the games.
+
+| | |
+|:-:|:-:|
+| <a href="screenshots/themes/dark.jpg"><img src="screenshots/themes/dark-thumb.jpg"></a><br>Dark (default) | <a href="screenshots/themes/ff7.jpg"><img src="screenshots/themes/ff7-thumb.jpg"></a><br>Final Fantasy VII |
+| <a href="screenshots/themes/osrs.jpg"><img src="screenshots/themes/osrs-thumb.jpg"></a><br>Old School RuneScape | <a href="screenshots/themes/pokemon.jpg"><img src="screenshots/themes/pokemon-thumb.jpg"></a><br>Pokémon |
+| <a href="screenshots/themes/win95.jpg"><img src="screenshots/themes/win95-thumb.jpg"></a><br>Windows 95 | <a href="screenshots/themes/winxp.jpg"><img src="screenshots/themes/winxp-thumb.jpg"></a><br>Windows XP |
+| <a href="screenshots/themes/aqua.jpg"><img src="screenshots/themes/aqua-thumb.jpg"></a><br>Aqua | <a href="screenshots/themes/terminal.jpg"><img src="screenshots/themes/terminal-thumb.jpg"></a><br>Terminal |
+| <a href="screenshots/themes/templeos.jpg"><img src="screenshots/themes/templeos-thumb.jpg"></a><br>TempleOS | <a href="screenshots/themes/farmyard.jpg"><img src="screenshots/themes/farmyard-thumb.jpg"></a><br>Maisy's Farm |
+
+A theme is a small TOML file of colours and styles, so making your own is mostly a
+matter of copying one and changing the colours. Custom themes go in the `themes` folder
+in Flex's data folder (Settings → Theme → "Open themes folder") and can bring their own
+background picture, pointer and font. See [THEMES.md](THEMES.md).
+
 ## Plugins
 
 Plugins live in a `plugins` folder, either next to `flex.exe` (releases come with the

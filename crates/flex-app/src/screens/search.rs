@@ -128,7 +128,7 @@ impl Screen for SearchView {
         let font = TextStyle::Small.resolve(&style);
         let mut x = body.left();
         for (i, (_, label)) in scopes(sh).iter().enumerate() {
-            let w = painter.layout_no_wrap(label.clone(), font.clone(), crate::theme::TEXT).size().x + 44.0;
+            let w = painter.layout_no_wrap(label.clone(), font.clone(), crate::theme::text()).size().x + 44.0;
             let r = Rect::from_min_size(pos2(x, body.top()), vec2(w, SCOPE_H));
             if widgets::hit(ui, r).any() {
                 (self.scope, self.on_scopes) = (i, true);
