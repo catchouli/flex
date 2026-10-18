@@ -211,13 +211,108 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
 }
 
 /// Remote buttons egui doesn't report (media keys, search, HID zoom). On Windows they're
-/// caught from the raw window messages via winit's message hook; macOS keeps media keys
-/// for its own Now Playing, so there the keyboard equivalents are used instead.
+/// caught from the raw window messages via winit's message hook; on Linux they're read
+/// from /dev/input (the user must be in the `input` group); macOS keeps media keys for its
+/// own Now Playing, so there the keyboard equivalents are used instead.
 pub mod os {
     #[cfg(windows)]
     pub use windows::{drain, drain_diagnostics, hook, set_context, set_diagnostics};
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    pub use linux::{drain, drain_diagnostics, set_context, set_diagnostics};
+
+    #[cfg(target_os = "linux")]
+    mod linux {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Mutex, OnceLock};
+
+        use eframe::egui;
+        use evdev::KeyCode;
+
+        use super::super::Action;
+
+        static QUEUE: Mutex<Vec<(String, Action)>> = Mutex::new(Vec::new());
+        static DIAGNOSTICS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        static DIAGNOSTICS_ON: AtomicBool = AtomicBool::new(false);
+        static CTX: OnceLock<egui::Context> = OnceLock::new();
+
+        /// The buttons egui doesn't report. Arrows, Enter and Back arrive as ordinary keys.
+        fn action(key: KeyCode) -> Option<Action> {
+            Some(match key {
+                KeyCode::KEY_PLAYPAUSE | KeyCode::KEY_PLAY | KeyCode::KEY_PAUSE | KeyCode::KEY_PLAYCD | KeyCode::KEY_PAUSECD => Action::PlayPause,
+                KeyCode::KEY_STOP | KeyCode::KEY_STOPCD => Action::Stop,
+                KeyCode::KEY_NEXTSONG => Action::Next,
+                KeyCode::KEY_PREVIOUSSONG => Action::Previous,
+                KeyCode::KEY_SEARCH => Action::Search,
+                KeyCode::KEY_ZOOMIN | KeyCode::KEY_ZOOM => Action::ZoomIn,
+                KeyCode::KEY_ZOOMOUT => Action::Search,
+                _ => return None,
+            })
+        }
+
+        /// Starts a reader for each input device with any of those buttons.
+        pub fn set_context(ctx: &egui::Context) {
+            if CTX.set(ctx.clone()).is_err() {
+                return;
+            }
+            let mut found = 0;
+            for (path, device) in evdev::enumerate() {
+                let has_media = device.supported_keys().is_some_and(|keys| keys.iter().any(|k| action(k).is_some()));
+                if !has_media {
+                    continue;
+                }
+                found += 1;
+                let name = device.name().unwrap_or("?").to_owned();
+                log::info!("remote: reading {} ({name})", path.display());
+                std::thread::Builder::new().name("remote-input".into()).spawn(move || read(device, &name)).ok();
+            }
+            if found == 0 {
+                // Usually permissions: /dev/input needs the `input` group.
+                log::info!("remote: no readable input devices with media keys (is this user in the `input` group?)");
+            }
+        }
+
+        fn read(mut device: evdev::Device, name: &str) {
+            loop {
+                let events = match device.fetch_events() {
+                    Ok(events) => events.collect::<Vec<_>>(),
+                    Err(e) => {
+                        log::info!("remote: {name}: {e}");
+                        return;
+                    }
+                };
+                for event in events {
+                    let evdev::EventSummary::Key(_, key, value) = event.destructure() else { continue };
+                    if DIAGNOSTICS_ON.load(Ordering::Relaxed) {
+                        DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()).push(format!("evdev {key:?} value {value} ({name})"));
+                    }
+                    // 1 = pressed (0 released, 2 auto-repeat).
+                    if value == 1
+                        && let Some(action) = action(key)
+                    {
+                        QUEUE.lock().unwrap_or_else(|e| e.into_inner()).push((format!("{key:?}"), action));
+                        if let Some(ctx) = CTX.get() {
+                            ctx.request_repaint();
+                        }
+                    }
+                }
+            }
+        }
+
+        pub fn drain() -> Vec<(String, Action)> {
+            std::mem::take(&mut *QUEUE.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+
+        pub fn drain_diagnostics() -> Vec<String> {
+            std::mem::take(&mut *DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+
+        pub fn set_diagnostics(on: bool) {
+            DIAGNOSTICS_ON.store(on, Ordering::Relaxed);
+        }
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     mod fallback {
         use super::super::Action;
 
@@ -234,7 +329,7 @@ pub mod os {
         pub fn set_diagnostics(_on: bool) {}
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     pub use fallback::*;
 
     #[cfg(windows)]

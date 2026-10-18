@@ -21,6 +21,14 @@ winit = { version = "0.30", default-features = false }
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_System_Registry", "Win32_System_Threading"] }
 
+[target."cfg(target_os = \"linux\")".dependencies]
+# Remote buttons egui doesn't report (media keys), read from /dev/input.
+evdev = "0.13"
+# A window on Linux needs a display backend: Wayland (e.g. cage) or X11, both loaded at
+# runtime, so neither is needed to build.
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+winit = { version = "0.30", default-features = false, features = ["wayland", "wayland-dlopen", "x11", "rwh_06"] }
+
 # System tray icon (Flex keeps running there when its window is closed).
 [target."cfg(any(windows, target_os = \"macos\"))".dependencies]
 tray-icon = "0.26"
