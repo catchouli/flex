@@ -166,17 +166,23 @@ impl VideoGrid {
         }
     }
 
-    /// Draws the buttons and the grid; starts preparing the selected video.
+    /// Draws the buttons and the grid; starts preparing the selected video. Returns whether
+    /// the grid was clicked.
     #[allow(clippy::too_many_arguments)]
-    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, body: Rect, buttons: &[&str], items: &[VideoItem], empty: &str, focused: bool) {
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, body: Rect, buttons: &[&str], items: &[VideoItem], empty: &str, focused: bool) -> bool {
         let style = ui.style().clone();
         if items.is_empty() && self.button.is_none() && !buttons.is_empty() {
             self.button = Some(0);
         }
         let mut top = body.top();
         if !buttons.is_empty() {
+            let font = TextStyle::Body.resolve(&style);
+            let mut x = body.left();
             for (i, label) in buttons.iter().enumerate() {
-                let r = Rect::from_min_size(pos2(body.left() + i as f32 * (BUTTON.x + 20.0), top), BUTTON);
+                // Wide enough for the label (e.g. "Showing: all channels").
+                let text_w = ui.painter().layout_no_wrap((*label).to_owned(), font.clone(), theme::text()).size().x;
+                let r = Rect::from_min_size(pos2(x, top), vec2(BUTTON.x.max(text_w + 56.0), BUTTON.y));
+                x = r.right() + 20.0;
                 if widgets::hit(ui, r).any() {
                     self.button = Some(i);
                 }
@@ -187,7 +193,7 @@ impl VideoGrid {
         let area = Rect::from_min_max(pos2(body.left(), top), body.max);
         if items.is_empty() {
             widgets::message(ui.painter(), area, empty, &style);
-            return;
+            return false;
         }
         if !std::mem::replace(&mut self.warmed, true) {
             for item in items.iter().take(WARM) {
@@ -207,6 +213,7 @@ impl VideoGrid {
             self.prepared = Some(item.id.clone());
             sh.prepare_youtube(&item.id);
         }
+        hit.any()
     }
 }
 
@@ -372,36 +379,113 @@ impl Screen for ChannelPage {
     }
 }
 
-/// Search results (the search runs in the background).
-pub struct SearchResults {
-    query: String,
+#[derive(Clone, Copy, PartialEq)]
+enum Lookup {
+    Search,
+    Related,
+}
+
+/// Videos from a lookup that runs in the background: a search, or a video's related
+/// videos. Also shown in the main search's YouTube scope.
+pub struct VideoResults {
+    lookup: Lookup,
+    /// The query, or the video whose related videos these are.
+    key: String,
     view: VideoGrid,
     items: Vec<VideoItem>,
     done: bool,
 }
 
-impl SearchResults {
-    pub fn new(sh: &mut Shared, query: &str) -> Self {
+impl VideoResults {
+    pub fn search(sh: &mut Shared, query: &str) -> Self {
+        let query = query.trim();
         sh.youtube.start_search(query);
-        Self { query: query.trim().to_owned(), view: VideoGrid::default(), items: Vec::new(), done: false }
+        Self::new(Lookup::Search, query)
+    }
+
+    fn related(sh: &mut Shared, id: &str) -> Self {
+        sh.youtube.start_related(id);
+        Self::new(Lookup::Related, id)
+    }
+
+    fn new(lookup: Lookup, key: &str) -> Self {
+        Self { lookup, key: key.to_owned(), view: VideoGrid::default(), items: Vec::new(), done: false }
+    }
+
+    /// What these are results for (the query, for a search).
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The videos, once in.
+    pub fn len(&self) -> Option<usize> {
+        self.done.then_some(self.items.len())
     }
 
     fn refresh(&mut self, sh: &mut Shared) {
         if self.done {
             return;
         }
-        let Some((query, Some(result))) = &sh.youtube.search else { return };
-        if *query != self.query {
+        let current = match self.lookup {
+            Lookup::Search => &sh.youtube.search,
+            Lookup::Related => &sh.youtube.related,
+        };
+        let Some((key, Some(result))) = current else { return };
+        if *key != self.key {
             return;
         }
         self.done = true;
         match result {
             Ok(listed) => self.items = from_listed(listed, &sh.yt_progress_all()),
             Err(e) => {
+                let what = if self.lookup == Lookup::Search { "Search failed" } else { "Couldn't find related videos" };
                 let e = e.clone();
-                sh.toast(format!("Search failed: {e}"));
+                sh.toast(format!("{what}: {e}"));
             }
         }
+    }
+
+    fn handle_grid(&mut self, sh: &mut Shared, press: Press, buttons: usize) -> GridInput {
+        self.refresh(sh);
+        self.view.handle(press, buttons, self.items.len())
+    }
+
+    /// Up from the top row gives `Nav::FocusTopBar`.
+    pub fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        let input = self.handle_grid(sh, press, 0);
+        video_input(input, &self.items).unwrap_or(Nav::None)
+    }
+
+    /// Plays the first video, if they're in.
+    pub fn play_first(&self) -> Nav {
+        self.items.first().map_or(Nav::None, VideoItem::play)
+    }
+
+    /// Draws the videos in `body`; returns whether they were clicked.
+    pub fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, body: Rect, buttons: &[&str], focused: bool) -> bool {
+        self.refresh(sh);
+        let empty = match (self.done, self.lookup) {
+            (true, _) => "Nothing found",
+            (false, _) if sh.youtube.tools.is_none() => "YouTube isn't set up yet (Settings → YouTube)",
+            (false, Lookup::Search) => "Searching…",
+            (false, Lookup::Related) => "Finding related videos…",
+        };
+        if !self.done {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        let items = std::mem::take(&mut self.items);
+        let hit = self.view.ui(ui, sh, body, buttons, &items, empty, focused);
+        self.items = items;
+        hit
+    }
+}
+
+/// YouTube search results (the search runs in the background).
+pub struct SearchResults(VideoResults);
+
+impl SearchResults {
+    pub fn new(sh: &mut Shared, query: &str) -> Self {
+        Self(VideoResults::search(sh, query))
     }
 }
 
@@ -410,28 +494,47 @@ impl Screen for SearchResults {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        self.refresh(sh);
-        match self.view.handle(press, 1, self.items.len()) {
+        match self.0.handle_grid(sh, press, 1) {
             GridInput::Button(_) => Nav::replace(TextEntry::youtube_search()),
-            input => video_input(input, &self.items).unwrap_or(Nav::None),
+            input => video_input(input, &self.0.items).unwrap_or(Nav::None),
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        self.refresh(sh);
-        let body = widgets::header(ui.painter(), rect, &format!("“{}”", self.query), "YouTube search", ui.style());
-        let empty = if self.done { "Nothing found" } else { "Searching…" };
-        if !self.done {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
-        }
-        let items = std::mem::take(&mut self.items);
-        self.view.ui(ui, sh, body, &["New search…"], &items, empty, focused);
-        self.items = items;
+        let body = widgets::header(ui.painter(), rect, &format!("“{}”", self.0.key), "YouTube search", ui.style());
+        self.0.ui(ui, sh, body, &["New search…"], focused);
         Nav::None
     }
 }
 
-/// Hold OK on a video: play from the start, mark watched, its channel, and (when
+/// The videos YouTube suggests after one (from its options).
+pub struct RelatedVideos {
+    title: String,
+    results: VideoResults,
+}
+
+impl RelatedVideos {
+    fn new(sh: &mut Shared, item: &VideoItem) -> Self {
+        Self { title: item.title.clone(), results: VideoResults::related(sh, &item.id) }
+    }
+}
+
+impl Screen for RelatedVideos {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        self.results.handle(sh, press)
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        let body = widgets::header(ui.painter(), rect, &self.title, "Related videos", ui.style());
+        self.results.ui(ui, sh, body, &[], focused);
+        Nav::None
+    }
+}
+
+/// Hold OK on a video: play from the start, mark watched, related videos, its channel, and (when
 /// part-watched) remove it from Continue Watching.
 pub struct VideoOptions {
     item: VideoItem,
@@ -442,6 +545,7 @@ enum VideoChoice {
     FromStart,
     Watched(bool),
     Channel,
+    Related,
     Subscribe(bool),
     Focus(bool),
     RemoveFromContinue,
@@ -478,6 +582,7 @@ impl VideoOptions {
         } else {
             out.push((Row::new(Icon::Add, "Mark as watched"), VideoChoice::Watched(true)));
         }
+        out.push((Row::new(Icon::Video, "See related videos"), VideoChoice::Related));
         if !self.item.channel_id.is_empty() {
             out.push((Row::new(Icon::Folder, format!("Go to {}", self.item.channel)), VideoChoice::Channel));
             let subscribed = sh.is_subscribed(&self.item.channel_id);
@@ -511,6 +616,10 @@ impl Screen for VideoOptions {
                 Nav::Pop
             }
             Some(VideoChoice::Channel) => Nav::replace(ChannelPage::new(&item.channel_id, &item.channel)),
+            Some(VideoChoice::Related) => {
+                let page = RelatedVideos::new(sh, item);
+                Nav::replace(page)
+            }
             Some(VideoChoice::Subscribe(true)) => {
                 sh.subscribe(&item.channel_id, &item.channel);
                 Nav::Pop

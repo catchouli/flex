@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flex_core::youtube::feeds::{self, FeedVideo, Listed};
+use flex_core::youtube::related;
 use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_core::youtube::tools::{self, Tool};
 use flex_core::youtube::{Tools, Video};
@@ -42,11 +43,13 @@ pub enum Msg {
     FeedsDone,
     Tools(Result<tools::Report, String>),
     Search(String, Result<Vec<Listed>, String>),
+    /// A video's related videos.
+    Related(String, Result<Vec<Listed>, String>),
     /// "Add a channel": its id and name.
     Channel(Result<(String, String), String>),
 }
 
-/// A search: the query, and its results once in.
+/// A search (or a video's related videos): the query (or video), and its results once in.
 pub type Search = (String, Option<Result<Vec<Listed>, String>>);
 
 pub struct YouTube {
@@ -61,6 +64,8 @@ pub struct YouTube {
     segments: HashMap<String, Vec<Segment>>,
     /// The current search and its results, once in.
     pub search: Option<Search>,
+    /// The video whose related videos were last asked for, and them once in.
+    pub related: Option<Search>,
     pub refreshing: bool,
     last_refresh: Option<Instant>,
     /// Bumped when subscriptions or their videos change, so screens reload.
@@ -80,6 +85,7 @@ impl YouTube {
             resolving: HashSet::new(),
             segments: HashMap::new(),
             search: None,
+            related: None,
             refreshing: false,
             last_refresh: None,
             version: 0,
@@ -182,13 +188,30 @@ impl YouTube {
         !self.refreshing && self.last_refresh.is_none_or(|t| t.elapsed() >= REFRESH_EVERY)
     }
 
+    /// Searches in the background, unless the last search was the same and didn't fail.
     pub fn start_search(&mut self, query: &str) {
         let query = query.trim().to_owned();
+        if reusable(&self.search, &query) {
+            return;
+        }
         let Some(tools) = self.tools.clone().filter(|_| !query.is_empty()) else { return };
         self.search = Some((query.clone(), None));
         self.spawn(move |tx| {
             let result = tools.search(&query, 30).map_err(|e| format!("{e:#}"));
             let _ = tx.send(Msg::Search(query, result));
+        });
+    }
+
+    /// Finds a video's related videos in the background (unless they're already in).
+    pub fn start_related(&mut self, id: &str) {
+        if reusable(&self.related, id) {
+            return;
+        }
+        self.related = Some((id.to_owned(), None));
+        let id = id.to_owned();
+        self.spawn(move |tx| {
+            let result = related::related(&id).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Msg::Related(id, result));
         });
     }
 
@@ -224,6 +247,11 @@ impl YouTube {
                         self.search = Some((query, Some(result)));
                     }
                 }
+                Msg::Related(id, result) => {
+                    if self.related.as_ref().is_some_and(|(v, _)| *v == id) {
+                        self.related = Some((id, Some(result)));
+                    }
+                }
                 Msg::Tools(result) => {
                     self.tools_busy = false;
                     self.tools = Tools::find();
@@ -238,6 +266,11 @@ impl YouTube {
         }
         out
     }
+}
+
+/// Whether `current` is for `key` and hasn't failed (so needn't run again).
+fn reusable(current: &Option<Search>, key: &str) -> bool {
+    current.as_ref().is_some_and(|(k, result)| k == key && !matches!(result, Some(Err(_))))
 }
 
 /// "3 hours ago", "2 days ago", "5 months ago".

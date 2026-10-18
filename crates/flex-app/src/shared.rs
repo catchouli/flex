@@ -1703,7 +1703,7 @@ impl Shared {
                 Msg::Tools(Err(e)) => self.toast(format!("Couldn't set up YouTube: {e}")),
                 Msg::Channel(Ok((id, title))) => self.subscribe(&id, &title),
                 Msg::Channel(Err(e)) => self.toast(format!("Couldn't find that channel: {e}")),
-                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) => {}
+                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) | Msg::Related(..) => {}
             }
         }
         if self.youtube_enabled() && self.youtube.tools.is_some() && self.youtube.refresh_due() {

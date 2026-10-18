@@ -1,11 +1,13 @@
-//! YouTube through yt-dlp: Flex never parses YouTube itself. yt-dlp (kept up to date in
-//! the data folder's `tools`) turns a video into stream URLs, which mpv plays like any
-//! other file. When YouTube changes something, updating yt-dlp is normally the fix.
+//! YouTube through yt-dlp: Flex doesn't parse YouTube itself, except for related videos
+//! (see [`related`]), which yt-dlp doesn't list. yt-dlp (kept up to date in the data
+//! folder's `tools`) turns a video into stream URLs, which mpv plays like any other file.
+//! When YouTube changes something, updating yt-dlp is normally the fix.
 //!
 //! The streams come straight from YouTube's video servers, so there are no ads in them.
 
 pub mod feeds;
 pub mod proxy;
+pub mod related;
 pub mod sponsorblock;
 pub mod store;
 pub mod tools;

@@ -76,11 +76,13 @@ date, since YouTube changes things a lot and a newer yt-dlp is usually the fix.
 Add channels under Channels by pasting a link or an @handle, or import your existing
 subscriptions from Google Takeout (`subscriptions.csv`), FreeTube, NewPipe or an OPML
 file. New videos are picked up from each channel's feed every half an hour, so there's no
-API key to set up. Search works too.
+API key to set up. Search works too, either on the YouTube page or from the main search
+(pick the YouTube scope at the top of the results).
 
 Videos take a few seconds to start, since yt-dlp has to ask YouTube for them first, but
 Flex starts on whichever video you have highlighted, so it's usually ready by the time you
-press OK. Hold OK on a video to mark it watched or jump to its channel. Settings →
+press OK. Hold OK on a video to mark it watched, see related videos or jump to its
+channel. Settings →
 YouTube also has the quality limit (1080p unless you change it), whether to show Shorts
 (hidden by default) and which SponsorBlock categories to skip (sponsors, self-promotion
 and "like and subscribe" reminders by default).
@@ -138,3 +140,7 @@ you like. See [PLUGINS.md](PLUGINS.md).
 Arrows to move, OK to select, Back to go back. Hold OK for more options, and hold Back
 to quit. Play/pause, stop and next/previous work if your remote has them, and on my
 remote zoom+ toggles fullscreen and zoom- jumps to search.
+
+While a video plays, OK pauses, Left/Right skip back and forward 10 seconds (30 while
+held), Up changes the subtitles and Down the audio track. Holding Up turns subtitles off,
+for when there are dozens of tracks to cycle back through. F2 shows playback stats.
