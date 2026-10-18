@@ -3,13 +3,15 @@
 //! The app owns the library state and hands the server read-only [`Snapshot`]s whenever
 //! it changes; the server never organises or matches anything itself. Changes made from
 //! the web (marking things watched) are written to the database, applied to the server's
-//! snapshot straight away, and reported to the app through the `on_change` callback.
+//! snapshot straight away, and reported to the app through the `on_change` callback, as
+//! are the phone remote's commands (see [`remote`]).
 
 mod api;
 mod images;
 mod media;
 mod music;
 mod play;
+pub mod remote;
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
@@ -50,6 +52,10 @@ pub enum Change {
     Watched { library_id: i64, file_ids: Vec<i64>, watched: bool },
     /// Played in the browser.
     Progress { library_id: i64, file_id: i64, progress: flex_core::progress::Progress },
+    /// From the phone remote.
+    Remote(remote::Remote),
+    /// The remote's search: the app answers through `reply`.
+    Search { query: String, reply: std::sync::mpsc::SyncSender<Vec<remote::Hit>> },
 }
 
 pub struct Config {
@@ -74,6 +80,8 @@ pub(crate) struct State {
     on_change: Box<dyn Fn(Change) + Send + Sync>,
     agent: ureq::Agent,
     pub(crate) tools: Arc<media::Tools>,
+    /// What's playing in the app, and whether YouTube is on.
+    pub(crate) status: RwLock<remote::Status>,
 }
 
 impl State {
@@ -126,6 +134,7 @@ impl Server {
             on_change: Box::new(on_change),
             agent,
             tools: Arc::new(media::Tools::find()),
+            status: RwLock::default(),
         });
         let (shutdown, stopped) = tokio::sync::oneshot::channel::<()>();
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -155,6 +164,16 @@ impl Server {
     /// Replaces what the web UI shows (call whenever the app's libraries change).
     pub fn publish(&self, snapshot: Snapshot) {
         *self.state.snapshot.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(snapshot);
+    }
+
+    /// Keeps the remote's status up to date (cheap to call every frame).
+    pub fn set_status(&self, status: remote::Status) {
+        let current = self.state.status.read().unwrap_or_else(|e| e.into_inner());
+        if *current == status {
+            return;
+        }
+        drop(current);
+        *self.state.status.write().unwrap_or_else(|e| e.into_inner()) = status;
     }
 
     pub fn port(&self) -> u16 {

@@ -268,6 +268,12 @@ impl Player {
         Nav::None
     }
 
+    fn turn_subs_off(&mut self, now: f64) {
+        let _ = self.mpv.set_string("sid", "no");
+        self.sub_changed = true;
+        self.message = Some((Track::Sub, now + MESSAGE_SECS));
+    }
+
     /// Turns subtitles off once Up has been held for `SUB_OFF_HOLD_SECS`.
     fn hold_up_for_subs_off(&mut self, ctx: &egui::Context, now: f64) {
         if !ctx.input(|i| i.key_down(egui::Key::ArrowUp)) {
@@ -281,9 +287,7 @@ impl Player {
         let held = now - *since;
         if held >= SUB_OFF_HOLD_SECS {
             *fired = true;
-            let _ = self.mpv.set_string("sid", "no");
-            self.sub_changed = true;
-            self.message = Some((Track::Sub, now + MESSAGE_SECS));
+            self.turn_subs_off(now);
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(SUB_OFF_HOLD_SECS - held));
         }
@@ -701,6 +705,11 @@ impl Screen for Player {
 
     fn shows_top_bar(&self) -> bool {
         false
+    }
+
+    fn subtitles_off(&mut self, sh: &mut Shared) {
+        let now = sh.ctx.input(|i| i.time);
+        self.turn_subs_off(now);
     }
 
     fn is_player(&self) -> bool {

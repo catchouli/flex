@@ -24,6 +24,16 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/player.js", get(|| asset(include_str!("../web/player.js"), "text/javascript; charset=utf-8")))
         .route("/subtitles.js", get(|| asset(include_str!("../web/subtitles.js"), "text/javascript; charset=utf-8")))
         .route("/icon.png", get(icon))
+        .route("/remote.js", get(|| asset(include_str!("../web/remote.js"), "text/javascript; charset=utf-8")))
+        .route("/manifest.webmanifest", get(|| asset(include_str!("../web/manifest.webmanifest"), "application/manifest+json")))
+        .route("/sw.js", get(|| asset(include_str!("../web/sw.js"), "text/javascript; charset=utf-8")))
+        .route("/icon-192.png", get(|| png(include_bytes!("../../../assets/icon-192.png"))))
+        .route("/icon-512.png", get(|| png(include_bytes!("../../../assets/icon-512.png"))))
+        .route("/api/remote", get(crate::remote::status))
+        .route("/api/remote/key", post(crate::remote::key))
+        .route("/api/remote/play", post(crate::remote::play))
+        .route("/api/search", get(crate::remote::search))
+        .route("/api/youtube/search", get(crate::remote::youtube))
         .route("/api/home", get(home))
         .route("/api/music/{id}", get(crate::music::albums))
         .route("/api/album/{id}", get(crate::music::album))
@@ -58,8 +68,11 @@ async fn asset(body: &'static str, kind: &'static str) -> Response {
 }
 
 async fn icon() -> Response {
-    let png: &'static [u8] = include_bytes!("../../../assets/icon-256.png");
-    ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=86400")], png).into_response()
+    png(include_bytes!("../../../assets/icon-256.png")).await
+}
+
+async fn png(bytes: &'static [u8]) -> Response {
+    ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=86400")], bytes).into_response()
 }
 
 fn lib(snapshot: &Snapshot, id: i64) -> Option<&LibrarySnapshot> {

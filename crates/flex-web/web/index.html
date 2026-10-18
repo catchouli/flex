@@ -7,18 +7,21 @@
 <title>Flex</title>
 <link rel="icon" href="/icon.png">
 <link rel="apple-touch-icon" href="/icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header class="top">
   <a class="brand" href="#/" tabindex="-1"><img src="/icon.png" alt=""> Flex</a>
   <button class="back" id="back" hidden>‹ Back</button>
+  <a class="back remote-link" href="#/remote" tabindex="-1">📺 Remote</a>
 </header>
 <main id="main" aria-live="polite"></main>
 <div class="toast" id="toast" hidden></div>
 <script src="/subtitles.js"></script>
 <script src="/player.js"></script>
 <script src="/music.js"></script>
+<script src="/remote.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -313,6 +313,8 @@ pub struct Shared {
     web_published: Vec<(i64, u64, String)>,
     web_tx: Sender<flex_web::Change>,
     web_rx: Receiver<flex_web::Change>,
+    /// The phone remote's commands, for the app to carry out.
+    pub remote: Vec<flex_web::remote::Remote>,
     /// Plugins found on disk (only switched-on ones run).
     pub plugins: flex_core::plugins::Host,
     /// Screen colours for plugins subscribed to `light`.
@@ -365,6 +367,7 @@ impl Shared {
             web_published: Vec::new(),
             web_tx,
             web_rx,
+            remote: Vec::new(),
             plugins,
             ambient,
             playback_sent: None,
@@ -523,6 +526,13 @@ impl Shared {
                         file.progress = progress;
                         state.version += 1;
                     }
+                }
+                flex_web::Change::Remote(command) => {
+                    log::info!("remote: {command:?}");
+                    self.remote.push(command);
+                }
+                flex_web::Change::Search { query, reply } => {
+                    let _ = reply.try_send(self.remote_search(&query));
                 }
             }
         }
@@ -1798,6 +1808,17 @@ impl Shared {
     /// Handles plugin messages, tells plugins about playback and updates lights.
     /// `playing`: what the top screen is playing, if anything, and the library file.
     pub fn poll_plugins(&mut self, playing: Option<(Playback, Option<(i64, i64)>)>) {
+        if let Some(web) = &self.web {
+            let now_playing = playing.as_ref().filter(|(p, _)| p.state != PlaybackState::Stopped).map(|(p, _)| flex_web::remote::NowPlaying {
+                title: p.title.clone(),
+                paused: p.state == PlaybackState::Paused,
+                // Whole seconds, so the status only changes once a second.
+                position: p.position.map(f64::floor),
+                duration: p.duration.map(f64::floor),
+            });
+            let youtube = self.youtube.tools.is_some() && self.youtube_enabled();
+            web.set_status(flex_web::remote::Status { playing: now_playing, youtube });
+        }
         let mut wait = self.plugins.poll(&self.db);
         let plugin_toasts = self.plugins.take_toasts();
         self.toasts.extend(plugin_toasts);
@@ -2116,6 +2137,24 @@ impl Shared {
             items.extend(path_items(&l.lib, &l.tree));
         }
         items
+    }
+
+    /// The phone remote's search: shows and films, then episodes.
+    fn remote_search(&mut self, query: &str) -> Vec<flex_web::remote::Hit> {
+        use flex_core::search::{Scope, Target};
+        let mut items = self.search(query, Scope::Titles, 25);
+        items.extend(self.search(query, Scope::Episodes, 25));
+        items
+            .into_iter()
+            .filter_map(|item| {
+                let (library, show, file) = match item.target {
+                    Target::Show { library_id, show_id } => (library_id, Some(show_id), None),
+                    Target::Episode { library_id, file_id } | Target::File { library_id, file_id } => (library_id, None, Some(file_id)),
+                    _ => return None,
+                };
+                Some(flex_web::remote::Hit { title: item.title, context: item.context, library, show, file })
+            })
+            .collect()
     }
 
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {

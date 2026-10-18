@@ -155,3 +155,23 @@ you like. See [PLUGINS.md](PLUGINS.md).
 Arrows to move, OK to select, Back to go back. Hold OK for more options, and hold Back
 to quit. Play/pause, stop and next/previous work if your remote has them, and on my
 remote zoom+ toggles fullscreen and zoom- jumps to search.
+
+## Your phone as a remote
+
+Switch on Settings → Web access, then open the address it shows on your phone and tap
+📺 Remote. It has the remote's buttons (plus play/pause and "subtitles off"), shows
+what's playing, and searches your libraries and YouTube: tap an episode or video and it
+plays on the TV. Show pages in the web UI get a 📺 button on each episode too. Anyone on
+your home network can use it, as with the rest of the web UI.
+
+It can be installed as an app, so it gets its own icon and opens without the browser's
+bars. Chrome only installs apps from secure (HTTPS) addresses, and Flex's address on your
+home network isn't one, so on Android tell Chrome to trust it, once:
+
+1. In Chrome, open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. Enter Flex's address, e.g. `http://192.168.1.20:8484`, set the flag to Enabled and
+   relaunch Chrome.
+3. Open that address, then ⋮ → Add to home screen → Install.
+
+Without the flag, Add to home screen still makes a shortcut, but it opens in a normal
+Chrome tab.
