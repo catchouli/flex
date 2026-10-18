@@ -321,6 +321,14 @@ impl FlexApp {
                     let sh = &mut self.sh;
                     self.stack.last_mut().expect("never empty").subtitles_off(sh);
                 }
+                Remote::Volume { up } => match crate::volume::change(up) {
+                    Ok(Some(level)) => self.sh.toast_keyed("volume", format!("Volume {level}%")),
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::warn!("volume: {e}");
+                        self.sh.toast(format!("Couldn't change the volume: {e}"));
+                    }
+                },
             }
             ctx.request_repaint();
         }

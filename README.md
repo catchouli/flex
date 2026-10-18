@@ -176,7 +176,8 @@ file's own default. F2 shows playback stats.
 ## Your phone as a remote
 
 Switch on Settings → Web access, then open the address it shows on your phone and tap
-📺 Remote. It has the remote's buttons (plus play/pause and "subtitles off"), shows
+📺 Remote. It has the remote's buttons (plus play/pause, the computer's volume, which
+repeats while held, and "subtitles off"), shows
 what's playing, and searches like the TV does, one scope at a time (Movies & shows, each
 library, Episodes, and YouTube when it's on): tap an episode or video and it plays on
 the TV. Show pages in the web UI get a 📺 button on each episode too. Anyone on

@@ -1369,6 +1369,11 @@ impl Shared {
         self.toasts.push(flex_core::plugins::Toast::new(msg));
     }
 
+    /// A toast that replaces the last one with the same key (e.g. the volume level).
+    pub fn toast_keyed(&mut self, key: &str, msg: impl Into<String>) {
+        self.toasts.push(flex_core::plugins::Toast { key: Some(key.to_owned()), ..flex_core::plugins::Toast::new(msg) });
+    }
+
     pub fn take_toasts(&mut self) -> Vec<flex_core::plugins::Toast> {
         std::mem::take(&mut self.toasts)
     }

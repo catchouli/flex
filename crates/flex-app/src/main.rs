@@ -22,6 +22,7 @@ mod theme;
 mod topbar;
 mod tray;
 mod update;
+mod volume;
 mod youtube;
 mod widgets;
 

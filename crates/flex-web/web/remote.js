@@ -14,7 +14,8 @@ const Remote = (() => {
   async function press(key) {
     buzz();
     try {
-      await post("/api/remote/key", key === "subs-off" ? { action: key } : { key });
+      // Keys are pressed in Flex; actions ("subs-off", "volume-up"…) are carried out.
+      await post("/api/remote/key", key.includes("-") ? { action: key } : { key });
     } catch (err) {
       toast(`Couldn't reach Flex: ${err.message}`);
     }
@@ -62,6 +63,24 @@ const Remote = (() => {
   const button = (label, key, extra = "") =>
     h("button", { class: `rk ${extra}`, "data-key": `r-${key}`, "aria-label": key, onclick: () => press(key) }, label);
 
+  /** A volume button: one step per tap, repeating while held. */
+  function volume(label, action) {
+    let timer = null;
+    const stop = () => { clearInterval(timer); timer = null; };
+    const start = (e) => {
+      e.preventDefault(); // no long-press menu or text selection on phones
+      stop();
+      press(action);
+      timer = setInterval(() => press(action), 250);
+    };
+    return h("button", {
+      class: "rk", "data-key": `r-${action}`, "aria-label": action === "volume-up" ? "Volume up" : "Volume down",
+      onpointerdown: start, onpointerup: stop, onpointerleave: stop, onpointercancel: stop, oncontextmenu: (e) => e.preventDefault(),
+      // Keyboard (Enter/Space) clicks have no pointer events.
+      onclick: (e) => { if (e.detail === 0) press(action); },
+    }, label);
+  }
+
   function pad() {
     return h("div", { class: "remote" },
       h("div", { class: "dpad" },
@@ -72,6 +91,9 @@ const Remote = (() => {
         button("‹ Back", "back"),
         button("⏯", "playpause"),
         button("☰ Options", "menu")),
+      h("div", { class: "keys" },
+        volume("🔉 −", "volume-down"),
+        volume("🔊 +", "volume-up")),
       h("div", { class: "keys" },
         h("button", { class: "rk small", "data-key": "r-subs", onclick: () => press("subs-off") }, "Subtitles off")));
   }
