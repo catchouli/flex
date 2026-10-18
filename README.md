@@ -40,6 +40,11 @@ to whichever PC is plugged into your TV.
 On a Mac it'll pick up the libmpv that comes with [IINA](https://iina.io) if you have it,
 or you can point `FLEX_LIBMPV` at a `libmpv.2.dylib`.
 
+On Linux, install libmpv from your distro (`apt install libmpv2` on Debian and Ubuntu)
+and run `flex`. Each release has a `linux-x64.tar.gz` too. It works under Wayland
+(including kiosk setups like cage) or X11. The remote's media buttons are read from
+`/dev/input`, so add yourself to the `input` group for those.
+
 Then:
 
 1. Open Settings and add your libraries, picking whether each is Movies, TV, Anime or

@@ -1,4 +1,4 @@
-# cargo-about: licenses of the Rust crates compiled into flex.exe, bundled with releases
+# cargo-about: licenses of the Rust crates compiled into Flex (Windows and Linux), bundled with releases
 # (see .github/scripts/package.sh). Run: cargo about generate about.hbs
 accepted = [
     "0BSD",
@@ -16,7 +16,7 @@ accepted = [
     "Unlicense",
     "Zlib",
 ]
-targets = ["x86_64-pc-windows-msvc"]
+targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
 # Flex's own crates (publish = false) aren't third-party.
