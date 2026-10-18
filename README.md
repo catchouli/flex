@@ -30,22 +30,19 @@ plugin does just that, talking to the strip over Bluetooth with
 
 ## Getting it running
 
-You'll need Rust and a copy of libmpv.
+Download Flex from the [releases page](https://github.com/catchouli/flex/releases/latest):
 
-On Windows, run `cargo build --release`, then grab `libmpv-2.dll` from the
-[mpv releases](https://github.com/mpv-player/mpv/releases) page
-and drop it next to `flex.exe`. Those two files are all you need, so you can copy them
-to whichever PC is plugged into your TV.
+- **Windows:** run the `windows-x64-setup.exe` installer, or unzip the `windows-x64.zip`
+  anywhere and run `flex.exe`. Everything it needs is included, so you can copy the
+  folder to whichever PC is plugged into your TV.
+- **Linux:** unpack the `linux-x64.tar.gz`, install libmpv from your distro
+  (`apt install libmpv2` on Debian and Ubuntu) and run `flex`. To use a remote's media
+  buttons, add yourself to the `input` group.
+- **Mac:** there's no download yet, so you'll need to build it yourself.
 
-On a Mac it'll pick up the libmpv that comes with [IINA](https://iina.io) if you have it,
-or you can point `FLEX_LIBMPV` at a `libmpv.2.dylib`.
+To build Flex from source, see [BUILDING.md](BUILDING.md).
 
-On Linux, install libmpv from your distro (`apt install libmpv2` on Debian and Ubuntu)
-and run `flex`. Each release has a `linux-x64.tar.gz` too. It works under Wayland
-(including kiosk setups like cage) or X11. The remote's media buttons are read from
-`/dev/input`, so add yourself to the `input` group for those.
-
-Then:
+Once it's running:
 
 1. Open Settings and add your libraries, picking whether each is Movies, TV, Anime or
    Music.
