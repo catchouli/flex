@@ -356,10 +356,13 @@ pub fn button(painter: &Painter, rect: Rect, label: &str, focused: bool, style: 
 
 /// Screen title with an optional dim subtitle; returns the rect left below it.
 pub fn header(painter: &Painter, rect: Rect, title: &str, subtitle: &str, style: &egui::Style) -> Rect {
-    let clip = painter.with_clip_rect(rect);
-    theme::paint_title(&clip, rect, title, TextStyle::Heading.resolve(style));
+    // A title bar reaches a little above `rect`.
+    let clip = painter.with_clip_rect(rect.with_min_y(rect.top() - 12.0));
+    let title = theme::paint_title(&clip, rect, title, TextStyle::Heading.resolve(style));
     let mut top = rect.top() + 70.0;
     if !subtitle.is_empty() {
+        // Clear of a title bar.
+        top = top.max(title.bottom() + 8.0);
         theme::shadow_text(&clip, egui::pos2(rect.left(), top), Align2::LEFT_TOP, subtitle, TextStyle::Small.resolve(style), theme::dim());
         top += 40.0;
     }
