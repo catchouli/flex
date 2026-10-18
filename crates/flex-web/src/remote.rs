@@ -38,6 +38,8 @@ pub enum Remote {
     YouTube { id: String, title: String },
     /// Turns subtitles off (holding Up on the TV remote).
     SubtitlesOff,
+    /// The system volume, up or down a step.
+    Volume { up: bool },
 }
 
 /// Where the remote searches, like the scopes along the top of the TV's search.
@@ -97,7 +99,7 @@ pub(crate) async fn status(AxState(state): AxState<Arc<State>>) -> Json<Status> 
 #[derive(Deserialize)]
 pub(crate) struct KeyBody {
     key: Option<Key>,
-    /// "subs-off".
+    /// "subs-off", "volume-up" or "volume-down".
     action: Option<String>,
 }
 
@@ -105,6 +107,8 @@ pub(crate) async fn key(AxState(state): AxState<Arc<State>>, Json(body): Json<Ke
     let command = match (body.key, body.action.as_deref()) {
         (Some(key), _) => Remote::Key(key),
         (None, Some("subs-off")) => Remote::SubtitlesOff,
+        (None, Some("volume-up")) => Remote::Volume { up: true },
+        (None, Some("volume-down")) => Remote::Volume { up: false },
         _ => return StatusCode::BAD_REQUEST,
     };
     (state.on_change)(Change::Remote(command));
@@ -226,6 +230,7 @@ mod tests {
 
         assert_eq!(post("/api/remote/key", serde_json::json!({ "key": "playpause" })), 204);
         assert_eq!(post("/api/remote/key", serde_json::json!({ "action": "subs-off" })), 204);
+        assert_eq!(post("/api/remote/key", serde_json::json!({ "action": "volume-down" })), 204);
         assert_eq!(post("/api/remote/key", serde_json::json!({ "key": "jump" })), 422);
         assert_eq!(post("/api/remote/play", serde_json::json!({ "library": 1, "file": 7 })), 204);
         assert_eq!(post("/api/remote/play", serde_json::json!({ "youtube": "aqz-KE-bpKQ", "title": "Bunny" })), 204);
@@ -235,6 +240,7 @@ mod tests {
             [
                 "Key(PlayPause)",
                 "SubtitlesOff",
+                "Volume { up: false }",
                 "Play { library_id: 1, file_id: 7 }",
                 "YouTube { id: \"aqz-KE-bpKQ\", title: \"Bunny\" }",
             ]
