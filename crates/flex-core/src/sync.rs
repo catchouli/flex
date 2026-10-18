@@ -380,7 +380,10 @@ pub fn apply(db: &mut Db, snapshots: &[Snapshot]) -> Result<Applied> {
     let mut applied = Applied::default();
     // Libraries are paired by name (each device has its own folder for them).
     let libraries: HashMap<String, i64> = db.libraries()?.into_iter().map(|l| (l.name, l.id)).collect();
-    let tx = db.conn.transaction()?;
+    // Take the write lock up front: a transaction that reads and then writes can't wait for
+    // another connection's write in between (SQLite fails it at once, as "locked"), and the
+    // app and this thread both write.
+    let tx = db.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let file_id = |library: &str, path: &str| -> Result<Option<(i64, i64)>> {
         let Some(&lib) = libraries.get(library) else { return Ok(None) };
         Ok(tx

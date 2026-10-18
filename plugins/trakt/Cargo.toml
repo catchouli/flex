@@ -7,5 +7,5 @@ license.workspace = true
 publish = false
 
 [dependencies]
-flex-plugin = { version = "0.9.1", path = "../../crates/flex-plugin" }
+flex-plugin = { version = "0.9.2", path = "../../crates/flex-plugin" }
 ureq = { version = "3", features = ["json"] }

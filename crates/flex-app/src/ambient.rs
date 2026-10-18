@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::glow::{self, HasContext};
-use flex_core::ambient::{self, Boost, Grid, Linear, Mode, Smoother};
+use flex_core::ambient::{self, Boost, Grid, Linear, Mode, Noticeable, Smoother};
 use flex_core::plugins::Host;
 use flex_plugin::Light;
 
@@ -207,7 +207,13 @@ const IDLE_BRIGHTNESS: usize = 6;
 const CHANGE: &str = "OK to change";
 
 pub const CHOICES: [Choice; 7] = [
-    Choice { key: "ambient_mode", label: "Colour from", options: &["The whole picture", "The edges of the picture"], default: 0, detail: CHANGE },
+    Choice {
+        key: "ambient_mode",
+        label: "Colour from",
+        options: &["The whole picture", "The edges of the picture", "The most noticeable colour"],
+        default: 0,
+        detail: CHANGE,
+    },
     Choice { key: "ambient_smoothing", label: "Smoothing", options: &["Off", "Quick", "Medium", "Slow"], default: 2, detail: CHANGE },
     Choice {
         key: "ambient_saturation",
@@ -268,6 +274,8 @@ pub struct Ambient {
     pub values: [usize; CHOICES.len()],
     /// Per zone count (plugins can want different numbers of zones).
     smoothers: HashMap<usize, Smoother>,
+    /// For "the most noticeable colour" (remembers its pick between frames).
+    noticeable: Noticeable,
     last_tick: Option<Instant>,
     /// Nothing to do before this (colours settled), unless what's on screen changes.
     next_tick: Option<Instant>,
@@ -286,6 +294,7 @@ impl Ambient {
             sampler: Arc::default(),
             values,
             smoothers: HashMap::new(),
+            noticeable: Noticeable::default(),
             last_tick: None,
             next_tick: None,
             was_video: false,
@@ -293,8 +302,14 @@ impl Ambient {
         }
     }
 
+    /// How zones are averaged. "The most noticeable colour" is for one-colour lights; ones
+    /// with several zones use the edges for it.
     pub fn mode(&self) -> Mode {
-        if self.values[MODE] == 1 { Mode::Edges } else { Mode::Whole }
+        if self.values[MODE] == 0 { Mode::Whole } else { Mode::Edges }
+    }
+
+    fn noticeable_mode(&self) -> bool {
+        self.values[MODE] == 2
     }
 
     fn idle(&self) -> Idle {
@@ -334,12 +349,15 @@ impl Ambient {
         let saturation = if grid.is_some() { SATURATIONS[self.values[SATURATION]] } else { 1.0 };
         let tau = if grid.is_some() { SMOOTHING_SECS[self.values[SMOOTHING]] } else { IDLE_FADE_SECS };
         let mut settled = true;
+        let noticeable_mode = self.noticeable_mode();
+        let noticeable = &mut self.noticeable;
         let smoothers = &mut self.smoothers;
         let mut one_zone = None;
         plugins.send_light(|zones| {
             let smoother = smoothers.entry(zones).or_default();
             let held = smoother.current().to_vec();
             let target = match (&grid, &idle) {
+                (Some(grid), _) if noticeable_mode && zones == 1 => boost.apply(&[noticeable.pick(grid)]),
                 (Some(grid), _) => boost.apply(&grid.zones(zones, mode)),
                 // Video without a fresh frame (loading, seeking), or "keep the last colour".
                 (None, _) if (video || matches!(idle, Idle::Hold)) && !held.is_empty() => held,
