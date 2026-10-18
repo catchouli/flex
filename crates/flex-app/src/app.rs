@@ -170,7 +170,8 @@ impl FlexApp {
             self.sh.toast("Video needs the OpenGL renderer, which isn't available");
             return;
         };
-        match Player::open(ctx, proc_address, req) {
+        let picture = self.sh.picture_for(&req);
+        match Player::open(ctx, proc_address, req, picture) {
             Ok(player) => {
                 if replace {
                     self.pop();

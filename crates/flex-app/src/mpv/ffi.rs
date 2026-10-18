@@ -123,11 +123,11 @@ api! {
 /// Library file names to try, in order. Each is looked up next to the executable first,
 /// then via the platform's normal library search.
 #[cfg(target_os = "windows")]
-const NAMES: &[&str] = &["libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"];
+pub const NAMES: &[&str] = &["libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"];
 #[cfg(target_os = "macos")]
-const NAMES: &[&str] = &["libmpv.2.dylib", "libmpv.dylib"];
+pub const NAMES: &[&str] = &["libmpv.2.dylib", "libmpv.dylib"];
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-const NAMES: &[&str] = &["libmpv.so.2", "libmpv.so"];
+pub const NAMES: &[&str] = &["libmpv.so.2", "libmpv.so"];
 
 /// Extra absolute locations checked after the executable's directory.
 #[cfg(target_os = "macos")]
@@ -144,13 +144,28 @@ const EXTRA_DIRS: &[&str] = &[];
 /// Environment variable that overrides the libmpv path entirely.
 pub const PATH_ENV: &str = "FLEX_LIBMPV";
 
+/// A folder to try before all the others (SVP's libmpv, see [`crate::picture`]).
+static PREFERRED: OnceLock<PathBuf> = OnceLock::new();
+/// Where libmpv was loaded from.
+static LOADED: OnceLock<PathBuf> = OnceLock::new();
+
+/// Tries libmpv in `dir` first. Only has an effect before libmpv is first loaded.
+pub fn prefer_dir(dir: PathBuf) {
+    let _ = PREFERRED.set(dir);
+}
+
+/// Where libmpv was loaded from, once it has been.
+pub fn loaded_from() -> Option<&'static std::path::Path> {
+    LOADED.get().map(PathBuf::as_path)
+}
+
 fn candidates() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os(PATH_ENV) {
         return vec![PathBuf::from(path)];
     }
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from));
     let mut out = Vec::new();
-    for dir in exe_dir.iter().cloned().chain(EXTRA_DIRS.iter().map(PathBuf::from)) {
+    for dir in PREFERRED.get().into_iter().cloned().chain(exe_dir).chain(EXTRA_DIRS.iter().map(PathBuf::from)) {
         out.extend(NAMES.iter().map(|n| dir.join(n)));
     }
     // Bare names last, so the OS search path (PATH / DYLD paths) gets a chance.
@@ -167,6 +182,8 @@ pub fn api() -> Result<&'static Api, String> {
             // Safety: loading libmpv runs its (trusted) initialisers only.
             match unsafe { Library::new(&path) } {
                 Ok(lib) => {
+                    log::info!("libmpv: {}", path.display());
+                    let _ = LOADED.set(path.clone());
                     return unsafe { Api::load(lib) }
                         .map_err(|e| format!("{} is missing symbols: {e}", path.display()));
                 }

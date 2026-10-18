@@ -374,6 +374,7 @@ impl Shared {
             sync: None,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
+        shared.check_svp();
         if shared.youtube_enabled() {
             // Installs yt-dlp if it's missing; otherwise only checks once a day.
             shared.youtube.update_tools(false);
@@ -1502,6 +1503,88 @@ impl Shared {
             SkipMode::Off => "off",
         };
         self.set_setting(SKIP_SETTING, value);
+    }
+
+    pub fn picture_upscale(&self) -> crate::picture::Upscale {
+        crate::picture::Upscale::from_setting(self.setting(crate::picture::UPSCALE_SETTING).as_deref())
+    }
+
+    pub fn set_picture_upscale(&mut self, upscale: crate::picture::Upscale) {
+        self.set_setting(crate::picture::UPSCALE_SETTING, upscale.setting());
+    }
+
+    pub fn picture_smooth(&self) -> bool {
+        self.setting_bool(crate::picture::SMOOTH_SETTING)
+    }
+
+    /// Switches 60fps smoothing on, if SVP is installed (otherwise says so and leaves it
+    /// off), or off.
+    pub fn set_picture_smooth(&mut self, on: bool) {
+        use crate::picture::svp;
+        if !on {
+            self.set_setting_bool(crate::picture::SMOOTH_SETTING, false);
+            return;
+        }
+        let Some(found) = svp::find() else {
+            self.set_setting_bool(crate::picture::SMOOTH_SETTING, false);
+            self.toast("60fps needs SVP (svp-team.com), which isn't installed, so it's been left off");
+            return;
+        };
+        self.set_setting_bool(crate::picture::SMOOTH_SETTING, true);
+        if !svp::using_its_libmpv(&found) {
+            self.toast("60fps is on: restart Flex to play through SVP's copy of mpv. Keep SVP running");
+        } else {
+            self.toast("60fps is on. Keep SVP running");
+        }
+    }
+
+    /// At startup: with 60fps on, plays through SVP's libmpv, or switches 60fps off (with
+    /// a warning) if SVP has gone.
+    fn check_svp(&mut self) {
+        if !self.picture_smooth() {
+            return;
+        }
+        match crate::picture::svp::find() {
+            Some(found) => {
+                log::info!("SVP: {}", found.dir.display());
+                if let Some(dir) = found.libmpv_dir {
+                    crate::mpv::ffi::prefer_dir(dir);
+                }
+            }
+            None => {
+                self.set_setting_bool(crate::picture::SMOOTH_SETTING, false);
+                self.toast("SVP isn't installed any more, so 60fps has been switched off");
+            }
+        }
+    }
+
+    /// Whether a library uses the picture enhancements that are on (yes unless switched
+    /// off there).
+    pub fn library_upscale(&self, library_id: i64) -> bool {
+        self.setting(&crate::picture::upscale_key(library_id)).as_deref() != Some("false")
+    }
+
+    pub fn set_library_upscale(&mut self, library_id: i64, on: bool) {
+        self.set_setting_bool(&crate::picture::upscale_key(library_id), on);
+    }
+
+    pub fn library_smooth(&self, library_id: i64) -> bool {
+        self.setting(&crate::picture::smooth_key(library_id)).as_deref() != Some("false")
+    }
+
+    pub fn set_library_smooth(&mut self, library_id: i64, on: bool) {
+        self.set_setting_bool(&crate::picture::smooth_key(library_id), on);
+    }
+
+    /// The enhancements a video gets: those switched on, unless its library opts out.
+    /// Videos outside libraries (YouTube) get none.
+    pub fn picture_for(&self, req: &PlayRequest) -> crate::picture::Picture {
+        use crate::picture::{Picture, Upscale};
+        if req.library_id < 0 {
+            return Picture::default();
+        }
+        let upscale = Some(self.picture_upscale()).filter(|u| *u != Upscale::Off && self.library_upscale(req.library_id));
+        Picture { upscale, smooth: self.picture_smooth() && self.library_smooth(req.library_id) }
     }
 
     pub fn youtube_enabled(&self) -> bool {
