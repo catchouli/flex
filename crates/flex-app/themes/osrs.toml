@@ -1,35 +1,48 @@
-# Inspired by Old School RuneScape's interface: bevelled brown panels on stone, orange
-# text and yellow titles with a hard black shadow. Drawn by Flex (the stone is made
-# in code); nothing is taken from the game.
+# Inspired by Old School RuneScape's interface: the screen is the inventory, a brown
+# panel between carved stone pillars; buttons and rows are bevelled tab stones, the
+# focused one red like the open tab; messages and the player's controls are the
+# parchment chatbox. Drawn by Flex (the pillars and stone are made in code); nothing is
+# taken from the game.
 name = "Old School RuneScape"
-description = "Brown stone panels, orange text and yellow titles"
+description = "The inventory between stone pillars, tab-stone buttons and a parchment chatbox"
 dark = true
 
 [colours]
-background = "#34312b"
+background = "#3e3529"
 text = "#ff981f"
 dim = "#c8aa78"
-panel = "#3b3226"
+panel = "#4a3f31"
 panel_text = "#ff981f"
 panel_dim = "#bfa27a"
-accent = "#ffff00"
-on_accent = "#000000"
-overlay = "#2b2419ee"
-overlay_text = "#ff981f"
+accent = "#7d2b1c"
+on_accent = "#ffff00"
+highlight = "#ffff00"
+progress = "#0dc10d"
+overlay = "#d3c49e"
+overlay_text = "#000000"
 
 [panel]
-radius = 0
+radius = 3
+gradient = "#3b3226"
 border = { width = 1, colour = "#000000" }
-bevel = { light = "#5d523f", dark = "#1a150f", width = 3 }
+bevel = { light = "#6e604a", dark = "#1e1912", width = 3 }
 
 [focus]
-style = "outline"
+style = "fill"
+gradient = "#511a10"
 
 [header]
 text = "#ffff00"
 
 [background]
-pattern = "stone"
+pattern = "osrs"
+
+[overlay]
+radius = 0
+gradient = "#bfae86"
+border = { width = 3, colour = "#2b2318" }
+inner_border = { width = 2, colour = "#86745a" }
+inner_gap = 1
 
 [text]
 shadow = "#000000"

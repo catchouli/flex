@@ -1,6 +1,6 @@
 //! Backgrounds and pictures for themes, all drawn in code: tiled patterns (stone,
-//! pinstripes, falling code), painted scenes (rolling hills, a farmyard) and pixel-art
-//! sprites. Nothing here is taken from a game or website.
+//! pinstripes, falling code), painted scenes (rolling hills, a farmyard, a stone frame
+//! with pillars) and pixel-art sprites. Nothing here is taken from a game or website.
 
 use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, pos2, vec2};
 
@@ -46,8 +46,21 @@ pub fn make_pattern(name: &str, base: Color32) -> Option<egui::ColorImage> {
             Some(egui::ColorImage::new([8, 8], pixels))
         }
         "rain" => Some(rain(base)),
+        "osrs" => Some(mottle(base)),
         _ => None,
     }
+}
+
+/// Faint blotches of lighter and darker, like a worn interface panel.
+fn mottle(base: Color32) -> egui::ColorImage {
+    const SIZE: usize = 64;
+    let pixels = (0..SIZE * SIZE)
+        .map(|i| {
+            let (x, y) = (i % SIZE, i / SIZE);
+            scale(base, 0.94 + noise(x / 4, y / 4, 37) * 0.08 + noise(x, y, 41) * 0.04)
+        })
+        .collect();
+    egui::ColorImage::new([SIZE, SIZE], pixels)
 }
 
 /// Uneven stone blocks with speckle.
@@ -157,9 +170,91 @@ pub fn paint_scene(painter: &Painter, rect: Rect, name: &str, hill: Color32, hil
     match name {
         "hills" => paint_hills(painter, rect, hill, hill_bottom),
         "farmyard" => paint_farmyard(painter, rect),
+        "osrs" => paint_stone_frame(painter, rect),
         _ => return false,
     }
     true
+}
+
+/// Carved stone: light, middle, dark and the black outline.
+const STONE: [Color32; 4] = [
+    Color32::from_rgb(0x9c, 0x8f, 0x74),
+    Color32::from_rgb(0x6f, 0x64, 0x4f),
+    Color32::from_rgb(0x41, 0x38, 0x2b),
+    Color32::from_rgb(0x0e, 0x0b, 0x08),
+];
+
+/// A stone block: outlined, lit along the top and left, shaded along the bottom and right.
+fn stone_block(painter: &Painter, r: Rect, shade: f32) {
+    let [light, mid, dark, outline] = STONE;
+    let edge = (r.height().min(r.width()) * 0.12).clamp(1.5, 4.0);
+    painter.rect_filled(r, CornerRadius::ZERO, outline);
+    let inner = r.shrink(1.5);
+    painter.rect_filled(inner, CornerRadius::ZERO, scale(mid, shade));
+    painter.rect_filled(Rect::from_min_size(inner.min, vec2(inner.width(), edge)), CornerRadius::ZERO, scale(light, shade));
+    painter.rect_filled(Rect::from_min_size(inner.min, vec2(edge, inner.height())), CornerRadius::ZERO, scale(light, shade));
+    painter.rect_filled(Rect::from_min_max(pos2(inner.left(), inner.bottom() - edge), inner.max), CornerRadius::ZERO, scale(dark, shade));
+    painter.rect_filled(Rect::from_min_max(pos2(inner.right() - edge, inner.top() + edge), inner.max), CornerRadius::ZERO, scale(dark, shade));
+}
+
+/// A band of stone blocks of uneven width across `r`.
+fn stone_band(painter: &Painter, r: Rect, seed: u32) {
+    let mut x = r.left() - noise(0, 0, seed) * 40.0;
+    let mut i = 0;
+    while x < r.right() {
+        let w = r.height() * (1.6 + noise(i, 1, seed) * 1.8);
+        stone_block(painter, Rect::from_min_max(pos2(x, r.top()), pos2(x + w, r.bottom())), 0.85 + noise(i, 2, seed) * 0.25);
+        x += w;
+        i += 1;
+    }
+}
+
+/// A fluted stone pillar filling `r` (its capital and base reach a little either side).
+fn pillar(painter: &Painter, r: Rect, seed: u32) {
+    let [light, mid, dark, outline] = STONE;
+    let w = r.width();
+    let cap_h = w * 0.55;
+    let shaft = Rect::from_min_max(pos2(r.left(), r.top() + cap_h * 1.4), pos2(r.right(), r.bottom() - cap_h * 1.4));
+    painter.rect_filled(shaft.expand2(vec2(1.5, 0.0)), CornerRadius::ZERO, outline);
+    // Drums of stone, each a little different, with flutes running down them.
+    const FLUTES: [(f32, usize); 5] = [(0.16, 2), (0.2, 1), (0.28, 0), (0.2, 1), (0.16, 2)];
+    let drum_h = w * 2.6;
+    let drums = (shaft.height() / drum_h).round().max(1.0) as usize;
+    let drum_h = shaft.height() / drums as f32;
+    for d in 0..drums {
+        let shade = 0.88 + noise(d, 0, seed) * 0.2;
+        let top = shaft.top() + d as f32 * drum_h;
+        let mut x = shaft.left();
+        for (frac, tone) in FLUTES {
+            let colour = scale([light, mid, dark][tone], shade);
+            painter.rect_filled(Rect::from_min_size(pos2(x, top), vec2(w * frac, drum_h)), CornerRadius::ZERO, colour);
+            x += w * frac;
+        }
+        if d > 0 {
+            // The joint: a dark seam with a lit edge under it.
+            painter.rect_filled(Rect::from_min_size(pos2(shaft.left(), top - 1.0), vec2(w, 2.0)), CornerRadius::ZERO, outline);
+            painter.rect_filled(Rect::from_min_size(pos2(shaft.left(), top + 1.0), vec2(w, 1.5)), CornerRadius::ZERO, scale(light, shade * 1.1));
+        }
+    }
+    // Capital and base: a wide slab and a narrower collar against the shaft.
+    for (slab_y, collar_y) in [(r.top(), r.top() + cap_h * 0.75), (r.bottom() - cap_h * 0.75, shaft.bottom())] {
+        stone_block(painter, Rect::from_min_size(pos2(r.left() - w * 0.18, slab_y), vec2(w * 1.36, cap_h * 0.75)), 1.0);
+        stone_block(painter, Rect::from_min_size(pos2(r.left() - w * 0.06, collar_y), vec2(w * 1.12, cap_h * 0.65)), 0.92);
+    }
+}
+
+/// A stone frame in the screen's overscan margin: a band of blocks along the top and
+/// bottom, and a pillar down each side.
+fn paint_stone_frame(painter: &Painter, rect: Rect) {
+    let (mx, my) = (rect.width() * crate::theme::SAFE_MARGIN, rect.height() * crate::theme::SAFE_MARGIN);
+    let band = (my * 0.7).clamp(10.0, 34.0);
+    stone_band(painter, Rect::from_min_size(rect.min, vec2(rect.width(), band)), 43);
+    stone_band(painter, Rect::from_min_max(pos2(rect.left(), rect.bottom() - band), rect.max), 47);
+    let w = (mx * 0.72).clamp(12.0, 56.0);
+    for (side, x) in [(0, rect.left() + mx / 2.0), (1, rect.right() - mx / 2.0)] {
+        let r = Rect::from_min_max(pos2(x - w / 2.0, rect.top() + band), pos2(x + w / 2.0, rect.bottom() - band));
+        pillar(painter, r, 53 + side);
+    }
 }
 
 /// A soft cloud of overlapping puffs.
@@ -491,7 +586,7 @@ mod tests {
 
     #[test]
     fn patterns_are_made() {
-        for name in ["stone", "pinstripes", "rain"] {
+        for name in ["stone", "pinstripes", "rain", "osrs"] {
             assert!(make_pattern(name, Color32::from_rgb(60, 50, 40)).is_some(), "{name}");
         }
         assert!(make_pattern("farmyard", Color32::BLACK).is_none(), "scenes are painted, not tiled");

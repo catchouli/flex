@@ -387,7 +387,7 @@ impl ShowsView {
         let Some(rect) = self.popup_rect(toolbar) else { return };
         let Some((tool, list)) = &mut self.popup else { return };
         let (options, current) = tool.options(&self.prefs);
-        ui.painter().rect_filled(rect.expand(6.0), CornerRadius::same(12), theme::overlay());
+        theme::paint_overlay(ui.painter(), rect.expand(6.0), 12.0);
         let rows: Vec<Row> = options
             .iter()
             .enumerate()

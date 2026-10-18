@@ -220,6 +220,9 @@ pub struct Theme {
     pub header: HeaderStyle,
     #[serde(default)]
     pub background: BackgroundStyle,
+    /// How messages and the player's controls are drawn, like panels (in the `overlay`
+    /// colour); a plain rounded box when not given.
+    pub overlay: Option<PanelStyle>,
     #[serde(default)]
     pub text: TextStyleConfig,
     /// Its id (folder name, or built-in name) and folder (for images), set when loaded.
@@ -244,10 +247,11 @@ impl Theme {
 }
 
 /// The themes that come with Flex, in the order Settings lists them.
-const BUILT_IN: [(&str, &str); 10] = [
+const BUILT_IN: [(&str, &str); 11] = [
     ("dark", include_str!("../themes/dark.toml")),
     ("ff7", include_str!("../themes/ff7.toml")),
     ("osrs", include_str!("../themes/osrs.toml")),
+    ("brick", include_str!("../themes/brick.toml")),
     ("pokemon", include_str!("../themes/pokemon.toml")),
     ("win95", include_str!("../themes/win95.toml")),
     ("winxp", include_str!("../themes/winxp.toml")),
@@ -453,16 +457,16 @@ pub fn paint_background(painter: &Painter, rect: Rect) {
     let b = &t.background;
     gradient(painter, rect, t.colours.background.0, b.gradient.map(|c| c.0));
     if let Some(pattern) = &b.pattern {
+        // A tiled pattern, then whatever the scene paints over it (some have both).
         if let Some(tex) = texture("pattern") {
             let s = crate::scenery::pattern_scale(pattern);
             let [w, h] = tex.size();
             let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(rect.width() / (s * w as f32), rect.height() / (s * h as f32)));
             painter.image(tex.id(), rect, uv, Color32::WHITE);
-        } else {
-            let hill = b.hill.map_or(Color32::from_rgb(0x6d, 0xbb, 0x3a), |c| c.0);
-            let hill_bottom = b.hill_bottom.map_or(Color32::from_rgb(0x2f, 0x7d, 0x1c), |c| c.0);
-            crate::scenery::paint_scene(painter, rect, pattern, hill, hill_bottom);
         }
+        let hill = b.hill.map_or(Color32::from_rgb(0x6d, 0xbb, 0x3a), |c| c.0);
+        let hill_bottom = b.hill_bottom.map_or(Color32::from_rgb(0x2f, 0x7d, 0x1c), |c| c.0);
+        crate::scenery::paint_scene(painter, rect, pattern, hill, hill_bottom);
     }
     if let Some(tex) = texture("background") {
         let [w, h] = tex.size();
@@ -493,10 +497,47 @@ pub fn paint_panel(painter: &Painter, rect: Rect, focused: bool, selected: bool)
     let p = &t.panel;
     let radius = CornerRadius::same(p.radius.round().clamp(0.0, 255.0) as u8);
     if focused && t.focus.style == FocusKind::Fill {
-        rounded_gradient(painter, rect, p.radius, t.colours.accent.0, t.focus.gradient.map(|c| c.0));
+        paint_box(painter, rect, p, t.colours.accent.0, t.focus.gradient.map(|c| c.0));
     } else {
-        rounded_gradient(painter, rect, p.radius, t.colours.panel.0, p.gradient.map(|c| c.0));
+        paint_box(painter, rect, p, t.colours.panel.0, p.gradient.map(|c| c.0));
     }
+    if focused {
+        if t.focus.style == FocusKind::Outline {
+            painter.rect_stroke(rect, radius, Stroke::new(3.0, t.colours.accent.0), StrokeKind::Inside);
+        }
+        if t.focus.style == FocusKind::Pointer || t.focus.pointer.is_some() {
+            paint_pointer(painter, rect);
+        }
+        if let Some(ring) = &t.focus.ring {
+            painter.rect_stroke(rect, radius, Stroke::new(ring.width, ring.colour.0), StrokeKind::Inside);
+        }
+    } else if selected && t.focus.style != FocusKind::Pointer {
+        // Selected but the list isn't focused (e.g. the top bar has focus).
+        painter.rect_stroke(rect, radius, Stroke::new(2.0, t.colours.accent.0), StrokeKind::Inside);
+    }
+    match (focused, t.focus.style) {
+        (true, FocusKind::Fill) => t.colours.on_accent.0,
+        (true, FocusKind::Outline) => t.colours.accent.0,
+        _ => t.panel_text(),
+    }
+}
+
+/// The box behind messages and the player's controls: the theme's `[overlay]` style, or a
+/// plain box rounded by `radius`, in the overlay colour.
+pub fn paint_overlay(painter: &Painter, rect: Rect, radius: f32) {
+    let t = current();
+    match &t.overlay {
+        Some(style) => paint_box(painter, rect, style, t.colours.overlay.0, style.gradient.map(|c| c.0)),
+        None => {
+            painter.rect_filled(rect, CornerRadius::same(radius as u8), t.colours.overlay.0);
+        }
+    }
+}
+
+/// A box in a panel style: its fill (`top` fading to `bottom`), gloss, bevel and borders.
+fn paint_box(painter: &Painter, rect: Rect, p: &PanelStyle, top: Color32, bottom: Option<Color32>) {
+    let radius = CornerRadius::same(p.radius.round().clamp(0.0, 255.0) as u8);
+    rounded_gradient(painter, rect, p.radius, top, bottom);
     if let Some(gloss) = p.gloss {
         // A sheen over the top half, fading out towards the middle.
         let inset = p.border.as_ref().map_or(0.0, |b| b.width) + 1.0;
@@ -521,25 +562,6 @@ pub fn paint_panel(painter: &Painter, rect: Rect, focused: bool, selected: bool)
         let inset = p.border.as_ref().map_or(0.0, |o| o.width) + p.inner_gap;
         let inner_radius = CornerRadius::same((p.radius - inset).max(0.0).round() as u8);
         painter.rect_stroke(rect.shrink(inset), inner_radius, Stroke::new(b.width, b.colour.0), StrokeKind::Inside);
-    }
-    if focused {
-        if t.focus.style == FocusKind::Outline {
-            painter.rect_stroke(rect, radius, Stroke::new(3.0, t.colours.accent.0), StrokeKind::Inside);
-        }
-        if t.focus.style == FocusKind::Pointer || t.focus.pointer.is_some() {
-            paint_pointer(painter, rect);
-        }
-        if let Some(ring) = &t.focus.ring {
-            painter.rect_stroke(rect, radius, Stroke::new(ring.width, ring.colour.0), StrokeKind::Inside);
-        }
-    } else if selected && t.focus.style != FocusKind::Pointer {
-        // Selected but the list isn't focused (e.g. the top bar has focus).
-        painter.rect_stroke(rect, radius, Stroke::new(2.0, t.colours.accent.0), StrokeKind::Inside);
-    }
-    match (focused, t.focus.style) {
-        (true, FocusKind::Fill) => t.colours.on_accent.0,
-        (true, FocusKind::Outline) => t.colours.accent.0,
-        _ => t.panel_text(),
     }
 }
 

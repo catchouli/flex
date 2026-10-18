@@ -381,9 +381,9 @@ impl FlexApp {
             let screen = ctx.content_rect();
             let rect = Rect::from_center_size(screen.center(), vec2(560.0, 150.0));
             let painter = ui.painter();
-            painter.rect_filled(rect, CornerRadius::same(14), theme::overlay());
+            theme::paint_overlay(painter, rect, 14.0);
             let prompt = if self.tray.is_some() { "Keep holding to close" } else { "Keep holding to quit" };
-            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, prompt, TextStyle::Body.resolve(ui.style()), theme::text());
+            painter.text(rect.center() - vec2(0.0, 22.0), Align2::CENTER_CENTER, prompt, TextStyle::Body.resolve(ui.style()), theme::overlay_text());
             let bar = Rect::from_min_size(pos2(rect.left() + 40.0, rect.bottom() - 46.0), vec2(rect.width() - 80.0, 10.0));
             painter.rect_filled(bar, CornerRadius::same(5), theme::overlay_text().gamma_multiply(0.22));
             let t = ((held - QUIT_PROMPT_SECS) / (QUIT_HOLD_SECS - QUIT_PROMPT_SECS)) as f32;
@@ -407,13 +407,13 @@ impl FlexApp {
         let font = TextStyle::Body.resolve(ui.style());
         let mut bottom = safe.bottom();
         for msg in sticky.iter().chain(self.toasts.iter().rev().map(|(m, _, _)| m)) {
-            let galley = ui.painter().layout(msg.clone(), font.clone(), theme::text(), safe.width() * 0.7);
+            let galley = ui.painter().layout(msg.clone(), font.clone(), theme::overlay_text(), safe.width() * 0.7);
             let rect = Rect::from_center_size(
                 pos2(safe.center().x, bottom - galley.size().y / 2.0 - 16.0),
                 galley.size() + vec2(48.0, 32.0),
             );
-            ui.painter().rect_filled(rect, CornerRadius::same(12), theme::overlay());
-            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::text());
+            theme::paint_overlay(ui.painter(), rect, 12.0);
+            ui.painter().galley(rect.center() - galley.size() / 2.0, galley, theme::overlay_text());
             bottom = rect.top() - 12.0;
         }
         if let Some(next_expiry) = next_expiry {
@@ -438,13 +438,13 @@ impl FlexApp {
         let safe = theme::safe_rect(ui.ctx());
         let rect = Rect::from_min_size(pos2(safe.right() - 760.0, safe.top() + 90.0), vec2(760.0, 560.0));
         let painter = ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(12), theme::overlay());
+        theme::paint_overlay(painter, rect, 12.0);
         let mono = TextStyle::Monospace.resolve(ui.style());
         let mut y = rect.top() + 20.0;
         painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, "Input log (F1 to hide)", mono.clone(), theme::accent());
         for entry in self.input_log.entries() {
             y += 40.0;
-            painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, entry, mono.clone(), theme::text());
+            painter.text(pos2(rect.left() + 24.0, y), Align2::LEFT_TOP, entry, mono.clone(), theme::overlay_text());
         }
     }
 }
