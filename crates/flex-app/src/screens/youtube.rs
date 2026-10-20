@@ -235,9 +235,15 @@ pub struct YouTubeHome {
     loaded: Option<u64>,
 }
 
-/// Search, Channels, History, and which channels' videos to show.
-fn home_buttons(sh: &Shared) -> [&'static str; 4] {
-    ["Search…", "Channels", "History", if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" }]
+/// Search, Channels, History, Refresh, and which channels' videos to show.
+fn home_buttons(sh: &Shared) -> [&'static str; 5] {
+    [
+        "Search…",
+        "Channels",
+        "History",
+        if sh.youtube.refreshing { "Refreshing…" } else { "Refresh" },
+        if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" },
+    ]
 }
 
 impl YouTubeHome {
@@ -276,6 +282,10 @@ impl Screen for YouTubeHome {
             GridInput::Button(0) => Nav::push(TextEntry::youtube_search()),
             GridInput::Button(1) => Nav::push(ChannelList::default()),
             GridInput::Button(2) => Nav::push(YouTubeHistory::default()),
+            GridInput::Button(3) => {
+                sh.refresh_youtube_feeds();
+                Nav::None
+            }
             GridInput::Button(_) => {
                 let on = !sh.youtube_focused_only();
                 sh.set_youtube_focused_only(on);

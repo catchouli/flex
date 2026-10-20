@@ -1811,8 +1811,7 @@ impl Shared {
             }
         }
         self.youtube.version += 1;
-        let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
-        self.youtube.refresh(ids);
+        self.refresh_youtube_feeds();
         Ok(added)
     }
 
@@ -1841,9 +1840,14 @@ impl Shared {
             }
         }
         if self.youtube_enabled() && self.youtube.tools.is_some() && self.youtube.refresh_due() {
-            let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
-            self.youtube.refresh(ids);
+            self.refresh_youtube_feeds();
         }
+    }
+
+    /// Reads every subscription's feed again now (in the background).
+    pub fn refresh_youtube_feeds(&mut self) {
+        let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
+        self.youtube.refresh(ids);
     }
 
     /// Handles plugin messages, tells plugins about playback, keeps the computer awake
