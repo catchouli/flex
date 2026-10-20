@@ -362,7 +362,7 @@ mod tests {
     #[ignore]
     fn relays_youtube_fast() {
         let tools = super::super::Tools::find().expect("yt-dlp");
-        let video = tools.resolve("aqz-KE-bpKQ", 1080).unwrap();
+        let video = tools.resolve("aqz-KE-bpKQ", 1080, false).unwrap();
         let local = global().unwrap().add(&video.video_url, video.video_size);
         let started = std::time::Instant::now();
         let response = ureq::get(&local).header("Range", "bytes=0-").call().unwrap();

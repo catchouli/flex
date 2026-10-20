@@ -1641,6 +1641,17 @@ impl Shared {
 
     pub fn set_youtube_quality(&mut self, height: u32) {
         self.set_setting(crate::youtube::QUALITY_SETTING, &height.to_string());
+        self.youtube.forget_streams();
+    }
+
+    /// Whether to prefer H.264 videos (easier to decode than VP9).
+    pub fn youtube_h264(&self) -> bool {
+        self.setting_bool(crate::youtube::H264_SETTING)
+    }
+
+    pub fn set_youtube_h264(&mut self, on: bool) {
+        self.set_setting_bool(crate::youtube::H264_SETTING, on);
+        self.youtube.forget_streams();
     }
 
     pub fn youtube_shorts(&self) -> bool {
@@ -1671,8 +1682,8 @@ impl Shared {
 
     /// Starts finding a video's streams (and what to skip) ahead of playing it.
     pub fn prepare_youtube(&mut self, id: &str) {
-        let (quality, categories) = (self.youtube_quality(), self.sponsorblock_categories());
-        self.youtube.prepare(id, quality, categories);
+        let (quality, h264, categories) = (self.youtube_quality(), self.youtube_h264(), self.sponsorblock_categories());
+        self.youtube.prepare(id, quality, h264, categories);
     }
 
     pub fn yt_channels(&self) -> Vec<flex_core::youtube::store::Channel> {

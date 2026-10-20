@@ -793,7 +793,7 @@ impl Screen for YouTubeSettings {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        match self.list.handle(press, 7) {
+        match self.list.handle(press, 8) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
                 let on = !sh.youtube_enabled();
@@ -815,17 +815,22 @@ impl Screen for YouTubeSettings {
                 Nav::None
             }
             ListInput::Activate(3) => {
+                let on = !sh.youtube_h264();
+                sh.set_youtube_h264(on);
+                Nav::None
+            }
+            ListInput::Activate(4) => {
                 let on = !sh.youtube_shorts();
                 sh.set_youtube_shorts(on);
                 Nav::None
             }
-            ListInput::Activate(4) => {
+            ListInput::Activate(5) => {
                 let current = sh.youtube_continue_limit();
                 let i = CONTINUE_LIMITS.iter().position(|n| *n == current).unwrap_or(3);
                 sh.set_youtube_continue_limit(CONTINUE_LIMITS[(i + 1) % CONTINUE_LIMITS.len()]);
                 Nav::None
             }
-            ListInput::Activate(5) => Nav::push(SponsorBlockSettings::default()),
+            ListInput::Activate(6) => Nav::push(SponsorBlockSettings::default()),
             ListInput::Activate(_) => Nav::push(ChannelList::default()),
             ListInput::None => Nav::None,
         }
@@ -847,6 +852,8 @@ impl Screen for YouTubeSettings {
             Row::new(Icon::None, format!("YouTube: {}", if on { "on" } else { "off" })).detail("Adds YouTube to Home"),
             Row::new(Icon::Refresh, tools).detail("OK to update now (they also update daily)"),
             Row::new(Icon::None, format!("Quality: up to {}p", sh.youtube_quality())).detail("OK to change"),
+            Row::new(Icon::None, format!("Codec: {}", if sh.youtube_h264() { "H.264 when available" } else { "any (VP9 or H.264)" }))
+                .detail("H.264 is easier on slow machines · OK to change"),
             Row::new(Icon::None, format!("Shorts: {}", if sh.youtube_shorts() { "shown" } else { "hidden" })).detail("OK to change"),
             Row::new(Icon::None, match sh.youtube_continue_limit() {
                 0 => "Continue Watching: no YouTube videos".to_owned(),

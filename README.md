@@ -84,7 +84,8 @@ Videos take a few seconds to start, since yt-dlp has to ask YouTube for them fir
 Flex starts on whichever video you have highlighted, so it's usually ready by the time you
 press OK. Hold OK on a video to mark it watched, see related videos or jump to its
 channel. Settings →
-YouTube also has the quality limit (1080p unless you change it), whether to show Shorts
+YouTube also has the quality limit (1080p unless you change it), an H.264 option for
+machines that struggle to decode VP9, whether to show Shorts
 (hidden by default) and which SponsorBlock categories to skip (sponsors, self-promotion
 and "like and subscribe" reminders by default).
 
