@@ -1,6 +1,6 @@
 name = "AniList"
 description = "Updates your AniList progress as you watch anime in Flex"
-version = "0.18.0"
+version = "0.19.0"
 command = "flex-anilist"
 subscribe = ["playback"]
 
