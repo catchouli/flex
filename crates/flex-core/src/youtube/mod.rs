@@ -7,6 +7,7 @@
 
 pub mod feeds;
 pub mod proxy;
+pub mod recommend;
 pub mod related;
 pub mod sponsorblock;
 pub mod store;

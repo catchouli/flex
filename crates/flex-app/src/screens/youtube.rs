@@ -227,12 +227,15 @@ fn video_input(input: GridInput, items: &[VideoItem]) -> Option<Nav> {
     })
 }
 
-/// YouTube's main page: part-watched videos, then the latest from subscriptions.
+/// YouTube's main page: part-watched videos, then the latest from subscriptions (or
+/// suggestions, "for you").
 #[derive(Default)]
 pub struct YouTubeHome {
     view: VideoGrid,
     items: Vec<VideoItem>,
     loaded: Option<u64>,
+    /// Suggestions are on but there's nothing played or subscribed to suggest from.
+    no_seeds: bool,
 }
 
 /// Search, Channels, History, Refresh, and which channels' videos to show.
@@ -242,7 +245,11 @@ fn home_buttons(sh: &Shared) -> [&'static str; 5] {
         "Channels",
         "History",
         if sh.youtube.refreshing { "Refreshing…" } else { "Refresh" },
-        if sh.youtube_focused_only() { "Showing: focused" } else { "Showing: all channels" },
+        match (sh.youtube_for_you(), sh.youtube_focused_only()) {
+            (true, _) => "Showing: for you",
+            (false, true) => "Showing: focused",
+            (false, false) => "Showing: all channels",
+        },
     ]
 }
 
@@ -267,7 +274,13 @@ impl YouTubeHome {
             })
             .collect();
         let continuing: Vec<String> = items.iter().map(|v| v.id.clone()).collect();
-        items.extend(from_store(sh.yt_latest(LATEST), &progress).into_iter().filter(|v| !continuing.contains(&v.id)));
+        let rest = if sh.youtube_for_you() {
+            let suggested = sh.youtube.for_you.as_ref().and_then(|r| r.as_ref().ok());
+            from_listed(suggested.map_or(&[], Vec::as_slice), &progress).into_iter().filter(|v| !v.watched).collect()
+        } else {
+            from_store(sh.yt_latest(LATEST), &progress)
+        };
+        items.extend(rest.into_iter().filter(|v| !continuing.contains(&v.id)));
         self.items = items;
     }
 }
@@ -284,11 +297,21 @@ impl Screen for YouTubeHome {
             GridInput::Button(2) => Nav::push(YouTubeHistory::default()),
             GridInput::Button(3) => {
                 sh.refresh_youtube_feeds();
+                if sh.youtube_for_you() {
+                    self.no_seeds = !sh.find_youtube_for_you(true);
+                }
                 Nav::None
             }
             GridInput::Button(_) => {
-                let on = !sh.youtube_focused_only();
-                sh.set_youtube_focused_only(on);
+                // All channels → focused → for you → all channels.
+                if sh.youtube_for_you() {
+                    sh.set_youtube_for_you(false);
+                    sh.set_youtube_focused_only(false);
+                } else if sh.youtube_focused_only() {
+                    sh.set_youtube_for_you(true);
+                } else {
+                    sh.set_youtube_focused_only(true);
+                }
                 Nav::None
             }
             input => video_input(input, &self.items).unwrap_or(Nav::None),
@@ -296,11 +319,17 @@ impl Screen for YouTubeHome {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        let for_you = sh.youtube_for_you();
+        // With nothing to suggest from, try again only once something changes.
+        if for_you && sh.youtube.tools.is_some() && (!self.no_seeds || self.loaded != Some(sh.youtube.version)) {
+            self.no_seeds = !sh.find_youtube_for_you(false);
+        }
         self.refresh(sh);
         let channels = sh.yt_channels().len();
         let subtitle = match (sh.youtube.tools.is_some(), channels, sh.youtube.refreshing) {
             (false, _, _) if sh.youtube.tools_busy => "Setting up (downloading yt-dlp)…".to_owned(),
             (false, _, _) => "Not set up: switch YouTube on in Settings → YouTube".to_owned(),
+            (true, _, _) if for_you && sh.youtube.for_you_busy => "Finding videos for you…".to_owned(),
             (true, 0, _) => "Search, or subscribe to channels in Channels".to_owned(),
             (true, n, true) => format!("{} · checking for new videos…", count(n, "channel")),
             (true, n, false) => format!("{} · no ads, sponsors skipped", count(n, "channel")),
@@ -308,6 +337,10 @@ impl Screen for YouTubeHome {
         let body = widgets::header(ui.painter(), rect, "YouTube", &subtitle, ui.style());
         let items = std::mem::take(&mut self.items);
         let empty = match (channels, sh.youtube_focused_only()) {
+            _ if for_you && sh.youtube.for_you_busy => "Finding videos for you…",
+            _ if for_you && self.no_seeds => "Play a few videos or subscribe to channels, and suggestions will show here",
+            _ if for_you && matches!(sh.youtube.for_you, Some(Err(_))) => "Couldn't get suggestions from YouTube. Try Refresh",
+            _ if for_you => "No suggestions yet. Try Refresh",
             (0, _) => "Nothing here yet",
             (_, true) if !sh.yt_channels().iter().any(|c| c.focused) => "No focused channels yet: hold OK on one in Channels",
             _ => "No new videos",

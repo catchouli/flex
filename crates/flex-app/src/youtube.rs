@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flex_core::youtube::feeds::{self, FeedVideo, Listed};
-use flex_core::youtube::related;
+use flex_core::youtube::{recommend, related};
 use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_core::youtube::tools::{self, Tool};
 use flex_core::youtube::{Tools, Video};
@@ -22,6 +22,8 @@ pub const SPONSORBLOCK_SETTING: &str = "youtube_sponsorblock";
 pub const CONTINUE_SETTING: &str = "youtube_continue";
 /// Whether YouTube's page shows only focused channels' videos.
 pub const FOCUSED_SETTING: &str = "youtube_focused_only";
+/// Whether YouTube's page shows suggestions ("for you") instead of subscriptions' videos.
+pub const FOR_YOU_SETTING: &str = "youtube_for_you";
 /// How many part-watched videos Continue Watching keeps, as offered in Settings.
 pub const CONTINUE_LIMITS: [usize; 5] = [0, 3, 5, 10, 20];
 pub const DEFAULT_CONTINUE: usize = 10;
@@ -33,6 +35,8 @@ pub const DEFAULT_QUALITY: u32 = 1080;
 const RESOLVED_FOR: Duration = Duration::from_secs(2 * 3600);
 /// How often subscriptions' feeds are read again.
 const REFRESH_EVERY: Duration = Duration::from_secs(30 * 60);
+/// How long suggestions last before they're found again.
+const FOR_YOU_EVERY: Duration = Duration::from_secs(3600);
 /// A pause between feeds, to be gentle with YouTube.
 const FEED_GAP: Duration = Duration::from_millis(300);
 
@@ -49,6 +53,8 @@ pub enum Msg {
     Related(String, Result<Vec<Listed>, String>),
     /// "Add a channel": its id and name.
     Channel(Result<(String, String), String>),
+    /// Suggestions for YouTube's page.
+    ForYou(Result<Vec<Listed>, String>),
 }
 
 /// A search (or a video's related videos): the query (or video), and its results once in.
@@ -70,6 +76,10 @@ pub struct YouTube {
     pub related: Option<Search>,
     pub refreshing: bool,
     last_refresh: Option<Instant>,
+    /// Suggestions once found (or why not), and whether they're being found now.
+    pub for_you: Option<Result<Vec<Listed>, String>>,
+    pub for_you_busy: bool,
+    for_you_at: Option<Instant>,
     /// Bumped when subscriptions or their videos change, so screens reload.
     pub version: u64,
 }
@@ -90,6 +100,9 @@ impl YouTube {
             related: None,
             refreshing: false,
             last_refresh: None,
+            for_you: None,
+            for_you_busy: false,
+            for_you_at: None,
             version: 0,
         }
     }
@@ -222,6 +235,44 @@ impl YouTube {
         });
     }
 
+    /// Whether suggestions should be found (again).
+    pub fn for_you_due(&self) -> bool {
+        !self.for_you_busy && self.for_you_at.is_none_or(|t| t.elapsed() >= FOR_YOU_EVERY)
+    }
+
+    /// Finds suggestions in the background from each seed's related videos (see
+    /// [`recommend`]). Fails only if every seed's related videos did.
+    pub fn start_for_you(&mut self, seeds: Vec<(String, f32)>, exclude: HashSet<String>, subscribed: HashSet<String>, shorts: bool) {
+        if self.for_you_busy {
+            return;
+        }
+        self.for_you_busy = true;
+        self.for_you_at = Some(Instant::now());
+        self.spawn(move |tx| {
+            let results: Vec<(f32, anyhow::Result<Vec<Listed>>)> = std::thread::scope(|s| {
+                let handles: Vec<_> = seeds.iter().map(|(id, weight)| (*weight, s.spawn(move || related::related(id)))).collect();
+                handles.into_iter().map(|(w, h)| (w, h.join().unwrap_or_else(|_| Err(anyhow::anyhow!("panicked"))))).collect()
+            });
+            let mut lists = Vec::new();
+            let mut error = None;
+            for (weight, result) in results {
+                match result {
+                    Ok(list) => lists.push((weight, list)),
+                    Err(e) => error = Some(format!("{e:#}")),
+                }
+            }
+            let result = match error {
+                Some(e) if lists.is_empty() => Err(e),
+                _ => {
+                    let mut exclude = exclude;
+                    exclude.extend(seeds.into_iter().map(|(id, _)| id));
+                    Ok(recommend::rank(&lists, &exclude, &subscribed, shorts))
+                }
+            };
+            let _ = tx.send(Msg::ForYou(result));
+        });
+    }
+
     /// Looks up a channel from a link or @handle (then subscribes, see `Shared`).
     pub fn find_channel(&self, input: &str) {
         let Some(tools) = self.tools.clone() else { return };
@@ -267,6 +318,14 @@ impl YouTube {
                 Msg::FeedsDone => {
                     self.refreshing = false;
                     out.push(Msg::FeedsDone);
+                }
+                Msg::ForYou(result) => {
+                    if let Err(e) = &result {
+                        log::warn!("youtube: no suggestions: {e}");
+                    }
+                    self.for_you_busy = false;
+                    self.for_you = Some(result);
+                    self.version += 1;
                 }
                 other => out.push(other),
             }
