@@ -15,6 +15,8 @@ use flex_core::youtube::{Tools, Video};
 
 pub const ENABLED_SETTING: &str = "youtube";
 pub const QUALITY_SETTING: &str = "youtube_quality";
+/// Whether to prefer H.264, which slow machines decode more easily than VP9.
+pub const H264_SETTING: &str = "youtube_h264";
 pub const SHORTS_SETTING: &str = "youtube_shorts";
 pub const SPONSORBLOCK_SETTING: &str = "youtube_sponsorblock";
 pub const CONTINUE_SETTING: &str = "youtube_continue";
@@ -115,7 +117,7 @@ impl YouTube {
 
     /// Starts finding a video's streams and SponsorBlock segments, unless that's done or
     /// under way. Called when a video is highlighted, so it's usually ready by OK.
-    pub fn prepare(&mut self, id: &str, max_height: u32, categories: Vec<String>) {
+    pub fn prepare(&mut self, id: &str, max_height: u32, h264: bool, categories: Vec<String>) {
         let fresh = self.resolved.get(id).is_some_and(|(at, r)| r.is_ok() && at.elapsed() < RESOLVED_FOR);
         if fresh || self.resolving.contains(id) {
             return;
@@ -125,7 +127,7 @@ impl YouTube {
         self.resolving.insert(id.to_owned());
         let video_id = id.to_owned();
         self.spawn(move |tx| {
-            let mut result = tools.resolve(&video_id, max_height);
+            let mut result = tools.resolve(&video_id, max_height, h264);
             if let Err(e) = &result {
                 // YouTube may have changed something that a newer yt-dlp handles.
                 log::warn!("youtube: {video_id}: {e:#}; checking for a newer yt-dlp");
@@ -133,7 +135,7 @@ impl YouTube {
                     && report.updated.iter().any(|(t, _)| *t == Tool::YtDlp)
                     && let Some(tools) = Tools::find()
                 {
-                    result = tools.resolve(&video_id, max_height);
+                    result = tools.resolve(&video_id, max_height, h264);
                 }
             }
             let _ = tx.send(Msg::Resolved(video_id, result.map_err(|e| format!("{e:#}"))));
@@ -153,6 +155,11 @@ impl YouTube {
     /// The video's streams once found (or why not).
     pub fn resolved(&self, id: &str) -> Option<&Result<Video, String>> {
         self.resolved.get(id).map(|(_, r)| r)
+    }
+
+    /// Forgets every video's streams, after the quality or codec setting changes.
+    pub fn forget_streams(&mut self) {
+        self.resolved.clear();
     }
 
     /// Forgets a failed attempt so playing again tries again.

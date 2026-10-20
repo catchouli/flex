@@ -72,15 +72,16 @@ impl Tools {
     }
 
     /// Finds the streams for a video (a URL or an 11-character id), at most `max_height`
-    /// pixels tall. Takes a few seconds (it asks YouTube).
-    pub fn resolve(&self, video: &str, max_height: u32) -> Result<Video> {
+    /// pixels tall, and H.264 when `h264` and YouTube has it. Takes a few seconds (it asks
+    /// YouTube).
+    pub fn resolve(&self, video: &str, max_height: u32, h264: bool) -> Result<Video> {
         let url = match video_id(video) {
             Some(id) => format!("https://www.youtube.com/watch?v={id}"),
             None => video.to_owned(),
         };
         let out = self
             .command()
-            .args(["--dump-single-json", "--format", &format_choice(max_height), &url])
+            .args(["--dump-single-json", "--format", &format_choice(max_height, h264), &url])
             .output()
             .with_context(|| format!("running {}", self.yt_dlp.display()))?;
         if !out.status.success() {
@@ -94,9 +95,11 @@ impl Tools {
 
 /// yt-dlp's format choice: the best video up to `max_height` without AV1 (which many
 /// GPUs can't decode, e.g. the TV PC's GTX 1070 Ti), plus the best audio; else the best
-/// single file.
-fn format_choice(max_height: u32) -> String {
-    format!("bv*[vcodec!^=av01][height<={max_height}]+ba/b[height<={max_height}]/b")
+/// single file. With `h264`, H.264 comes first: it's the cheapest to decode, for slow
+/// machines that struggle with VP9.
+fn format_choice(max_height: u32, h264: bool) -> String {
+    let any = format!("bv*[vcodec!^=av01][height<={max_height}]+ba/b[height<={max_height}]/b");
+    if h264 { format!("bv*[vcodec^=avc1][height<={max_height}]+ba/{any}") } else { any }
 }
 
 /// A video ready to play.
@@ -294,7 +297,7 @@ mod tests {
     #[ignore]
     fn resolves_a_real_video() {
         let tools = Tools::find().expect("yt-dlp in the tools folder or on the PATH");
-        let v = tools.resolve("https://www.youtube.com/watch?v=aqz-KE-bpKQ", 1080).unwrap();
+        let v = tools.resolve("https://www.youtube.com/watch?v=aqz-KE-bpKQ", 1080, false).unwrap();
         assert_eq!(v.id, "aqz-KE-bpKQ");
         assert!(v.title.contains("Big Buck Bunny"), "{}", v.title);
         assert!(v.audio_url.is_some() && v.height.is_some_and(|h| h <= 1080));

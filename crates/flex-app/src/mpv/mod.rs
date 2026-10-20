@@ -379,7 +379,7 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
         let tools = flex_core::youtube::Tools::find().expect("yt-dlp in the tools folder or on the PATH");
         let started = Instant::now();
-        let video = tools.resolve("aqz-KE-bpKQ", 1080).unwrap();
+        let video = tools.resolve("aqz-KE-bpKQ", 1080, false).unwrap();
         eprintln!("resolved in {:?}: {} ({:?}p)", started.elapsed(), video.title, video.height);
 
         let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("hwdec", "no")]).unwrap();
