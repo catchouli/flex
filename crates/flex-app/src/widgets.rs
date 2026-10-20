@@ -17,6 +17,14 @@ pub enum Icon {
     Refresh,
     Remove,
     Star,
+    /// A film reel.
+    Film,
+    Tv,
+    /// A record, for albums.
+    Album,
+    Person,
+    /// A musical note, for tracks.
+    Note,
 }
 
 pub struct Row {
@@ -139,6 +147,37 @@ pub fn paint_icon(painter: &Painter, c: Pos2, icon: Icon, color: Color32) {
                 let points = vec![inner[(i + 4) % 5], at(-90.0 + 72.0 * i as f32, 16.0), inner[i]];
                 painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
             }
+        }
+        Icon::Film => {
+            painter.circle_stroke(c, 13.0, Stroke::new(3.0, color));
+            painter.circle_filled(c, 2.5, color);
+            for i in 0..5 {
+                let a = (-90.0 + 72.0 * i as f32).to_radians();
+                painter.circle_filled(c + vec2(a.cos(), a.sin()) * 7.0, 2.5, color);
+            }
+            // The film running off the reel.
+            painter.line_segment([c + vec2(0.0, 13.0), c + vec2(16.0, 13.0)], Stroke::new(3.0, color));
+        }
+        Icon::Tv => {
+            let screen = Rect::from_center_size(c + vec2(0.0, 3.0), vec2(30.0, 20.0));
+            painter.rect_stroke(screen, 3, Stroke::new(3.0, color), egui::StrokeKind::Inside);
+            let top = c + vec2(0.0, -7.0);
+            painter.line_segment([top, c + vec2(-6.0, -14.0)], Stroke::new(2.5, color));
+            painter.line_segment([top, c + vec2(6.0, -14.0)], Stroke::new(2.5, color));
+        }
+        Icon::Album => {
+            painter.circle_stroke(c, 12.5, Stroke::new(4.0, color));
+            painter.circle_filled(c, 4.0, color);
+        }
+        Icon::Person => {
+            painter.circle_filled(c + vec2(0.0, -7.0), 6.5, color);
+            let body = Rect::from_min_max(c + vec2(-12.0, 2.0), c + vec2(12.0, 14.0));
+            painter.rect_filled(body, egui::CornerRadius { nw: 11, ne: 11, sw: 2, se: 2 }, color);
+        }
+        Icon::Note => {
+            painter.circle_filled(c + vec2(-5.0, 8.0), 5.5, color);
+            painter.line_segment([c + vec2(0.0, 8.0), c + vec2(0.0, -13.0)], Stroke::new(3.0, color));
+            painter.line_segment([c + vec2(-1.5, -13.0), c + vec2(9.0, -7.0)], Stroke::new(3.5, color));
         }
     }
 }

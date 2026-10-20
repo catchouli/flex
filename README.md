@@ -75,8 +75,11 @@ date, since YouTube changes things a lot and a newer yt-dlp is usually the fix.
 
 Add channels under Channels by pasting a link or an @handle, or import your existing
 subscriptions from Google Takeout (`subscriptions.csv`), FreeTube, NewPipe or an OPML
-file. New videos are picked up from each channel's feed every half an hour, so there's no
-API key to set up. Search works too, either on the YouTube page or from the main search
+file. New videos are picked up from each channel's feed every half an hour (or press
+Refresh), so there's no API key to set up. The Showing button switches between all your
+channels, just the focused ones, and *for you*: suggestions made from the related videos
+of what you've played lately and your subscriptions' new videos, leaving out anything
+you've watched. Search works too, either on the YouTube page or from the main search
 (pick the YouTube scope at the top of the results). History lists the videos you've
 played, most recent first.
 

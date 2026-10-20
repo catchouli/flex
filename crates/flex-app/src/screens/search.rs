@@ -87,7 +87,7 @@ impl SearchView {
 
     fn open(&self, sh: &mut Shared, i: usize) -> Nav {
         match &self.results[i].target {
-            Target::Show { library_id, show_id } => Nav::push(TitlePage::new(*library_id, *show_id)),
+            Target::Show { library_id, show_id, .. } => Nav::push(TitlePage::new(*library_id, *show_id)),
             Target::Episode { library_id, file_id } => Nav::push(EpisodePage::new(*library_id, *file_id)),
             Target::Folder { library_id, rel } => open_folder(sh, *library_id, rel),
             Target::File { library_id, file_id } => open_file(sh, *library_id, *file_id),
@@ -129,7 +129,7 @@ impl Screen for SearchView {
         if press.is(Action::Menu) {
             let Some(item) = self.results.get(self.list.selected) else { return Nav::None };
             let target = match &item.target {
-                Target::Show { library_id, show_id } => return Nav::push(super::shows::ShowOptions::new(*library_id, *show_id)),
+                Target::Show { library_id, show_id, .. } => return Nav::push(super::shows::ShowOptions::new(*library_id, *show_id)),
                 Target::Folder { library_id, rel } => options::Target::Folder { library_id: *library_id, rel: rel.clone() },
                 Target::File { library_id, file_id } | Target::Episode { library_id, file_id } => {
                     options::Target::File { library_id: *library_id, file_id: *file_id }
@@ -193,8 +193,13 @@ impl Screen for SearchView {
             .iter()
             .map(|item| {
                 let icon = match item.target {
-                    Target::Show { .. } | Target::Folder { .. } | Target::Album { .. } | Target::Artist { .. } => Icon::Folder,
-                    Target::Episode { .. } | Target::File { .. } | Target::Track { .. } => Icon::Video,
+                    Target::Show { series: true, .. } => Icon::Tv,
+                    Target::Show { series: false, .. } => Icon::Film,
+                    Target::Folder { .. } => Icon::Folder,
+                    Target::Album { .. } => Icon::Album,
+                    Target::Artist { .. } => Icon::Person,
+                    Target::Track { .. } => Icon::Note,
+                    Target::Episode { .. } | Target::File { .. } => Icon::Video,
                 };
                 Row::new(icon, item.title.as_str()).detail(item.context.as_str())
             })

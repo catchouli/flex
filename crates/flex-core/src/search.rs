@@ -11,8 +11,8 @@ use crate::tree::Tree;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    /// A show or film (opens its page).
-    Show { library_id: i64, show_id: i64 },
+    /// A show or film (opens its page). `series` when it has episodes.
+    Show { library_id: i64, show_id: i64, series: bool },
     /// An episode (opens its page).
     Episode { library_id: i64, file_id: i64 },
     Folder { library_id: i64, rel: String },
@@ -249,7 +249,7 @@ mod tests {
         );
         let mut items = path_items(&lib, &tree);
         let show = |id, title: &str, also: &[String]| {
-            Item::new(title.into(), "Anime".into(), Target::Show { library_id: 1, show_id: id }, 0, also)
+            Item::new(title.into(), "Anime".into(), Target::Show { library_id: 1, show_id: id, series: true }, 0, also)
         };
         items.push(show(10, "Dorohedoro", &[]));
         items.push(show(11, "Attack on Titan", &["Shingeki no Kyojin".to_owned()]));

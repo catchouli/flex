@@ -1699,6 +1699,37 @@ impl Shared {
         self.setting_bool(crate::youtube::FOCUSED_SETTING)
     }
 
+    /// Whether YouTube's page shows suggestions instead of subscriptions' videos.
+    pub fn youtube_for_you(&self) -> bool {
+        self.setting_bool(crate::youtube::FOR_YOU_SETTING)
+    }
+
+    pub fn set_youtube_for_you(&mut self, on: bool) {
+        self.set_setting_bool(crate::youtube::FOR_YOU_SETTING, on);
+        self.youtube.version += 1;
+    }
+
+    /// Finds suggestions for YouTube's page if they're due (or now with `force`), from
+    /// recently played videos and subscriptions' new ones. Returns false if there's
+    /// nothing to start from.
+    pub fn find_youtube_for_you(&mut self, force: bool) -> bool {
+        use flex_core::youtube::recommend;
+        if !force && !self.youtube.for_you_due() {
+            return true;
+        }
+        let progress = self.yt_progress_all();
+        let history = self.db.yt_history(20).unwrap_or_default();
+        let latest = self.db.yt_latest(20, false, false).unwrap_or_default();
+        let seeds = recommend::seeds(&history, &latest, &progress);
+        if seeds.is_empty() {
+            return false;
+        }
+        let watched = progress.into_iter().filter(|(_, p)| p.watched).map(|(id, _)| id).collect();
+        let subscribed = self.yt_channels().into_iter().map(|c| c.id).collect();
+        self.youtube.start_for_you(seeds, watched, subscribed, self.youtube_shorts());
+        true
+    }
+
     pub fn set_youtube_focused_only(&mut self, on: bool) {
         self.set_setting_bool(crate::youtube::FOCUSED_SETTING, on);
         self.youtube.version += 1;
@@ -1811,8 +1842,7 @@ impl Shared {
             }
         }
         self.youtube.version += 1;
-        let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
-        self.youtube.refresh(ids);
+        self.refresh_youtube_feeds();
         Ok(added)
     }
 
@@ -1837,13 +1867,18 @@ impl Shared {
                 Msg::Tools(Err(e)) => self.toast(format!("Couldn't set up YouTube: {e}")),
                 Msg::Channel(Ok((id, title))) => self.subscribe(&id, &title),
                 Msg::Channel(Err(e)) => self.toast(format!("Couldn't find that channel: {e}")),
-                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) | Msg::Related(..) => {}
+                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) | Msg::Related(..) | Msg::ForYou(..) => {}
             }
         }
         if self.youtube_enabled() && self.youtube.tools.is_some() && self.youtube.refresh_due() {
-            let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
-            self.youtube.refresh(ids);
+            self.refresh_youtube_feeds();
         }
+    }
+
+    /// Reads every subscription's feed again now (in the background).
+    pub fn refresh_youtube_feeds(&mut self) {
+        let ids = self.yt_channels().into_iter().map(|c| c.id).collect();
+        self.youtube.refresh(ids);
     }
 
     /// Handles plugin messages, tells plugins about playback, keeps the computer awake
@@ -2171,7 +2206,7 @@ impl Shared {
                         Some(y) => format!("{} · {y}", l.lib.name),
                         None => l.lib.name.clone(),
                     };
-                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id };
+                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id, series: entry.is_series() };
                     items.push(Item::new(entry.show.title.clone(), context, target, 0, &also));
                     if entry.is_series() {
                         for e in &entry.episodes {
@@ -2200,7 +2235,7 @@ impl Shared {
             .into_iter()
             .filter_map(|item| {
                 let (library, show, file) = match item.target {
-                    Target::Show { library_id, show_id } => (library_id, Some(show_id), None),
+                    Target::Show { library_id, show_id, .. } => (library_id, Some(show_id), None),
                     Target::Episode { library_id, file_id } | Target::File { library_id, file_id } => (library_id, None, Some(file_id)),
                     _ => return None,
                 };
