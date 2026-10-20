@@ -2171,7 +2171,7 @@ impl Shared {
                         Some(y) => format!("{} · {y}", l.lib.name),
                         None => l.lib.name.clone(),
                     };
-                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id };
+                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id, series: entry.is_series() };
                     items.push(Item::new(entry.show.title.clone(), context, target, 0, &also));
                     if entry.is_series() {
                         for e in &entry.episodes {
@@ -2200,7 +2200,7 @@ impl Shared {
             .into_iter()
             .filter_map(|item| {
                 let (library, show, file) = match item.target {
-                    Target::Show { library_id, show_id } => (library_id, Some(show_id), None),
+                    Target::Show { library_id, show_id, .. } => (library_id, Some(show_id), None),
                     Target::Episode { library_id, file_id } | Target::File { library_id, file_id } => (library_id, None, Some(file_id)),
                     _ => return None,
                 };
