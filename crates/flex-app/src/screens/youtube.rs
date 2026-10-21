@@ -604,28 +604,41 @@ impl Screen for SearchResults {
     }
 }
 
-/// The videos YouTube suggests after one (from its options).
+/// The videos YouTube suggests after one (from its options, or when it finishes playing).
 pub struct RelatedVideos {
     title: String,
     results: VideoResults,
+    /// Shown after the video finished: a video picked here replaces this page, so Back
+    /// still returns to wherever playback was started from.
+    finished: bool,
 }
 
 impl RelatedVideos {
     fn new(sh: &mut Shared, item: &VideoItem) -> Self {
-        Self { title: item.title.clone(), results: VideoResults::related(sh, &item.id) }
+        Self { title: item.title.clone(), results: VideoResults::related(sh, &item.id), finished: false }
+    }
+
+    /// For the video that just finished playing.
+    pub fn after(sh: &mut Shared, id: &str, title: &str) -> Self {
+        Self { title: title.to_owned(), results: VideoResults::related(sh, id), finished: true }
     }
 }
 
 impl Screen for RelatedVideos {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
-        if press.is(Action::Back) {
+        if press.is(Action::Back) || (self.finished && press.is(Action::Stop)) {
             return Nav::Pop;
         }
-        self.results.handle(sh, press)
+        let nav = self.results.handle(sh, press);
+        match nav {
+            Nav::Play { req, .. } if self.finished => Nav::Play { req, replace: true },
+            nav => nav,
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let body = widgets::header(ui.painter(), rect, &self.title, "Related videos", ui.style());
+        let subtitle = if self.finished { "Finished · related videos" } else { "Related videos" };
+        let body = widgets::header(ui.painter(), rect, &self.title, subtitle, ui.style());
         self.results.ui(ui, sh, body, &[], focused);
         Nav::None
     }

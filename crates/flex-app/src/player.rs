@@ -25,7 +25,7 @@ use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
 use crate::picture::Picture;
 use crate::shared::TrackMemory;
 use flex_core::language;
-use crate::screens::{Nav, Screen, up_next::UpNext};
+use crate::screens::{Nav, Screen, up_next::UpNext, youtube::RelatedVideos};
 use crate::shared::{PlayRequest, Shared, SkipMode};
 use crate::theme;
 
@@ -475,6 +475,8 @@ impl Player {
                         return Some(Nav::Pop);
                     }
                     yt.loaded = true;
+                    // Ready for the page shown when it finishes.
+                    sh.youtube.start_related(&yt.id);
                     // Where playback starts, so a segment right there (e.g. a sponsor read
                     // at 0:00) counts as played into.
                     yt.last_pos = Some(self.req.start.unwrap_or(0.0));
@@ -530,6 +532,9 @@ impl Player {
                     }
                     self.log_session(sh);
                     self.finished = true;
+                    if let Some(id) = self.req.youtube_id() {
+                        return Nav::replace(RelatedVideos::after(sh, id, &self.req.title));
+                    }
                     return match sh.next_after(&self.req) {
                         Some(next) => Nav::replace(UpNext::new(self.req.title.clone(), next)),
                         None => Nav::Pop,
