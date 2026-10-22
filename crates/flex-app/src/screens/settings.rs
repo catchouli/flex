@@ -24,10 +24,10 @@ impl Screen for Settings {
             return Nav::Pop;
         }
         let libs = sh.libs.len();
-        // Web access, Plugins, YouTube, skipping openings, Picture, Sync, Theme, "Close to system
+        // Crash reports folder, web access, Plugins, YouTube, skipping openings, Picture, Sync, Theme, "Close to system
         // tray" where there's a tray, "Start with Windows", then "Update automatically" in
         // installed copies.
-        let tray_row = libs + 14;
+        let tray_row = libs + 15;
         let autostart_row = tray_row + usize::from(TRAY);
         let update = crate::update::installed();
         let rows = autostart_row + usize::from(cfg!(windows)) + usize::from(update);
@@ -57,7 +57,8 @@ impl Screen for Settings {
                 crate::logging::open_logs_folder();
                 Nav::None
             }
-            ListInput::Activate(i) if i == libs + 7 => {
+            ListInput::Activate(i) if i == libs + 7 => Nav::push(FolderPicker::with_purpose(sh, Purpose::CrashFolder)),
+            ListInput::Activate(i) if i == libs + 8 => {
                 let on = !sh.web_enabled();
                 sh.set_web_enabled(on);
                 if let Some(url) = sh.web_url().filter(|_| on) {
@@ -65,16 +66,16 @@ impl Screen for Settings {
                 }
                 Nav::None
             }
-            ListInput::Activate(i) if i == libs + 8 => Nav::push(Plugins::default()),
-            ListInput::Activate(i) if i == libs + 9 => Nav::push(super::youtube::YouTubeSettings::default()),
-            ListInput::Activate(i) if i == libs + 10 => {
+            ListInput::Activate(i) if i == libs + 9 => Nav::push(Plugins::default()),
+            ListInput::Activate(i) if i == libs + 10 => Nav::push(super::youtube::YouTubeSettings::default()),
+            ListInput::Activate(i) if i == libs + 11 => {
                 let next = sh.skip_mode().next();
                 sh.set_skip_mode(next);
                 Nav::None
             }
-            ListInput::Activate(i) if i == libs + 11 => Nav::push(PictureSettings::default()),
-            ListInput::Activate(i) if i == libs + 12 => Nav::push(super::sync::SyncSettings::default()),
-            ListInput::Activate(i) if i == libs + 13 => Nav::push(super::themes::Themes::default()),
+            ListInput::Activate(i) if i == libs + 12 => Nav::push(PictureSettings::default()),
+            ListInput::Activate(i) if i == libs + 13 => Nav::push(super::sync::SyncSettings::default()),
+            ListInput::Activate(i) if i == libs + 14 => Nav::push(super::themes::Themes::default()),
             ListInput::Activate(i) if TRAY && i == tray_row => {
                 sh.set_close_to_tray(!sh.close_to_tray);
                 Nav::None
@@ -114,6 +115,8 @@ impl Screen for Settings {
         rows.push(Row::new(Icon::Refresh, "Scan all libraries for changes").detail("New, moved and deleted files"));
         rows.push(Row::new(Icon::Refresh, "Rescan all libraries from scratch").detail("Slower: looks at every file again"));
         rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
+        let crashes = sh.crash_dir().map_or("the logs folder".to_owned(), |d| d.display().to_string());
+        rows.push(Row::new(Icon::Folder, "Crash reports folder…").detail(format!("Log + minidump go in {crashes}")));
         rows.push(match sh.web_url() {
             Some(url) => Row::new(Icon::None, "Web access: on").detail(format!("Open {url} on phones and PCs at home")),
             None => Row::new(Icon::None, "Web access: off").detail("Browse your libraries from other devices at home"),

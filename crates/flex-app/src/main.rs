@@ -47,10 +47,30 @@ fn keep_com_alive() {
     }
 }
 
+/// `--test-crash`: crashes a few seconds after starting (once settings are loaded), to
+/// check crash reports work. A native crash on Windows, a panic elsewhere.
+fn start_test_crash() {
+    std::thread::Builder::new()
+        .name("test-crash".into())
+        .spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            log::warn!("crashing on purpose (--test-crash)");
+            if cfg!(windows) {
+                // Safety: none; this is the point.
+                unsafe { std::ptr::null_mut::<u8>().write_volatile(1) };
+            }
+            // A panic on this thread alone wouldn't stop Flex: report it, then abort.
+            let _ = std::panic::catch_unwind(|| panic!("crashing on purpose (--test-crash)"));
+            std::process::abort();
+        })
+        .expect("spawning a thread");
+}
+
 fn main() -> eframe::Result {
     let mut windowed = false;
     let mut hidden = false;
     let mut quit = false;
+    let mut test_crash = false;
     let mut start = None;
     for arg in std::env::args_os().skip(1) {
         if arg == "--windowed" {
@@ -59,6 +79,8 @@ fn main() -> eframe::Result {
             hidden = true;
         } else if arg == "--quit" {
             quit = true;
+        } else if arg == "--test-crash" {
+            test_crash = true;
         } else {
             start = Some(PathBuf::from(arg));
         }
@@ -91,6 +113,9 @@ fn main() -> eframe::Result {
     }
     #[cfg(windows)]
     keep_com_alive();
+    if test_crash {
+        start_test_crash();
+    }
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

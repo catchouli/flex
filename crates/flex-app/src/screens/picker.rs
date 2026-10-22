@@ -35,6 +35,8 @@ pub enum Purpose {
     YouTubeImport,
     /// A shared folder to sync watch state through (see `crate::sync`).
     SyncFolder,
+    /// Where crash reports go (see `crate::logging`).
+    CrashFolder,
 }
 
 fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
@@ -166,9 +168,10 @@ impl FolderPicker {
         self.pending = None;
     }
 
-    /// Row 0 is "Use this folder" when choosing a folder (a library's or the sync folder).
+    /// Row 0 is "Use this folder" when choosing a folder (a library's, the sync folder or
+    /// the crash reports folder).
     fn offset(&self) -> usize {
-        usize::from(self.dir.is_some() && matches!(self.purpose, Purpose::Library | Purpose::SyncFolder))
+        usize::from(self.dir.is_some() && matches!(self.purpose, Purpose::Library | Purpose::SyncFolder | Purpose::CrashFolder))
     }
 }
 
@@ -190,6 +193,12 @@ impl Screen for FolderPicker {
                 let dir = self.dir.clone().unwrap_or_default();
                 sh.set_sync_dir(Some(&dir));
                 sh.toast(format!("Syncing through {}", dir.display()));
+                Nav::Pop
+            }
+            ListInput::Activate(0) if self.offset() == 1 && self.purpose == Purpose::CrashFolder => {
+                let dir = self.dir.clone().unwrap_or_default();
+                sh.set_crash_dir(Some(&dir));
+                sh.toast(format!("Crash reports will go in {}", dir.display()));
                 Nav::Pop
             }
             ListInput::Activate(0) if self.offset() == 1 => {
@@ -228,6 +237,7 @@ impl Screen for FolderPicker {
             Purpose::PlexDatabase => ("Import from Plex", "Find com.plexapp.plugins.library.db"),
             Purpose::YouTubeImport => ("Import subscriptions", "Find subscriptions.csv (Google Takeout), or a FreeTube, NewPipe or OPML export"),
             Purpose::SyncFolder => ("Sync folder", "Choose a folder every device can reach, e.g. an empty folder on the array"),
+            Purpose::CrashFolder => ("Crash reports folder", "Choose where crash reports (log + minidump) go"),
         };
         let location = self.dir.as_ref().map_or(prompt.to_owned(), |d| d.display().to_string());
         let subtitle = self.error.clone().unwrap_or(location);
@@ -240,6 +250,7 @@ impl Screen for FolderPicker {
         if let Some(dir) = self.dir.as_ref().filter(|_| self.offset() == 1) {
             let label = match self.purpose {
                 Purpose::SyncFolder => format!("Sync through “{}”", name_of(dir)),
+                Purpose::CrashFolder => format!("Put crash reports in “{}”", name_of(dir)),
                 _ => format!("Use “{}” as a library", name_of(dir)),
             };
             rows.push(Row::new(Icon::Add, label));
@@ -250,7 +261,7 @@ impl Screen for FolderPicker {
         }));
         if rows.is_empty() {
             let what = match self.purpose {
-                Purpose::Library | Purpose::SyncFolder => "No folders here",
+                Purpose::Library | Purpose::SyncFolder | Purpose::CrashFolder => "No folders here",
                 Purpose::PlexDatabase => "No folders or .db files here",
                 Purpose::YouTubeImport => "No folders or subscription files here",
             };
