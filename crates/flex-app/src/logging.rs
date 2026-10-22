@@ -2,8 +2,10 @@
 //!
 //! - `logs/flex.log` in the data folder holds this run's log; the previous run's is kept as
 //!   `flex.previous.log`.
-//! - A panic, or on Windows a native crash (e.g. inside mpv or the graphics driver), writes
-//!   `logs/crash-<time>.txt` with what happened and where.
+//! - A panic, or on Windows a native crash (e.g. inside mpv or the graphics driver), writes a
+//!   `crash-<time>` folder with `crash.txt` (what happened and where), a copy of the log and,
+//!   on Windows, a minidump (`flex.dmp`). It goes in the folder chosen in Settings → "Crash
+//!   reports folder", or the logs folder.
 
 use std::fs::File;
 use std::io::Write;
@@ -15,6 +17,23 @@ pub fn logs_dir() -> PathBuf {
 }
 
 static LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
+
+/// Setting: the folder crash reports go in (empty = the logs folder).
+pub const CRASH_DIR_SETTING: &str = "crash_dir";
+
+/// The folder from [`CRASH_DIR_SETTING`], if one is set.
+static CRASH_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_crash_dir(dir: Option<PathBuf>) {
+    *CRASH_DIR.lock().unwrap_or_else(|e| e.into_inner()) = dir;
+}
+
+/// Where crash reports go.
+pub fn crash_dir() -> PathBuf {
+    // try_lock: never wait inside a crash.
+    let chosen = CRASH_DIR.try_lock().ok().and_then(|d| d.clone());
+    chosen.unwrap_or_else(logs_dir)
+}
 
 /// Sends log output to the log file and stderr.
 struct Tee;
@@ -62,19 +81,31 @@ pub fn init() {
     windows::install_crash_handler();
 }
 
-/// Writes a crash report and returns its path.
-fn write_crash_report(what: &str) -> Option<PathBuf> {
-    let dir = logs_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let path = dir.join(format!("crash-{stamp}.txt"));
+/// Writes a crash report folder and returns its path. `dump` writes the minidump into the
+/// path it's given (Windows only).
+fn write_crash_report(what: &str, dump: impl FnOnce(&std::path::Path) -> Result<(), String>) -> Option<PathBuf> {
+    let name = format!("crash-{}", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
+    // The chosen folder may be a share that's gone away: fall back to the logs folder.
+    let dir = [crash_dir(), logs_dir()]
+        .into_iter()
+        .map(|d| d.join(&name))
+        .find(|d| std::fs::create_dir_all(d).is_ok())?;
+    let _ = std::fs::copy(logs_dir().join("flex.log"), dir.join("flex.log"));
+    let dumped = if cfg!(windows) {
+        match dump(&dir.join("flex.dmp")) {
+            Ok(()) => " The minidump is flex.dmp.".to_owned(),
+            Err(e) => format!(" Couldn't write a minidump: {e}"),
+        }
+    } else {
+        String::new()
+    };
     let report = format!(
-        "Flex {} crashed on {}.\n\n{what}\n\nThe log up to the crash is in flex.log (or flex.previous.log once Flex has been restarted).\n",
+        "Flex {} crashed on {}.\n\n{what}\n\nThe log up to the crash is flex.log in this folder.{dumped}\n",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
     );
-    std::fs::write(&path, report).ok()?;
-    Some(path)
+    std::fs::write(dir.join("crash.txt"), report).ok()?;
+    Some(dir)
 }
 
 fn install_panic_hook() {
@@ -85,7 +116,11 @@ fn install_panic_hook() {
         let what = format!("Panic in thread '{thread}': {info}\n\nBacktrace:\n{backtrace}");
         log::error!("{what}");
         log::logger().flush();
-        if let Some(path) = write_crash_report(&what) {
+        #[cfg(windows)]
+        let dump = |path: &std::path::Path| windows::write_minidump(path, std::ptr::null());
+        #[cfg(not(windows))]
+        let dump = |_: &std::path::Path| Ok(());
+        if let Some(path) = write_crash_report(&what, dump) {
             eprintln!("crash report written to {}", path.display());
         }
         default(info);
@@ -94,12 +129,49 @@ fn install_panic_hook() {
 
 #[cfg(windows)]
 mod windows {
+    use std::os::windows::io::AsRawHandle;
+
     use windows_sys::Win32::Foundation::HMODULE;
-    use windows_sys::Win32::System::Diagnostics::Debug::{EXCEPTION_POINTERS, SetUnhandledExceptionFilter};
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MiniDumpWithFullMemoryInfo,
+        MiniDumpWithIndirectlyReferencedMemory, MiniDumpWithThreadInfo, MiniDumpWithUnloadedModules, MiniDumpWriteDump,
+        SetUnhandledExceptionFilter,
+    };
     use windows_sys::Win32::System::LibraryLoader::{
         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleFileNameW,
         GetModuleHandleExW,
     };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId};
+
+    /// Writes a minidump of this process to `path`. `info` is the crash's exception (null
+    /// for a panic, where the dump just shows every thread's stack).
+    pub fn write_minidump(path: &std::path::Path, info: *const EXCEPTION_POINTERS) -> Result<(), String> {
+        let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+        let exception = MINIDUMP_EXCEPTION_INFORMATION {
+            ThreadId: unsafe { GetCurrentThreadId() },
+            ExceptionPointers: info as *mut _,
+            ClientPointers: 0,
+        };
+        // Stacks plus the memory they point at: enough for locals and a few levels of
+        // heap objects, while staying a few MB.
+        let kind = MiniDumpWithIndirectlyReferencedMemory
+            | MiniDumpWithThreadInfo
+            | MiniDumpWithUnloadedModules
+            | MiniDumpWithFullMemoryInfo;
+        // Safety: the handles are this process and a file we keep open for the call.
+        let ok = unsafe {
+            MiniDumpWriteDump(
+                GetCurrentProcess(),
+                GetCurrentProcessId(),
+                file.as_raw_handle(),
+                kind,
+                if info.is_null() { std::ptr::null() } else { &exception },
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if ok == 0 { Err(std::io::Error::last_os_error().to_string()) } else { Ok(()) }
+    }
 
     /// "libmpv-2.dll+0x1a2b3c" for a code address.
     fn locate(address: usize) -> String {
@@ -135,7 +207,7 @@ mod windows {
         };
         log::error!("{what}");
         log::logger().flush();
-        let _ = super::write_crash_report(&what);
+        let _ = super::write_crash_report(&what, |path| write_minidump(path, info));
         0 // EXCEPTION_CONTINUE_SEARCH: let Windows handle it as usual
     }
 

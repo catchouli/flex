@@ -398,6 +398,7 @@ impl Shared {
             sync: None,
         };
         shared.close_to_tray = shared.setting_bool(CLOSE_TO_TRAY_SETTING);
+        crate::logging::set_crash_dir(shared.crash_dir());
         shared.check_svp();
         if shared.youtube_enabled() {
             // Installs yt-dlp if it's missing; otherwise only checks once a day.
@@ -732,6 +733,16 @@ impl Shared {
     /// Where sync files go, if syncing is on.
     pub fn sync_dir(&self) -> Option<PathBuf> {
         self.setting(crate::sync::DIR_SETTING).filter(|d| !d.is_empty()).map(PathBuf::from)
+    }
+
+    /// The folder chosen for crash reports, if any (see [`crate::logging`]).
+    pub fn crash_dir(&self) -> Option<PathBuf> {
+        self.setting(crate::logging::CRASH_DIR_SETTING).filter(|d| !d.is_empty()).map(PathBuf::from)
+    }
+
+    pub fn set_crash_dir(&mut self, dir: Option<&Path>) {
+        self.set_setting(crate::logging::CRASH_DIR_SETTING, &dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        crate::logging::set_crash_dir(dir.map(Path::to_path_buf));
     }
 
     /// This device's name for other devices (its host name until renamed).
