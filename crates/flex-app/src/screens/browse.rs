@@ -2,6 +2,9 @@
 //! for the view, sort order and watched filter. Each remembers its own choices.
 //!
 //! Up from the top row reaches the toolbar; OK on a setting opens a small dropdown.
+//! Choosing the current sort again flips its direction.
+
+use std::cmp::Ordering;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::natural::natural_cmp;
@@ -43,9 +46,26 @@ const LAYOUTS: [(Layout, &str, &str); 2] = [(Layout::Posters, "Posters", "poster
 const SORTS: [(Sort, &str, &str); 4] = [
     (Sort::Added, "Recently added", "added"),
     (Sort::Played, "Recently played", "played"),
-    (Sort::Title, "A–Z", "title"),
+    (Sort::Title, "Title", "title"),
     (Sort::Released, "Release date", "released"),
 ];
+impl Sort {
+    /// Newest first for dates, A to Z for titles.
+    fn descending_by_default(self) -> bool {
+        self != Sort::Title
+    }
+
+    /// How the list runs, e.g. "newest first".
+    fn direction(self, descending: bool) -> &'static str {
+        match (self, descending) {
+            (Sort::Title, false) => "A to Z",
+            (Sort::Title, true) => "Z to A",
+            (_, true) => "newest first",
+            (_, false) => "oldest first",
+        }
+    }
+}
+
 const FILTERS: [(Filter, &str, &str); 4] = [
     (Filter::All, "All", "all"),
     (Filter::Unwatched, "Unwatched", "unwatched"),
@@ -57,6 +77,8 @@ const FILTERS: [(Filter, &str, &str); 4] = [
 struct Prefs {
     layout: Layout,
     sort: Sort,
+    /// Which way the sort runs.
+    descending: bool,
     filter: Filter,
 }
 
@@ -78,15 +100,21 @@ impl Source {
 }
 
 impl Prefs {
-    /// Stored as "posters|added|all".
+    /// Stored as "posters|added|all|desc" (older settings have no direction: the sort's default).
     fn load(sh: &Shared, source: Source) -> Self {
         let saved = sh.setting(&source.key()).unwrap_or_default();
         let mut parts = saved.split('|');
         let pick = |part: Option<&str>| part.unwrap_or_default().to_owned();
-        let (l, s, f) = (pick(parts.next()), pick(parts.next()), pick(parts.next()));
+        let (l, s, f, d) = (pick(parts.next()), pick(parts.next()), pick(parts.next()), pick(parts.next()));
+        let sort = SORTS.iter().find(|x| x.2 == s).map_or(Sort::Added, |x| x.0);
         Self {
             layout: LAYOUTS.iter().find(|x| x.2 == l).map_or(Layout::Posters, |x| x.0),
-            sort: SORTS.iter().find(|x| x.2 == s).map_or(Sort::Added, |x| x.0),
+            sort,
+            descending: match d.as_str() {
+                "desc" => true,
+                "asc" => false,
+                _ => sort.descending_by_default(),
+            },
             filter: FILTERS.iter().find(|x| x.2 == f).map_or(Filter::All, |x| x.0),
         }
     }
@@ -95,7 +123,8 @@ impl Prefs {
         let l = LAYOUTS.iter().find(|x| x.0 == self.layout).map_or("posters", |x| x.2);
         let s = SORTS.iter().find(|x| x.0 == self.sort).map_or("added", |x| x.2);
         let f = FILTERS.iter().find(|x| x.0 == self.filter).map_or("all", |x| x.2);
-        sh.set_setting(&source.key(), &format!("{l}|{s}|{f}"));
+        let d = if self.descending { "desc" } else { "asc" };
+        sh.set_setting(&source.key(), &format!("{l}|{s}|{f}|{d}"));
     }
 }
 
@@ -135,7 +164,12 @@ impl Tool {
     fn apply(self, prefs: &mut Prefs, choice: usize) {
         match self {
             Tool::View => prefs.layout = LAYOUTS[choice].0,
-            Tool::Sort => prefs.sort = SORTS[choice].0,
+            // The current sort again flips it; another starts in its usual direction.
+            Tool::Sort if SORTS[choice].0 == prefs.sort => prefs.descending = !prefs.descending,
+            Tool::Sort => {
+                prefs.sort = SORTS[choice].0;
+                prefs.descending = prefs.sort.descending_by_default();
+            }
             Tool::Show => prefs.filter = FILTERS[choice].0,
             Tool::Folders | Tool::History => {}
         }
@@ -214,16 +248,25 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
             ))
         })
         .collect();
+    sort_items(&mut items, prefs);
+    items.into_iter().map(|(item, ..)| item).collect()
+}
+
+/// Sorts (item, added, released, last played) by the chosen sort and direction.
+fn sort_items(items: &mut [(Item, i64, String, i64)], prefs: &Prefs) {
+    let way = |o: Ordering| if prefs.descending { o.reverse() } else { o };
     match prefs.sort {
-        Sort::Added => items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
-        Sort::Played => items.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
-        Sort::Title => items.sort_by(|a, b| natural_cmp(&a.0.title, &b.0.title)),
-        // Newest first; undated last.
+        Sort::Added => items.sort_by(|a, b| way(a.1.cmp(&b.1)).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
+        // Never played last, either way.
+        Sort::Played => items.sort_by(|a, b| {
+            (a.3 == 0).cmp(&(b.3 == 0)).then_with(|| way(a.3.cmp(&b.3))).then_with(|| natural_cmp(&a.0.title, &b.0.title))
+        }),
+        Sort::Title => items.sort_by(|a, b| way(natural_cmp(&a.0.title, &b.0.title))),
+        // Undated last, either way.
         Sort::Released => items.sort_by(|a, b| {
-            a.2.is_empty().cmp(&b.2.is_empty()).then_with(|| b.2.cmp(&a.2)).then_with(|| natural_cmp(&a.0.title, &b.0.title))
+            a.2.is_empty().cmp(&b.2.is_empty()).then_with(|| way(a.2.cmp(&b.2))).then_with(|| natural_cmp(&a.0.title, &b.0.title))
         }),
     }
-    items.into_iter().map(|(item, ..)| item).collect()
 }
 
 /// Poster card size (2:3 poster plus two lines of text).
@@ -361,14 +404,21 @@ impl ShowsView {
         let mut x = rect.left();
         for (i, tool) in self.tools().iter().enumerate() {
             let label = tool.label(&self.prefs);
-            let width = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x + 44.0;
+            // The sort button ends with an arrow for its direction.
+            let arrow = if *tool == Tool::Sort { 26.0 } else { 0.0 };
+            let text_w = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x;
+            let width = text_w + arrow + 44.0;
             let r = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
             self.tool_x[i] = x;
             if widgets::hit(ui, r).any() {
                 self.toolbar = Some(i);
             }
             let color = widgets::paint_focusable(painter, r, focused && self.toolbar == Some(i), false);
-            painter.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
+            let text_at = r.left_center() + vec2(22.0, 0.0);
+            painter.text(text_at, Align2::LEFT_CENTER, label, font.clone(), color);
+            if arrow > 0.0 {
+                widgets::paint_arrow(painter, text_at + vec2(text_w + 16.0, 0.0), self.prefs.descending, color);
+            }
             x += width + 14.0;
         }
     }
@@ -391,7 +441,14 @@ impl ShowsView {
         let rows: Vec<Row> = options
             .iter()
             .enumerate()
-            .map(|(i, label)| Row::new(Icon::None, *label).detail(if i == current { "current" } else { "" }))
+            .map(|(i, label)| {
+                let detail = match tool {
+                    Tool::Sort if i == current => self.prefs.sort.direction(self.prefs.descending),
+                    _ if i == current => "current",
+                    _ => "",
+                };
+                Row::new(Icon::None, *label).detail(detail)
+            })
             .collect();
         widgets::list(ui, rect.shrink(8.0), &rows, list, true);
     }
@@ -571,5 +628,62 @@ impl Screen for ShowsView {
         }
         self.draw_popup(ui, toolbar);
         Nav::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(title: &str, added: i64, released: &str, played: i64) -> (Item, i64, String, i64) {
+        let item = Item {
+            library_id: 1,
+            show_id: 0,
+            title: title.to_owned(),
+            year: None,
+            poster: None,
+            series: false,
+            episodes: 1,
+            unwatched: 1,
+            progress: None,
+            unmatched: false,
+        };
+        (item, added, released.to_owned(), played)
+    }
+
+    fn sorted(sort: Sort, descending: bool) -> Vec<String> {
+        let mut items = vec![item("b", 2, "2001", 0), item("a", 3, "", 5), item("c", 1, "1999-05-01", 9)];
+        sort_items(&mut items, &Prefs { layout: Layout::Posters, sort, descending, filter: Filter::All });
+        items.into_iter().map(|(it, ..)| it.title).collect()
+    }
+
+    #[test]
+    fn sorts_both_ways() {
+        assert_eq!(sorted(Sort::Added, true), ["a", "b", "c"]);
+        assert_eq!(sorted(Sort::Added, false), ["c", "b", "a"]);
+        assert_eq!(sorted(Sort::Title, false), ["a", "b", "c"]);
+        assert_eq!(sorted(Sort::Title, true), ["c", "b", "a"]);
+    }
+
+    #[test]
+    fn undated_and_unplayed_stay_last() {
+        assert_eq!(sorted(Sort::Released, true), ["b", "c", "a"]);
+        assert_eq!(sorted(Sort::Released, false), ["c", "b", "a"]);
+        assert_eq!(sorted(Sort::Played, true), ["c", "a", "b"]);
+        assert_eq!(sorted(Sort::Played, false), ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn choosing_the_current_sort_flips_it() {
+        let mut prefs = Prefs { layout: Layout::Posters, sort: Sort::Added, descending: true, filter: Filter::All };
+        let index = |sort| SORTS.iter().position(|x| x.0 == sort).unwrap();
+        Tool::Sort.apply(&mut prefs, index(Sort::Added));
+        assert!(!prefs.descending);
+        Tool::Sort.apply(&mut prefs, index(Sort::Added));
+        assert!(prefs.descending);
+        Tool::Sort.apply(&mut prefs, index(Sort::Title));
+        assert!(prefs.sort == Sort::Title && !prefs.descending);
+        Tool::Sort.apply(&mut prefs, index(Sort::Released));
+        assert!(prefs.sort == Sort::Released && prefs.descending);
     }
 }
