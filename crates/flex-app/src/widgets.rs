@@ -182,6 +182,16 @@ pub fn paint_icon(painter: &Painter, c: Pos2, icon: Icon, color: Color32) {
     }
 }
 
+/// A small arrow centred on `c`, pointing down or up (e.g. a sort's direction).
+pub fn paint_arrow(painter: &Painter, c: Pos2, down: bool, color: Color32) {
+    let dir = if down { 1.0 } else { -1.0 };
+    painter.line_segment([c + vec2(0.0, -9.0 * dir), c + vec2(0.0, 4.0 * dir)], Stroke::new(3.0, color));
+    let (left, right) = (c + vec2(-7.0, 2.0 * dir), c + vec2(7.0, 2.0 * dir));
+    // Clockwise either way.
+    let head = if down { vec![left, right, c + vec2(0.0, 10.0)] } else { vec![right, left, c + vec2(0.0, -10.0)] };
+    painter.add(egui::Shape::convex_polygon(head, color, Stroke::NONE));
+}
+
 /// Background + focus look shared by rows, cards and buttons (from the theme). Returns
 /// the text colour to use.
 pub fn paint_focusable(painter: &Painter, rect: Rect, focused: bool, selected: bool) -> Color32 {

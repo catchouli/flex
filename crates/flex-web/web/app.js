@@ -119,11 +119,13 @@ function card(c) {
     bar(c.fraction));
 }
 
+// [label, oldest/A first, newest first by default]
 const SORTS = {
-  title: ["A–Z", (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" })],
-  added: ["Recently added", (a, b) => b.added - a.added],
-  year: ["Release year", (a, b) => (b.year || 0) - (a.year || 0)],
+  title: ["Title", (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }), false],
+  added: ["Recently added", (a, b) => a.added - b.added, true],
+  year: ["Release year", (a, b) => (a.year || 0) - (b.year || 0), true],
 };
+const direction = (sort, desc) => sort === "title" ? (desc ? "Z to A" : "A to Z") : (desc ? "Newest first" : "Oldest first");
 const FILTERS = {
   all: ["All", () => true],
   unwatched: ["Unwatched", (s) => s.unwatched > 0],
@@ -137,16 +139,24 @@ async function libraryPage(id) {
     return { title: data.name, content: [h("h1", {}, data.name), h("p", { class: "empty" }, "Organising… shows will appear shortly.")] };
   }
   let sort = store(`sort${id}`) || "added";
+  if (!SORTS[sort]) sort = "added";
+  let desc = store(`desc${id}`) === null ? SORTS[sort][2] : store(`desc${id}`) === "1";
   let filter = store(`filter${id}`) || "all";
   let text = "";
   const grid = h("div", { class: "grid" });
+  const setDesc = (v) => { desc = v; store(`desc${id}`, v ? "1" : "0"); fill(); };
+  const way = h("button", { class: "way", onclick: () => setDesc(!desc) });
   const fill = () => {
     const words = text.toLowerCase().split(/\s+/).filter(Boolean);
     const shows = data.shows
       .filter(FILTERS[filter][1])
       .filter((s) => words.every((w) => s.title.toLowerCase().includes(w)))
-      .sort(SORTS[sort][1]);
+      // Undated last, either way.
+      .sort((a, b) => (sort === "year" ? !a.year - !b.year : 0) || (desc ? -1 : 1) * SORTS[sort][1](a, b));
     grid.replaceChildren(...shows.map((s) => poster(data.id, s)));
+    way.textContent = desc ? "↓" : "↑";
+    way.title = direction(sort, desc);
+    way.setAttribute("aria-label", `Sort direction: ${way.title}`);
     if (!shows.length) grid.append(h("p", { class: "empty" }, "Nothing here."));
   };
   const select = (options, value, onchange) =>
@@ -154,7 +164,8 @@ async function libraryPage(id) {
       Object.entries(options).map(([k, [label]]) => h("option", { value: k, selected: k === value }, label)));
   const tools = h("div", { class: "tools" },
     h("input", { type: "search", placeholder: `Search ${data.name}`, "aria-label": "Search", oninput: (e) => { text = e.target.value; fill(); } }),
-    select(SORTS, sort, (v) => { sort = v; store(`sort${id}`, v); fill(); }),
+    select(SORTS, sort, (v) => { sort = v; store(`sort${id}`, v); setDesc(SORTS[v][2]); }),
+    way,
     select(FILTERS, filter, (v) => { filter = v; store(`filter${id}`, v); fill(); }));
   fill();
   return { title: data.name, content: [h("h1", {}, data.name), tools, grid] };
