@@ -787,7 +787,14 @@ impl Shared {
     /// Reloads what other devices' changes touched.
     pub fn poll_sync(&mut self) {
         let Some(sync) = &mut self.sync else { return };
-        for applied in sync.poll() {
+        let (all_applied, notices) = sync.poll();
+        for notice in notices {
+            match notice {
+                crate::sync::Notice::Failing(e) => self.toast(format!("Sync isn't working: {e}")),
+                crate::sync::Notice::Recovered => self.toast("Sync is working again"),
+            }
+        }
+        for applied in all_applied {
             for id in &applied.files {
                 match self.db.files(*id) {
                     Ok(files) => {
