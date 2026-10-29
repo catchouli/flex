@@ -31,19 +31,28 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
-/// Initialises COM on the UI thread for the life of the app (never uninitialised).
+/// Initialises COM on the UI thread for the life of the app (never uninitialised), and
+/// keeps the taskbar's COM library loaded for good.
 ///
-/// winit creates a COM taskbar object the first time the window goes fullscreen and reuses
-/// it afterwards. If COM on this thread is torn down in between (libmpv initialises and
-/// uninitialises COM as players come and go), that object is freed and leaving fullscreen
-/// crashes with an access violation. Holding our own reference keeps COM, and the object,
-/// alive.
+/// winit creates a COM taskbar object (from explorerframe.dll) the first time the window
+/// goes fullscreen and reuses it afterwards. Crash dumps from the TV PC showed that
+/// explorerframe.dll still gets unloaded in between, even with COM kept alive here, and
+/// the next fullscreen change then crashes calling into it. Pinning the DLL means it can't
+/// be unloaded, whatever asks for that.
 #[cfg(windows)]
 fn keep_com_alive() {
     use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx};
+    use windows_sys::Win32::System::LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, LoadLibraryW};
     let hr = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
     if hr < 0 {
         log::warn!("couldn't initialise COM on the UI thread: {hr:#x}");
+    }
+    let name: Vec<u16> = "explorerframe.dll".encode_utf16().chain([0]).collect();
+    let mut module = std::ptr::null_mut();
+    // Safety: `name` is a NUL-terminated wide string that outlives both calls.
+    let pinned = unsafe { !LoadLibraryW(name.as_ptr()).is_null() && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, name.as_ptr(), &mut module) != 0 };
+    if !pinned {
+        log::warn!("couldn't keep explorerframe.dll loaded: leaving fullscreen may crash");
     }
 }
 
