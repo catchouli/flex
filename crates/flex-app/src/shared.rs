@@ -1881,7 +1881,7 @@ impl Shared {
                     }
                 }
                 Msg::Feed(id, Err(e)) => log::warn!("youtube: feed for {id}: {e}"),
-                Msg::FeedsDone => {
+                Msg::FeedsDone(_) => {
                     self.youtube.version += 1;
                     self.youtube.find_durations(self.db.yt_missing_durations().unwrap_or_default());
                 }
@@ -1914,6 +1914,9 @@ impl Shared {
                 Msg::Channel(Err(e)) => self.toast(format!("Couldn't find that channel: {e}")),
                 Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) | Msg::Related(..) | Msg::ForYou(..) => {}
             }
+        }
+        for notice in std::mem::take(&mut self.youtube.notices) {
+            self.toast(notice);
         }
         if self.youtube_enabled() && self.youtube.tools.is_some() && self.youtube.refresh_due() {
             self.refresh_youtube_feeds();
