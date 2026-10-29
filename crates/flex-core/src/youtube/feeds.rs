@@ -207,6 +207,9 @@ pub struct Listed {
     pub channel: String,
     pub channel_id: String,
     pub duration: Option<f64>,
+    pub views: Option<u64>,
+    /// When it came out (Unix time), if known; may be approximate ("3 years ago").
+    pub published: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +230,7 @@ struct FlatEntry {
     uploader: Option<String>,
     channel_id: Option<String>,
     duration: Option<f64>,
+    view_count: Option<u64>,
     ie_key: Option<String>,
 }
 
@@ -242,6 +246,8 @@ fn listed(flat: Flat) -> Vec<Listed> {
                 channel: e.channel.or(e.uploader).or_else(|| flat.channel.clone()).unwrap_or_default(),
                 channel_id: e.channel_id.or_else(|| flat.channel_id.clone()).unwrap_or_default(),
                 duration: e.duration,
+                views: e.view_count,
+                published: None,
             })
         })
         .collect()

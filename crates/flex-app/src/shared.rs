@@ -1764,6 +1764,13 @@ impl Shared {
         self.db.yt_channel_videos(channel_id, limit, self.youtube_shorts()).unwrap_or_default()
     }
 
+    /// Remembers how long subscriptions' videos are, from a list that says.
+    pub fn save_yt_durations(&mut self, durations: &[(String, f64)]) {
+        if let Err(e) = self.db.save_yt_durations(durations) {
+            log::warn!("youtube: saving video lengths: {e:#}");
+        }
+    }
+
     /// Part-watched YouTube videos, minus any removed from Continue Watching (until played
     /// again).
     pub fn yt_continue(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
@@ -1869,7 +1876,29 @@ impl Shared {
                     }
                 }
                 Msg::Feed(id, Err(e)) => log::warn!("youtube: feed for {id}: {e}"),
-                Msg::FeedsDone => self.youtube.version += 1,
+                Msg::FeedsDone => {
+                    self.youtube.version += 1;
+                    self.youtube.find_durations(self.db.yt_missing_durations().unwrap_or_default());
+                }
+                Msg::Durations(missing, Ok(found)) => {
+                    let durations: Vec<(String, f64)> = found.iter().map(|(_, id, secs)| (id.clone(), *secs)).collect();
+                    if let Err(e) = self.db.save_yt_durations(&durations) {
+                        log::warn!("youtube: saving video lengths: {e:#}");
+                    }
+                    // Videos missing from a channel that did list (live streams, say) stay
+                    // unknown; a channel that failed is tried again after the next refresh.
+                    let unknown: Vec<String> = missing
+                        .into_iter()
+                        .filter(|(channel, _)| found.iter().any(|(c, _, _)| c == channel))
+                        .flat_map(|(_, ids)| ids)
+                        .filter(|id| !found.iter().any(|(_, f, _)| f == id))
+                        .collect();
+                    if let Err(e) = self.db.mark_yt_durations_unknown(&unknown) {
+                        log::warn!("youtube: saving video lengths: {e:#}");
+                    }
+                    self.youtube.version += 1;
+                }
+                Msg::Durations(_, Err(e)) => log::warn!("youtube: looking up video lengths: {e}"),
                 Msg::Tools(Ok(report)) => {
                     for (tool, version) in report.updated {
                         log::info!("youtube: {} {version} installed", tool.name());

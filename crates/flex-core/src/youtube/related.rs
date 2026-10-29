@@ -56,6 +56,8 @@ fn parse(json: &Value, video_id: &str) -> Vec<Listed> {
             channel: channel.and_then(Value::as_str).unwrap_or_default().to_owned(),
             channel_id: channel_id.unwrap_or_default().to_owned(),
             duration,
+            views: None,
+            published: None,
         });
     }
     out

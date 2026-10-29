@@ -463,12 +463,20 @@ pub struct GridState {
     visible_rows: usize,
     scroll: f32,
     reveal: bool,
+    /// One past the last item on screen at the last draw.
+    shown_end: usize,
 }
 
 impl GridState {
     pub fn select(&mut self, i: usize) {
         self.selected = i;
         self.reveal = true;
+    }
+
+    /// How far down the grid has been looked at: one past the furthest item on screen or
+    /// selected (for lists that load as they're scrolled).
+    pub fn seen(&self) -> usize {
+        self.shown_end.max(self.selected + 1)
     }
 
     /// D-pad navigation over `len` items. Up from the first row reports `AtTop`.
@@ -542,6 +550,7 @@ pub fn grid(
     let mut result = Hit::None;
     let first_row = (state.scroll / row_h) as usize;
     let last_row = (((state.scroll + rect.height()) / row_h) as usize + 1).min(rows);
+    state.shown_end = (last_row * cols).min(len);
     for row in first_row..last_row {
         for col in 0..cols {
             let i = row * cols + col;
