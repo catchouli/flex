@@ -83,7 +83,7 @@ mod tests {
     use super::*;
 
     fn listed(id: &str, channel: &str) -> Listed {
-        Listed { id: id.into(), title: id.into(), channel: channel.into(), channel_id: format!("UC{channel}"), duration: Some(600.0) }
+        Listed { id: id.into(), title: id.into(), channel: channel.into(), channel_id: format!("UC{channel}"), duration: Some(600.0), views: None, published: None }
     }
 
     fn played(id: &str, position: f64, watched: bool) -> (String, WatchProgress) {
@@ -115,8 +115,8 @@ mod tests {
     fn seeds_weigh_recent_and_finished_videos_more() {
         let history = vec![played("given-up", 5.0, false), played("finished", 100.0, true)];
         let latest = vec![
-            Video { id: "new".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false },
-            Video { id: "finished".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false },
+            Video { id: "new".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false, duration: None },
+            Video { id: "finished".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false, duration: None },
         ];
         let seeds = seeds(&history, &latest, &HashMap::new());
         let ids: Vec<&str> = seeds.iter().map(|(id, _)| id.as_str()).collect();

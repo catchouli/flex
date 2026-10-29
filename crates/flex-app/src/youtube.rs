@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flex_core::youtube::feeds::{self, FeedVideo, Listed};
+use flex_core::youtube::listing::Entry;
 use flex_core::youtube::{recommend, related};
 use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_core::youtube::tools::{self, Tool};
@@ -55,6 +56,9 @@ pub enum Msg {
     Channel(Result<(String, String), String>),
     /// Suggestions for YouTube's page.
     ForYou(Result<Vec<Listed>, String>),
+    /// Lengths of subscriptions' videos: the videos asked about, then (channel id, video
+    /// id, seconds) for those found.
+    Durations(Vec<(String, Vec<String>)>, Result<Vec<(String, String, f64)>, String>),
 }
 
 /// A search (or a video's related videos): the query (or video), and its results once in.
@@ -80,6 +84,7 @@ pub struct YouTube {
     pub for_you: Option<Result<Vec<Listed>, String>>,
     pub for_you_busy: bool,
     for_you_at: Option<Instant>,
+    durations_busy: bool,
     /// Bumped when subscriptions or their videos change, so screens reload.
     pub version: u64,
 }
@@ -103,6 +108,7 @@ impl YouTube {
             for_you: None,
             for_you_busy: false,
             for_you_at: None,
+            durations_busy: false,
             version: 0,
         }
     }
@@ -273,6 +279,27 @@ impl YouTube {
         });
     }
 
+    /// Looks up how long subscriptions' videos are, since feeds don't say: `missing` is
+    /// (channel id, video ids) from `Db::yt_missing_durations`.
+    pub fn find_durations(&mut self, missing: Vec<(String, Vec<String>)>) {
+        if self.durations_busy || missing.is_empty() {
+            return;
+        }
+        let Some(tools) = self.tools.clone() else { return };
+        self.durations_busy = true;
+        self.spawn(move |tx| {
+            let channels: Vec<String> = missing.iter().map(|(c, _)| c.clone()).collect();
+            let result = tools.latest_durations(&channels).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Msg::Durations(missing, result));
+        });
+    }
+
+    /// Starts listing a channel tab or playlist (see [`Lazy`]); `None` until yt-dlp is
+    /// installed.
+    pub fn lazy(&self, url: &str) -> Option<Lazy> {
+        Some(Lazy::start(&self.ctx, self.tools.clone()?, url.to_owned()))
+    }
+
     /// Looks up a channel from a link or @handle (then subscribes, see `Shared`).
     pub fn find_channel(&self, input: &str) {
         let Some(tools) = self.tools.clone() else { return };
@@ -319,6 +346,10 @@ impl YouTube {
                     self.refreshing = false;
                     out.push(Msg::FeedsDone);
                 }
+                Msg::Durations(missing, result) => {
+                    self.durations_busy = false;
+                    out.push(Msg::Durations(missing, result));
+                }
                 Msg::ForYou(result) => {
                     if let Err(e) = &result {
                         log::warn!("youtube: no suggestions: {e}");
@@ -331,6 +362,118 @@ impl YouTube {
             }
         }
         out
+    }
+}
+
+/// Entries listed before anyone scrolls (a few screens' worth).
+const LAZY_FIRST: usize = 60;
+/// How far past the last entry on screen to keep listed.
+pub const LAZY_AHEAD: usize = 60;
+
+/// A channel's videos or playlists, or a playlist's videos, coming in from yt-dlp on a
+/// background thread. It reads only as far as [`Lazy::want`] asks, and yt-dlp waits in the
+/// meantime; dropping this stops it.
+pub struct Lazy {
+    pub entries: Vec<Entry>,
+    /// Everything's in (or it failed).
+    pub done: bool,
+    pub error: Option<String>,
+    rx: Receiver<Result<Entry, String>>,
+    want_tx: Sender<usize>,
+    wanted: usize,
+}
+
+impl Lazy {
+    fn start(ctx: &egui::Context, tools: Tools, url: String) -> Self {
+        let (tx, rx) = channel();
+        let (want_tx, want_rx) = channel::<usize>();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let listing = match tools.listing(&url) {
+                Ok(listing) => listing,
+                Err(e) => {
+                    let _ = tx.send(Err(format!("{e:#}")));
+                    ctx.request_repaint();
+                    return;
+                }
+            };
+            let (mut listing, mut sent, mut wanted) = (listing, 0, LAZY_FIRST);
+            loop {
+                while let Ok(n) = want_rx.try_recv() {
+                    wanted = wanted.max(n);
+                }
+                if sent >= wanted {
+                    match want_rx.recv() {
+                        Ok(n) => wanted = wanted.max(n),
+                        Err(_) => return, // the page closed
+                    }
+                    continue;
+                }
+                let Some(entry) = listing.next() else { break };
+                if sent == 0 {
+                    log::info!("youtube: listing {url}: first entry after {:.1}s", started.elapsed().as_secs_f64());
+                }
+                if tx.send(Ok(entry)).is_err() {
+                    return;
+                }
+                sent += 1;
+                ctx.request_repaint();
+            }
+            log::info!("youtube: listed {sent} from {url} in {:.1}s", started.elapsed().as_secs_f64());
+            if let Err(e) = listing.finish() {
+                log::warn!("youtube: listing {url}: {e:#}");
+                let _ = tx.send(Err(format!("{e:#}")));
+            }
+            ctx.request_repaint();
+        });
+        Self { entries: Vec::new(), done: false, error: None, rx, want_tx, wanted: LAZY_FIRST }
+    }
+
+    /// Takes entries that came in; returns whether any did.
+    pub fn poll(&mut self) -> bool {
+        let before = self.entries.len();
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(entry)) => self.entries.push(entry),
+                Ok(Err(e)) => self.error = Some(e),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.done = true;
+                    break;
+                }
+            }
+        }
+        self.entries.len() > before
+    }
+
+    /// Asks for at least `n` entries.
+    pub fn want(&mut self, n: usize) {
+        if n > self.wanted {
+            self.wanted = n;
+            let _ = self.want_tx.send(n);
+        }
+    }
+
+    /// Still listing (or about to be).
+    pub fn loading(&self) -> bool {
+        !self.done && self.entries.len() < self.wanted
+    }
+}
+
+/// Opens a web page in the default browser.
+pub fn open_in_browser(url: &str) {
+    let mut cmd = if cfg!(windows) {
+        let mut cmd = std::process::Command::new("rundll32");
+        cmd.arg("url.dll,FileProtocolHandler");
+        cmd
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    if let Err(e) = cmd.arg(url).spawn() {
+        log::warn!("opening {url}: {e}");
     }
 }
 

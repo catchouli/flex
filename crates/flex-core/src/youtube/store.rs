@@ -31,6 +31,8 @@ pub struct Video {
     pub channel: String,
     pub published: i64,
     pub short: bool,
+    /// Seconds, once looked up (feeds don't say).
+    pub duration: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,10 +47,11 @@ pub struct WatchProgress {
 }
 
 fn video(r: &rusqlite::Row) -> rusqlite::Result<Video> {
-    Ok(Video { id: r.get(0)?, title: r.get(1)?, channel_id: r.get(2)?, channel: r.get(3)?, published: r.get(4)?, short: r.get(5)? })
+    let duration = r.get::<_, Option<f64>>(6)?.filter(|d| *d > 0.0);
+    Ok(Video { id: r.get(0)?, title: r.get(1)?, channel_id: r.get(2)?, channel: r.get(3)?, published: r.get(4)?, short: r.get(5)?, duration })
 }
 
-const VIDEO_COLUMNS: &str = "id, title, channel_id, channel, published, short";
+const VIDEO_COLUMNS: &str = "id, title, channel_id, channel, published, short, duration";
 
 /// Part-watched videos resume unless they're nearly over (or barely started).
 const MIN_RESUME_SECS: f64 = 10.0;
@@ -122,6 +125,54 @@ impl Db {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params![channel_id, shorts, limit as i64], video)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The channel a video is from, for one known only by its channel's name (e.g. from
+    /// watch progress): from a subscription's feed, else a subscription by that name.
+    pub fn yt_channel_id_for(&self, video_id: &str, channel: &str) -> Result<Option<String>> {
+        let from_feed = self.conn.query_row("SELECT channel_id FROM yt_videos WHERE id = ?1", [video_id], |r| r.get(0)).optional()?;
+        if from_feed.is_some() {
+            return Ok(from_feed);
+        }
+        Ok(self.conn.query_row("SELECT id FROM yt_channels WHERE title = ?1 LIMIT 1", [channel], |r| r.get(0)).optional()?)
+    }
+
+    /// Saves how long videos are, for those that are stored (from any list that says).
+    pub fn save_yt_durations(&mut self, durations: &[(String, f64)]) -> Result<()> {
+        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        {
+            let mut stmt = tx.prepare("UPDATE yt_videos SET duration = ?2 WHERE id = ?1 AND duration IS NOT ?2")?;
+            for (id, secs) in durations {
+                stmt.execute(params![id, secs])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Videos (not Shorts) whose length hasn't been looked up yet, by channel:
+    /// (channel id, video ids).
+    pub fn yt_missing_durations(&self) -> Result<Vec<(String, Vec<String>)>> {
+        let mut stmt = self.conn.prepare("SELECT channel_id, id FROM yt_videos WHERE duration IS NULL AND short = 0 ORDER BY channel_id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        for row in rows {
+            let (channel, id) = row?;
+            match out.last_mut() {
+                Some((c, ids)) if *c == channel => ids.push(id),
+                _ => out.push((channel, vec![id])),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Marks videos whose length couldn't be found (e.g. live streams), so they aren't
+    /// looked up again.
+    pub fn mark_yt_durations_unknown(&self, ids: &[String]) -> Result<()> {
+        for id in ids {
+            self.conn.execute("UPDATE yt_videos SET duration = 0 WHERE id = ?1 AND duration IS NULL", [id])?;
+        }
+        Ok(())
     }
 
     pub fn yt_progress(&self, id: &str) -> Result<Option<WatchProgress>> {
@@ -245,6 +296,25 @@ mod tests {
 
         db.remove_yt_channel("UCa").unwrap();
         assert_eq!(ids(db.yt_latest(10, true, false).unwrap()), ["v3"]);
+    }
+
+    #[test]
+    fn durations_are_looked_up_once() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.add_yt_channel("UCa", "A", 1).unwrap();
+        db.save_yt_feed("UCa", "A", &[feed("v1", "UCa", 100, false), feed("v2", "UCa", 200, false), feed("s", "UCa", 300, true)], 5).unwrap();
+        assert_eq!(db.yt_missing_durations().unwrap(), vec![("UCa".to_owned(), vec!["v1".to_owned(), "v2".to_owned()])], "not Shorts");
+        db.save_yt_durations(&[("v1".into(), 61.0), ("elsewhere".into(), 5.0)]).unwrap();
+        db.mark_yt_durations_unknown(&["v1".into(), "v2".into()]).unwrap();
+        assert!(db.yt_missing_durations().unwrap().is_empty());
+        assert_eq!(db.yt_channel_id_for("v1", "?").unwrap().as_deref(), Some("UCa"), "from the feed");
+        assert_eq!(db.yt_channel_id_for("other", "A").unwrap().as_deref(), Some("UCa"), "by name");
+        assert_eq!(db.yt_channel_id_for("other", "B").unwrap(), None);
+        let videos = db.yt_channel_videos("UCa", 10, false).unwrap();
+        assert_eq!(videos.iter().map(|v| v.duration).collect::<Vec<_>>(), [None, Some(61.0)], "v2 unknown, v1 kept");
+        // A feed read again keeps the lengths.
+        db.save_yt_feed("UCa", "A", &[feed("v1", "UCa", 100, false)], 6).unwrap();
+        assert_eq!(db.yt_channel_videos("UCa", 10, false).unwrap()[1].duration, Some(61.0));
     }
 
     #[test]

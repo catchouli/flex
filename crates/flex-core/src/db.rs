@@ -212,7 +212,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE yt_channels ADD COLUMN focused_at INTEGER NOT NULL DEFAULT 0;",
     // 16: a show or film's original language (ISO 639-1; '' when TMDB doesn't say), for
     // picking its audio track. NULL until the details are next fetched.
-    "ALTER TABLE shows ADD COLUMN original_language TEXT;"
+    "ALTER TABLE shows ADD COLUMN original_language TEXT;",
+    // 17: how long subscriptions' videos are (feeds don't say; looked up separately).
+    // NULL: not looked up yet; 0: looked up, unknown.
+    "ALTER TABLE yt_videos ADD COLUMN duration REAL;"
 ];
 
 /// Now, in SQL (Unix seconds).

@@ -1,10 +1,11 @@
-//! YouTube: subscriptions' latest videos, channels, search, a video's options, and
-//! Settings → YouTube. Videos play in Flex's player through yt-dlp (see `crate::youtube`).
+//! YouTube: subscriptions' latest videos, channels and their playlists, search, a video's
+//! options, and Settings → YouTube. Videos play in Flex's player through yt-dlp (see `crate::youtube`).
 
 use std::collections::HashMap;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Rect, TextStyle, Ui, pos2, vec2};
 use flex_core::youtube::feeds::{Listed, thumbnail};
+use flex_core::youtube::listing::{self, Entry, Playlist};
 use flex_core::youtube::sponsorblock::CATEGORIES;
 use flex_core::youtube::store::{Video, WatchProgress};
 use flex_core::youtube::tools::{Installed, Tool};
@@ -15,7 +16,7 @@ use crate::images::{Size, paint_cover};
 use crate::input::{Action, Press};
 use crate::shared::{PlayRequest, Shared, now_unix};
 use crate::widgets::{self, GridSpec, GridState, Icon, ListInput, ListState, Row};
-use crate::youtube::{CONTINUE_LIMITS, QUALITIES, ago};
+use crate::youtube::{CONTINUE_LIMITS, LAZY_AHEAD, Lazy, QUALITIES, ago, open_in_browser};
 use crate::theme;
 
 const THUMB: egui::Vec2 = egui::vec2(400.0, 225.0);
@@ -29,6 +30,22 @@ fn count(n: usize, thing: &str) -> String {
     format!("{n} {thing}{}", if n == 1 { "" } else { "s" })
 }
 
+/// "950 views", "12K views", "1.2M views".
+fn views(n: u64) -> String {
+    let short = |n: u64, unit: u64, suffix: &str| {
+        let tenths = n * 10 / unit;
+        if tenths < 100 && !tenths.is_multiple_of(10) { format!("{}.{}{suffix}", tenths / 10, tenths % 10) } else { format!("{}{suffix}", n / unit) }
+    };
+    let n = match n {
+        1 => return "1 view".to_owned(),
+        n if n < 1_000 => n.to_string(),
+        n if n < 1_000_000 => short(n, 1_000, "K"),
+        n if n < 1_000_000_000 => short(n, 1_000_000, "M"),
+        n => short(n, 1_000_000_000, "B"),
+    };
+    format!("{n} views")
+}
+
 /// A video as shown in a grid.
 #[derive(Clone)]
 pub struct VideoItem {
@@ -38,6 +55,8 @@ pub struct VideoItem {
     pub channel_id: String,
     /// Under the title, e.g. "Blender · 3 days ago".
     detail: String,
+    /// Seconds, when known: shown on the thumbnail.
+    duration: Option<f64>,
     /// How far through a part-watched video is.
     fraction: Option<f32>,
     watched: bool,
@@ -51,6 +70,7 @@ impl VideoItem {
 
 fn with_progress(mut item: VideoItem, progress: Option<&WatchProgress>) -> VideoItem {
     if let Some(p) = progress {
+        item.duration = item.duration.or(p.duration);
         item.watched = p.watched;
         item.fraction = match (p.position, p.duration) {
             (Some(pos), Some(dur)) if dur > 0.0 => Some((pos / dur) as f32),
@@ -67,24 +87,67 @@ fn from_store(videos: Vec<Video>, progress: &HashMap<String, WatchProgress>) -> 
         .map(|v| {
             let detail = format!("{} · {}", v.channel, ago(v.published, now));
             let saved = progress.get(&v.id);
-            let item = VideoItem { title: v.title, channel: v.channel, channel_id: v.channel_id, detail, fraction: None, watched: false, id: v.id };
+            let item = VideoItem {
+                title: v.title,
+                channel: v.channel,
+                channel_id: v.channel_id,
+                detail,
+                duration: v.duration,
+                fraction: None,
+                watched: false,
+                id: v.id,
+            };
             with_progress(item, saved)
         })
         .collect()
 }
 
+fn listed_item(l: &Listed, detail: String, progress: &HashMap<String, WatchProgress>) -> VideoItem {
+    let item = VideoItem {
+        id: l.id.clone(),
+        title: l.title.clone(),
+        channel: l.channel.clone(),
+        channel_id: l.channel_id.clone(),
+        detail,
+        duration: l.duration,
+        fraction: None,
+        watched: false,
+    };
+    with_progress(item, progress.get(&l.id))
+}
+
+/// "Blender · 12K views · 3 days ago", from whichever is known.
+fn listed_detail(l: &Listed, now: i64) -> String {
+    [l.channel.clone(), video_detail(l.views, l.published, now)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
 fn from_listed(listed: &[Listed], progress: &HashMap<String, WatchProgress>) -> Vec<VideoItem> {
-    listed
-        .iter()
-        .map(|l| {
-            let detail = match l.duration {
-                Some(d) => format!("{} · {}", l.channel, theme::format_time(d)),
-                None => l.channel.clone(),
-            };
-            let item = VideoItem { id: l.id.clone(), title: l.title.clone(), channel: l.channel.clone(), channel_id: l.channel_id.clone(), detail, fraction: None, watched: false };
-            with_progress(item, progress.get(&l.id))
-        })
-        .collect()
+    let now = now_unix();
+    listed.iter().map(|l| listed_item(l, listed_detail(l, now), progress)).collect()
+}
+
+/// `detail` ("Blender · 12K views · 3 days ago") without as many of its last parts as it
+/// takes to fit in `width` (keeping the first, which is clipped if need be).
+fn fit_detail(detail: &str, width: f32, measure: impl Fn(&str) -> f32) -> &str {
+    let mut fitted = detail;
+    while measure(fitted) > width {
+        match fitted.rsplit_once(" · ") {
+            Some((rest, _)) => fitted = rest,
+            None => break,
+        }
+    }
+    fitted
+}
+
+/// A label in a thumbnail's bottom-right corner (a video's length), above the progress bar
+/// if there is one.
+fn paint_badge(painter: &Painter, thumb: Rect, text: &str, above_progress: bool, style: &egui::Style) {
+    let galley = painter.layout_no_wrap(text.to_owned(), TextStyle::Small.resolve(style), Color32::WHITE);
+    let pad = vec2(7.0, 2.0);
+    let max = pos2(thumb.right() - 8.0, thumb.bottom() - if above_progress { 18.0 } else { 8.0 });
+    let rect = Rect::from_min_max(max - galley.size() - pad * 2.0, max);
+    painter.rect_filled(rect, CornerRadius::same(4), Color32::from_black_alpha(200));
+    painter.galley(rect.min + pad, galley, Color32::WHITE);
 }
 
 fn paint_video(painter: &Painter, rect: Rect, item: &VideoItem, thumb: Option<&egui::TextureHandle>, focused: bool, style: &egui::Style) {
@@ -101,11 +164,16 @@ fn paint_video(painter: &Painter, rect: Rect, item: &VideoItem, thumb: Option<&e
     } else if let Some(fraction) = item.fraction {
         widgets::paint_progress(painter, thumb_rect, fraction, theme::progress());
     }
+    if let Some(d) = item.duration.filter(|d| *d > 0.0) {
+        paint_badge(painter, thumb_rect, &theme::format_time(d), item.fraction.is_some() && !item.watched, style);
+    }
     theme::paint_picture_frame(painter, thumb_rect, focused);
     let color = if focused { theme::highlight() } else { theme::text() };
     let text = Rect::from_min_max(pos2(rect.left(), thumb_rect.bottom() + 8.0), rect.max);
     widgets::text_block(painter, Rect::from_min_size(text.min, vec2(text.width(), 44.0)), &item.title, TextStyle::Small.resolve(style), color);
-    painter.with_clip_rect(text).text(pos2(text.left(), text.bottom() - 4.0), Align2::LEFT_BOTTOM, &item.detail, TextStyle::Small.resolve(style), theme::dim());
+    let font = TextStyle::Small.resolve(style);
+    let detail = fit_detail(&item.detail, text.width(), |s| painter.layout_no_wrap(s.to_owned(), font.clone(), theme::dim()).size().x);
+    painter.with_clip_rect(text).text(pos2(text.left(), text.bottom() - 4.0), Align2::LEFT_BOTTOM, detail, font, theme::dim());
 }
 
 /// A row of buttons above a grid of videos, shared by the YouTube screens.
@@ -269,7 +337,16 @@ impl YouTubeHome {
                     _ => String::new(),
                 };
                 let detail = format!("{}{left}", p.channel);
-                let item = VideoItem { id, title: p.title.clone(), channel: p.channel.clone(), channel_id: String::new(), detail, fraction: None, watched: false };
+                let item = VideoItem {
+                    id,
+                    title: p.title.clone(),
+                    channel: p.channel.clone(),
+                    channel_id: String::new(),
+                    detail,
+                    duration: None,
+                    fraction: None,
+                    watched: false,
+                };
                 with_progress(item, Some(&p))
             })
             .collect();
@@ -378,7 +455,16 @@ impl YouTubeHistory {
                     _ => "started".to_owned(),
                 };
                 let detail = format!("{} · {} · {how}", p.channel, ago(p.updated_at, now));
-                let item = VideoItem { id, title: p.title.clone(), channel: p.channel.clone(), channel_id: String::new(), detail, fraction: None, watched: false };
+                let item = VideoItem {
+                    id,
+                    title: p.title.clone(),
+                    channel: p.channel.clone(),
+                    channel_id: String::new(),
+                    detail,
+                    duration: None,
+                    fraction: None,
+                    watched: false,
+                };
                 with_progress(item, Some(&p))
             })
             .collect();
@@ -404,25 +490,161 @@ impl Screen for YouTubeHistory {
     }
 }
 
-/// One channel's videos.
+/// Videos yt-dlp lists as far as they're scrolled to: a channel's uploads, or a playlist's
+/// videos.
+struct LazyVideos {
+    url: String,
+    lazy: Option<Lazy>,
+}
+
+impl LazyVideos {
+    fn new(url: String) -> Self {
+        Self { url, lazy: None }
+    }
+
+    /// Starts listing once YouTube's set up, asks for more as `grid` scrolls, and takes
+    /// videos that came in (remembering their lengths). Returns whether any came in.
+    fn poll(&mut self, sh: &mut Shared, grid: &GridState) -> bool {
+        if self.lazy.is_none() {
+            self.lazy = sh.youtube.lazy(&self.url);
+        }
+        let Some(lazy) = &mut self.lazy else { return false };
+        lazy.want(grid.seen() + LAZY_AHEAD);
+        let before = lazy.entries.len();
+        if !lazy.poll() {
+            return false;
+        }
+        let durations: Vec<(String, f64)> = videos(&lazy.entries[before..]).filter_map(|v| Some((v.id.clone(), v.duration?))).collect();
+        sh.save_yt_durations(&durations);
+        true
+    }
+
+    fn videos(&self) -> impl Iterator<Item = &Listed> {
+        videos(self.lazy.as_ref().map_or(&[], |l| l.entries.as_slice()))
+    }
+
+    fn any(&self) -> bool {
+        self.videos().next().is_some()
+    }
+
+    /// For the subtitle: "120 videos", plus "loading…" while more are coming.
+    fn status(&self) -> String {
+        let Some(lazy) = &self.lazy else { return String::new() };
+        match (self.videos().count(), lazy.loading()) {
+            (0, _) => String::new(),
+            (n, true) => format!("{} · loading…", count(n, "video")),
+            (n, false) if lazy.done => count(n, "video"),
+            (n, false) => format!("{}+", count(n, "video")),
+        }
+    }
+
+    /// What to show while there are no videos.
+    fn empty(&self, sh: &Shared) -> String {
+        match &self.lazy {
+            None if sh.youtube.tools.is_none() => "YouTube isn't set up yet (Settings → YouTube)".to_owned(),
+            Some(Lazy { error: Some(e), .. }) => format!("Couldn't list the videos: {e}"),
+            Some(lazy) if lazy.done => "No videos".to_owned(),
+            _ => "Loading videos…".to_owned(),
+        }
+    }
+}
+
+fn videos(entries: &[Entry]) -> impl Iterator<Item = &Listed> {
+    entries.iter().filter_map(|e| match e {
+        Entry::Video(v) => Some(v),
+        Entry::Playlist(_) => None,
+    })
+}
+
+/// "12K views · 3 days ago", from whichever is known.
+fn video_detail(view_count: Option<u64>, published: Option<i64>, now: i64) -> String {
+    let parts: Vec<String> = [view_count.map(views), published.map(|p| ago(p, now))].into_iter().flatten().collect();
+    parts.join(" · ")
+}
+
+#[derive(Clone, Copy)]
+enum ChannelButton {
+    Subscribe(bool),
+    Focus(bool),
+    Playlists,
+}
+
+fn channel_buttons(sh: &Shared, id: &str) -> Vec<(&'static str, ChannelButton)> {
+    let mut out = Vec::new();
+    if sh.is_subscribed(id) {
+        out.push(("Unsubscribe", ChannelButton::Subscribe(false)));
+        let on = sh.is_channel_focused(id);
+        out.push((if on { "Unfocus" } else { "Focus" }, ChannelButton::Focus(!on)));
+    } else {
+        out.push(("Subscribe", ChannelButton::Subscribe(true)));
+    }
+    out.push(("Playlists", ChannelButton::Playlists));
+    out
+}
+
+/// What a channel's button (or its options in Channels) does.
+fn channel_action(sh: &mut Shared, id: &str, title: &str, button: ChannelButton) -> Nav {
+    match button {
+        ChannelButton::Subscribe(true) => sh.subscribe(id, title),
+        ChannelButton::Subscribe(false) => {
+            sh.unsubscribe(id);
+            sh.toast(format!("Unsubscribed from {title}"));
+        }
+        ChannelButton::Focus(on) => sh.set_channel_focused(id, title, on),
+        ChannelButton::Playlists => return Nav::push(ChannelPlaylists::new(id, title)),
+    }
+    Nav::None
+}
+
+/// One channel's videos, all the way back: they load as they're scrolled to. Until the
+/// first ones are in, a subscription shows the videos its feed listed.
 pub struct ChannelPage {
     id: String,
     title: String,
     view: VideoGrid,
     items: Vec<VideoItem>,
     loaded: Option<u64>,
+    videos: LazyVideos,
 }
 
 impl ChannelPage {
     pub fn new(id: &str, title: &str) -> Self {
-        Self { id: id.to_owned(), title: title.to_owned(), view: VideoGrid::default(), items: Vec::new(), loaded: None }
+        Self {
+            id: id.to_owned(),
+            title: title.to_owned(),
+            view: VideoGrid::default(),
+            items: Vec::new(),
+            loaded: None,
+            videos: LazyVideos::new(listing::channel_videos_url(id)),
+        }
     }
 
-    fn refresh(&mut self, sh: &Shared) {
-        if self.loaded != Some(sh.youtube.version) {
-            self.loaded = Some(sh.youtube.version);
-            self.items = from_store(sh.yt_channel_videos(&self.id, LATEST), &sh.yt_progress_all());
+    fn refresh(&mut self, sh: &mut Shared) {
+        let new = self.videos.poll(sh, &self.view.grid);
+        if !new && self.loaded == Some(sh.youtube.version) {
+            return;
         }
+        self.loaded = Some(sh.youtube.version);
+        let progress = sh.yt_progress_all();
+        let stored = sh.yt_channel_videos(&self.id, LATEST);
+        if !self.videos.any() {
+            self.items = from_store(stored, &progress);
+            return;
+        }
+        // The listing's dates are approximate; the feed's are exact, for recent ones.
+        let published: HashMap<&str, i64> = stored.iter().map(|v| (v.id.as_str(), v.published)).collect();
+        let now = now_unix();
+        self.items = self
+            .videos
+            .videos()
+            .map(|l| {
+                let mut item = listed_item(l, video_detail(l.views, published.get(l.id.as_str()).copied().or(l.published), now), &progress);
+                if item.channel.is_empty() {
+                    item.channel = self.title.clone();
+                }
+                item
+            })
+            .collect();
     }
 }
 
@@ -432,45 +654,239 @@ impl Screen for ChannelPage {
             return Nav::Pop;
         }
         self.refresh(sh);
-        let buttons = if sh.is_subscribed(&self.id) { 2 } else { 1 };
-        match self.view.handle(press, buttons, self.items.len()) {
-            GridInput::Button(1) => {
-                let on = !sh.is_channel_focused(&self.id);
-                sh.set_channel_focused(&self.id, &self.title, on);
-                Nav::None
-            }
-            GridInput::Button(_) => {
-                if sh.is_subscribed(&self.id) {
-                    sh.unsubscribe(&self.id);
-                    sh.toast(format!("Unsubscribed from {}", self.title));
-                } else {
-                    let (id, title) = (self.id.clone(), self.title.clone());
-                    sh.subscribe(&id, &title);
-                }
-                Nav::None
-            }
+        let buttons = channel_buttons(sh, &self.id);
+        match self.view.handle(press, buttons.len(), self.items.len()) {
+            GridInput::Button(b) => match buttons.get(b) {
+                Some((_, button)) => channel_action(sh, &self.id.clone(), &self.title.clone(), *button),
+                None => Nav::None,
+            },
             input => video_input(input, &self.items).unwrap_or(Nav::None),
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.refresh(sh);
-        let subscribed = sh.is_subscribed(&self.id);
-        let channel_focused = sh.is_channel_focused(&self.id);
-        let subtitle = match (subscribed, channel_focused) {
+        let subscribed = match (sh.is_subscribed(&self.id), sh.is_channel_focused(&self.id)) {
             (true, true) => "Subscribed · focused",
             (true, false) => "Subscribed",
             _ => "",
         };
-        let body = widgets::header(ui.painter(), rect, &self.title, subtitle, ui.style());
-        let buttons: &[&str] = match (subscribed, channel_focused) {
-            (true, true) => &["Unsubscribe", "Unfocus"],
-            (true, false) => &["Unsubscribe", "Focus"],
-            _ => &["Subscribe"],
-        };
-        let empty = if subscribed { "No videos yet (they appear after the next check)" } else { "Subscribe to see their latest videos" };
+        let subtitle = [subscribed.to_owned(), self.videos.status()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        let body = widgets::header(ui.painter(), rect, &self.title, &subtitle, ui.style());
+        let buttons: Vec<&str> = channel_buttons(sh, &self.id).into_iter().map(|b| b.0).collect();
+        let empty = self.videos.empty(sh);
         let items = std::mem::take(&mut self.items);
-        self.view.ui(ui, sh, body, buttons, &items, empty, focused);
+        self.view.ui(ui, sh, body, &buttons, &items, &empty, focused);
+        self.items = items;
+        Nav::None
+    }
+}
+
+/// Hold OK on a channel in Channels: focus it, its playlists, or unsubscribe.
+pub struct ChannelOptions {
+    id: String,
+    title: String,
+    list: ListState,
+}
+
+impl ChannelOptions {
+    fn new(id: &str, title: &str) -> Self {
+        Self { id: id.to_owned(), title: title.to_owned(), list: ListState::default() }
+    }
+
+    fn choices(&self, sh: &Shared) -> Vec<(Row, ChannelButton)> {
+        let mut out = Vec::new();
+        if sh.is_subscribed(&self.id) {
+            let on = sh.is_channel_focused(&self.id);
+            let row = Row::new(Icon::Star, if on { "Unfocus" } else { "Focus" }).detail("Channels you watch regularly");
+            out.push((row, ChannelButton::Focus(!on)));
+        }
+        out.push((Row::new(Icon::Folder, "Playlists"), ChannelButton::Playlists));
+        if sh.is_subscribed(&self.id) {
+            out.push((Row::new(Icon::Remove, "Unsubscribe"), ChannelButton::Subscribe(false)));
+        } else {
+            out.push((Row::new(Icon::Add, "Subscribe"), ChannelButton::Subscribe(true)));
+        }
+        out
+    }
+}
+
+impl Screen for ChannelOptions {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        let choices = self.choices(sh);
+        let ListInput::Activate(i) = self.list.handle(press, choices.len()) else { return Nav::None };
+        match choices.get(i).map(|c| c.1) {
+            Some(ChannelButton::Playlists) => Nav::replace(ChannelPlaylists::new(&self.id, &self.title)),
+            Some(button) => {
+                channel_action(sh, &self.id.clone(), &self.title.clone(), button);
+                Nav::Pop
+            }
+            None => Nav::None,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        let body = widgets::header(ui.painter(), rect, &self.title, "Channel", ui.style());
+        let rows: Vec<Row> = self.choices(sh).into_iter().map(|c| c.0).collect();
+        widgets::list(ui, body, &rows, &mut self.list, focused);
+        Nav::None
+    }
+}
+
+/// A channel's playlists; OK opens one.
+pub struct ChannelPlaylists {
+    channel: String,
+    grid: GridState,
+    lazy: Option<Lazy>,
+    url: String,
+}
+
+impl ChannelPlaylists {
+    fn new(id: &str, title: &str) -> Self {
+        Self { channel: title.to_owned(), grid: GridState::default(), lazy: None, url: listing::channel_playlists_url(id) }
+    }
+
+    fn poll(&mut self, sh: &Shared) {
+        if self.lazy.is_none() {
+            self.lazy = sh.youtube.lazy(&self.url);
+        }
+        if let Some(lazy) = &mut self.lazy {
+            lazy.want(self.grid.seen() + LAZY_AHEAD);
+            lazy.poll();
+        }
+    }
+
+    fn playlists(&self) -> Vec<&Playlist> {
+        let entries = self.lazy.as_ref().map_or(&[][..], |l| l.entries.as_slice());
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Playlist(p) => Some(p),
+                Entry::Video(_) => None,
+            })
+            .collect()
+    }
+}
+
+impl Screen for ChannelPlaylists {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        self.poll(sh);
+        let len = self.playlists().len();
+        match self.grid.handle(press, len) {
+            ListInput::AtTop => Nav::FocusTopBar,
+            ListInput::Activate(i) => match self.playlists().get(i) {
+                Some(p) => Nav::push(PlaylistPage::new(p, &self.channel)),
+                None => Nav::None,
+            },
+            ListInput::None => Nav::None,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        self.poll(sh);
+        let playlists: Vec<Playlist> = self.playlists().into_iter().cloned().collect();
+        let loading = self.lazy.as_ref().is_some_and(Lazy::loading);
+        let subtitle = match (playlists.len(), loading) {
+            (0, _) => "Playlists".to_owned(),
+            (n, true) => format!("{} · loading…", count(n, "playlist")),
+            (n, false) => count(n, "playlist"),
+        };
+        let body = widgets::header(ui.painter(), rect, &self.channel, &subtitle, ui.style());
+        if playlists.is_empty() {
+            let empty = match &self.lazy {
+                None if sh.youtube.tools.is_none() => "YouTube isn't set up yet (Settings → YouTube)".to_owned(),
+                Some(Lazy { error: Some(e), .. }) => format!("Couldn't list the playlists: {e}"),
+                Some(lazy) if lazy.done => "No playlists".to_owned(),
+                _ => "Loading playlists…".to_owned(),
+            };
+            widgets::message(ui.painter(), body, &empty, ui.style());
+            return Nav::None;
+        }
+        let style = ui.style().clone();
+        let images = &mut sh.images;
+        widgets::grid(ui, body, playlists.len(), GRID, &mut self.grid, focused, |painter, i, r, f| {
+            let p = &playlists[i];
+            let thumb = p.thumbnail.as_ref().and_then(|url| images.get(url, Size::Still));
+            let item = VideoItem {
+                id: p.id.clone(),
+                title: p.title.clone(),
+                channel: self.channel.clone(),
+                channel_id: String::new(),
+                detail: "Playlist".to_owned(),
+                duration: None,
+                fraction: None,
+                watched: false,
+            };
+            paint_video(painter, r, &item, thumb.as_ref(), f, &style);
+            paint_badge(painter, Rect::from_min_size(r.min, THUMB), "Playlist", false, &style);
+        });
+        Nav::None
+    }
+}
+
+/// A playlist's videos, loading as they're scrolled to.
+pub struct PlaylistPage {
+    title: String,
+    channel: String,
+    view: VideoGrid,
+    items: Vec<VideoItem>,
+    loaded: Option<u64>,
+    videos: LazyVideos,
+}
+
+impl PlaylistPage {
+    fn new(playlist: &Playlist, channel: &str) -> Self {
+        Self {
+            title: playlist.title.clone(),
+            channel: channel.to_owned(),
+            view: VideoGrid::default(),
+            items: Vec::new(),
+            loaded: None,
+            videos: LazyVideos::new(listing::playlist_url(&playlist.id)),
+        }
+    }
+
+    fn refresh(&mut self, sh: &mut Shared) {
+        let new = self.videos.poll(sh, &self.view.grid);
+        if !new && self.loaded == Some(sh.youtube.version) {
+            return;
+        }
+        self.loaded = Some(sh.youtube.version);
+        let progress = sh.yt_progress_all();
+        let now = now_unix();
+        self.items = self
+            .videos
+            .videos()
+            .map(|l| {
+                // Playlists can hold other channels' videos.
+                listed_item(l, listed_detail(l, now), &progress)
+            })
+            .collect();
+    }
+}
+
+impl Screen for PlaylistPage {
+    fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
+        if press.is(Action::Back) {
+            return Nav::Pop;
+        }
+        self.refresh(sh);
+        video_input(self.view.handle(press, 0, self.items.len()), &self.items).unwrap_or(Nav::None)
+    }
+
+    fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        self.refresh(sh);
+        let subtitle = [format!("Playlist · {}", self.channel), self.videos.status()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        let body = widgets::header(ui.painter(), rect, &self.title, &subtitle, ui.style());
+        let empty = self.videos.empty(sh);
+        let items = std::mem::take(&mut self.items);
+        self.view.ui(ui, sh, body, &[], &items, &empty, focused);
         self.items = items;
         Nav::None
     }
@@ -644,8 +1060,8 @@ impl Screen for RelatedVideos {
     }
 }
 
-/// Hold OK on a video: play from the start, mark watched, related videos, its channel, and (when
-/// part-watched) remove it from Continue Watching.
+/// Hold OK on a video: play from the start, mark watched, related videos, its channel, (when
+/// part-watched) remove it from Continue Watching, and open it in the browser.
 pub struct VideoOptions {
     item: VideoItem,
     list: ListState,
@@ -659,6 +1075,7 @@ enum VideoChoice {
     Subscribe(bool),
     Focus(bool),
     RemoveFromContinue,
+    Browser,
 }
 
 impl VideoOptions {
@@ -674,10 +1091,20 @@ impl VideoOptions {
             channel: channel.to_owned(),
             channel_id: String::new(),
             detail: String::new(),
+            duration: None,
             fraction: None,
             watched: false,
         };
         Self::new(item)
+    }
+
+    /// Videos from Continue Watching or History know only their channel's name.
+    fn find_channel(&mut self, sh: &Shared) {
+        if self.item.channel_id.is_empty()
+            && let Some(id) = sh.yt_channel_id_for(&self.item.id, &self.item.channel)
+        {
+            self.item.channel_id = id;
+        }
     }
 
     fn choices(&self, sh: &Shared) -> Vec<(Row, VideoChoice)> {
@@ -707,6 +1134,7 @@ impl VideoOptions {
         if continuing && sh.yt_continue(usize::MAX).iter().any(|(id, _)| *id == self.item.id) {
             out.push((Row::new(Icon::Remove, "Remove from Continue Watching").detail("Until you watch it again"), VideoChoice::RemoveFromContinue));
         }
+        out.push((Row::new(Icon::None, "Open in browser").detail("On YouTube's website"), VideoChoice::Browser));
         out
     }
 }
@@ -716,6 +1144,7 @@ impl Screen for VideoOptions {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
+        self.find_channel(sh);
         let choices = self.choices(sh);
         let ListInput::Activate(i) = self.list.handle(press, choices.len()) else { return Nav::None };
         let item = &self.item;
@@ -747,11 +1176,17 @@ impl Screen for VideoOptions {
                 sh.hide_continue(&format!("yt:{}", item.id));
                 Nav::Pop
             }
+            Some(VideoChoice::Browser) => {
+                open_in_browser(&format!("https://www.youtube.com/watch?v={}", item.id));
+                sh.toast("Opening in your browser…");
+                Nav::Pop
+            }
             None => Nav::None,
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        self.find_channel(sh);
         let body = widgets::header(ui.painter(), rect, &self.item.title, &self.item.channel, ui.style());
         let rows: Vec<Row> = self.choices(sh).into_iter().map(|c| c.0).collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
@@ -760,10 +1195,14 @@ impl Screen for VideoOptions {
 }
 
 /// Subscriptions: add one, import a list, show all or only focused ones, or open a
-/// channel. Focused channels come first; holding OK on one focuses or unfocuses it.
+/// channel. Focused channels come first; holding OK on one gives its options (focus,
+/// playlists, unsubscribe).
 #[derive(Default)]
 pub struct ChannelList {
     list: ListState,
+    /// The channel whose options were opened: still selected after it moves (focused ones
+    /// come first).
+    reselect: Option<String>,
 }
 
 /// Rows above the channels.
@@ -786,15 +1225,13 @@ impl Screen for ChannelList {
         }
         let channels = listed_channels(sh);
         if press.is(Action::Menu) {
-            if let Some(c) = self.list.selected.checked_sub(CHANNEL_LIST_TOP).and_then(|i| channels.get(i)) {
-                sh.set_channel_focused(&c.id, &c.title, !c.focused);
-                // It moves (focused ones come first, or it's no longer shown): keep it
-                // selected if it's still there.
-                if let Some(i) = listed_channels(sh).iter().position(|n| n.id == c.id) {
-                    self.list.select(CHANNEL_LIST_TOP + i);
+            return match self.list.selected.checked_sub(CHANNEL_LIST_TOP).and_then(|i| channels.get(i)) {
+                Some(c) => {
+                    self.reselect = Some(c.id.clone());
+                    Nav::push(ChannelOptions::new(&c.id, &c.title))
                 }
-            }
-            return Nav::None;
+                None => Nav::None,
+            };
         }
         match self.list.handle(press, CHANNEL_LIST_TOP + channels.len()) {
             ListInput::AtTop => Nav::FocusTopBar,
@@ -814,11 +1251,17 @@ impl Screen for ChannelList {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        // Back from a channel's options: it may have moved (focused ones come first).
+        if let Some(id) = self.reselect.take()
+            && let Some(i) = listed_channels(sh).iter().position(|c| c.id == id)
+        {
+            self.list.select(CHANNEL_LIST_TOP + i);
+        }
         let all = sh.yt_channels();
         let focused_count = all.iter().filter(|c| c.focused).count();
         let subtitle = match all.len() {
             0 => "No subscriptions yet".to_owned(),
-            n => format!("{} · {focused_count} focused · hold OK on a channel to focus it", count(n, "subscription")),
+            n => format!("{} · {focused_count} focused · hold OK on a channel for more", count(n, "subscription")),
         };
         let body = widgets::header(ui.painter(), rect, "Channels", &subtitle, ui.style());
         let show = if sh.youtube_focused_only() { "Show: focused channels" } else { "Show: all channels" };
@@ -959,5 +1402,36 @@ impl Screen for SponsorBlockSettings {
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_views_briefly() {
+        assert_eq!(views(1), "1 view");
+        assert_eq!(views(950), "950 views");
+        assert_eq!(views(1_000), "1K views");
+        assert_eq!(views(1_250), "1.2K views");
+        assert_eq!(views(657_000), "657K views");
+        assert_eq!(views(11_000_000), "11M views");
+        assert_eq!(views(1_900_000_000), "1.9B views");
+    }
+
+    #[test]
+    fn details_drop_their_last_parts_to_fit() {
+        let chars = |s: &str| s.chars().count() as f32;
+        assert_eq!(fit_detail("Chan · 12K views · 3 days ago", 30.0, chars), "Chan · 12K views · 3 days ago");
+        assert_eq!(fit_detail("Chan · 12K views · 3 days ago", 20.0, chars), "Chan · 12K views");
+        assert_eq!(fit_detail("A very long channel name", 5.0, chars), "A very long channel name");
+    }
+
+    #[test]
+    fn details_show_what_is_known() {
+        assert_eq!(video_detail(Some(12_000), Some(0), 3 * 86_400), "12K views · 3 days ago");
+        assert_eq!(video_detail(Some(5), None, 0), "5 views");
+        assert_eq!(video_detail(None, None, 0), "");
     }
 }
