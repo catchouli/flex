@@ -212,17 +212,18 @@ fn install(tool: Tool, download: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?;
     }
-    // Replacing a program that's running fails on Windows; it only runs for a moment, so
-    // try again shortly.
-    for attempt in 0..5 {
-        match std::fs::rename(&staged, &dest) {
-            Ok(()) => return Ok(()),
-            Err(_) if attempt < 4 => std::thread::sleep(Duration::from_millis(500)),
-            Err(e) => bail!("replacing {}: {e}", dest.display()),
-        }
+    // Only while yt-dlp isn't running (see `InUse`): a channel page keeps it going for as
+    // long as it's open, so wait a while for that.
+    let mut result = Ok(());
+    let swapped = super::when_unused(SWAP_PATIENCE, || result = std::fs::rename(&staged, &dest));
+    if !swapped {
+        bail!("yt-dlp stayed in use; trying again next time");
     }
-    Ok(())
+    result.with_context(|| format!("replacing {}", dest.display()))
 }
+
+/// How long an update waits for yt-dlp to stop being used before giving up until next time.
+const SWAP_PATIENCE: Duration = Duration::from_secs(30 * 60);
 
 #[cfg(test)]
 mod tests {
@@ -233,6 +234,17 @@ mod tests {
         // This platform at least: the ones Flex runs on all have both.
         assert!(Tool::YtDlp.asset().is_some());
         assert!(Tool::Deno.asset().is_some_and(|a| a.ends_with(".zip")));
+    }
+
+    #[test]
+    fn swaps_only_when_unused() {
+        let in_use = super::super::InUse::new();
+        let mut swapped = false;
+        assert!(!super::super::when_unused(Duration::from_millis(600), || swapped = true), "gives up");
+        assert!(!swapped);
+        drop(in_use);
+        assert!(super::super::when_unused(Duration::ZERO, || swapped = true));
+        assert!(swapped);
     }
 
     #[test]

@@ -260,6 +260,7 @@ impl Tools {
         if let Some(n) = items {
             cmd.arg("--playlist-items").arg(format!("1:{n}"));
         }
+        let _in_use = super::InUse::new();
         let out = cmd.arg(target).output().with_context(|| format!("running {}", self.yt_dlp.display()))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);

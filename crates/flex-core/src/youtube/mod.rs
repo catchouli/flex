@@ -16,6 +16,7 @@ pub mod tools;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -47,6 +48,50 @@ fn find(dir: &Path, name: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(&file)).find(|p| p.is_file())
 }
 
+/// How many yt-dlp runs (each maybe with Deno) are going. Updates swap the programs in only
+/// while none are: a running yt-dlp reads its own file as it goes and fails if it's
+/// replaced, and Windows can't replace a running program at all.
+static RUNNING: Mutex<usize> = Mutex::new(0);
+
+fn running() -> MutexGuard<'static, usize> {
+    RUNNING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Counts as a yt-dlp run while it lives.
+pub(crate) struct InUse(());
+
+impl InUse {
+    /// Waits only if an update is swapping the programs in right now.
+    pub(crate) fn new() -> Self {
+        *running() += 1;
+        Self(())
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        *running() -= 1;
+    }
+}
+
+/// Runs `swap` once no yt-dlp is running, and keeps new runs from starting until it's
+/// done. Gives up (false) after `patience`.
+pub(crate) fn when_unused(patience: std::time::Duration, swap: impl FnOnce()) -> bool {
+    let start = std::time::Instant::now();
+    loop {
+        let count = running();
+        if *count == 0 {
+            swap();
+            return true;
+        }
+        drop(count);
+        if start.elapsed() >= patience {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 impl Tools {
     /// yt-dlp and Deno from the tools folder, else the PATH.
     pub fn find() -> Option<Self> {
@@ -69,6 +114,7 @@ impl Tools {
     }
 
     pub fn yt_dlp_version(&self) -> Option<String> {
+        let _in_use = InUse::new();
         let out = self.command().arg("--version").output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
@@ -81,6 +127,7 @@ impl Tools {
             Some(id) => format!("https://www.youtube.com/watch?v={id}"),
             None => video.to_owned(),
         };
+        let _in_use = InUse::new();
         let out = self
             .command()
             .args(["--dump-single-json", "--format", &format_choice(max_height, h264), &url])

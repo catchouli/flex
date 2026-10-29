@@ -10,7 +10,7 @@ use std::process::{Child, ChildStderr, ChildStdout, Stdio};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use super::Tools;
+use super::{InUse, Tools};
 use super::feeds::Listed;
 
 /// A channel's uploads, newest first (without Shorts or live streams, which YouTube lists
@@ -98,6 +98,8 @@ pub struct Listing {
     stderr: Option<ChildStderr>,
     /// Entries given out, to tell "empty" from "failed".
     count: usize,
+    /// Dropped after `Drop` has stopped yt-dlp.
+    _in_use: InUse,
 }
 
 impl Listing {
@@ -141,6 +143,7 @@ impl Drop for Listing {
 impl Tools {
     /// Starts listing a channel tab or playlist (see the `*_url` functions).
     pub fn listing(&self, url: &str) -> Result<Listing> {
+        let in_use = InUse::new();
         let mut child = self
             .command()
             .args(["--flat-playlist", "--lazy-playlist", "--dump-json", url])
@@ -154,7 +157,7 @@ impl Tools {
             .with_context(|| format!("running {}", self.yt_dlp.display()))?;
         let stdout = child.stdout.take().context("yt-dlp's output")?;
         let stderr = child.stderr.take();
-        Ok(Listing { child, lines: BufReader::new(stdout).lines(), stderr, count: 0 })
+        Ok(Listing { child, lines: BufReader::new(stdout).lines(), stderr, count: 0, _in_use: in_use })
     }
 
     /// The lengths of the latest videos (about 30) on each channel, in one run of yt-dlp:
@@ -163,6 +166,7 @@ impl Tools {
         if channel_ids.is_empty() {
             return Ok(Vec::new());
         }
+        let _in_use = InUse::new();
         let out = self
             .command()
             .args(["--flat-playlist", "--dump-json", "--ignore-errors", "--playlist-items", "1:30"])

@@ -282,7 +282,7 @@ impl YouTube {
     /// Looks up how long subscriptions' videos are, since feeds don't say: `missing` is
     /// (channel id, video ids) from `Db::yt_missing_durations`.
     pub fn find_durations(&mut self, missing: Vec<(String, Vec<String>)>) {
-        if self.durations_busy || self.tools_busy || missing.is_empty() {
+        if self.durations_busy || missing.is_empty() {
             return;
         }
         let Some(tools) = self.tools.clone() else { return };
@@ -295,12 +295,8 @@ impl YouTube {
     }
 
     /// Starts listing a channel tab or playlist (see [`Lazy`]); `None` until yt-dlp is
-    /// installed, and while it's being updated (a yt-dlp running while its file is
-    /// replaced fails: it reads itself as it goes).
+    /// installed.
     pub fn lazy(&self, url: &str) -> Option<Lazy> {
-        if self.tools_busy {
-            return None;
-        }
         Some(Lazy::start(&self.ctx, self.tools.clone()?, url.to_owned()))
     }
 
