@@ -34,12 +34,19 @@ pub const DEFAULT_QUALITY: u32 = 1080;
 
 /// Stream URLs stop working after about six hours; don't reuse them for long.
 const RESOLVED_FOR: Duration = Duration::from_secs(2 * 3600);
-/// How often subscriptions' feeds are read again.
-const REFRESH_EVERY: Duration = Duration::from_secs(30 * 60);
+/// How often subscriptions' feeds are read again. YouTube starts refusing feeds (404s)
+/// when asked for hundreds of them too often.
+const REFRESH_EVERY: Duration = Duration::from_secs(2 * 3600);
+/// How long to wait after YouTube refuses feeds, doubling each time it does it again.
+const BACKOFF_FIRST: Duration = Duration::from_secs(3600);
+const BACKOFF_MAX: Duration = Duration::from_secs(12 * 3600);
+/// Feeds failing in a row that mean YouTube is refusing them (rather than a channel
+/// having gone): the rest of the round is skipped.
+const REFUSED_AFTER: usize = 5;
 /// How long suggestions last before they're found again.
 const FOR_YOU_EVERY: Duration = Duration::from_secs(3600);
 /// A pause between feeds, to be gentle with YouTube.
-const FEED_GAP: Duration = Duration::from_millis(300);
+const FEED_GAP: Duration = Duration::from_secs(1);
 
 /// Results from background work, handled by [`crate::shared::Shared::poll_youtube`].
 pub enum Msg {
@@ -47,7 +54,8 @@ pub enum Msg {
     Segments(String, Vec<Segment>),
     /// A channel's feed: id, then its title and videos.
     Feed(String, Result<(String, Vec<FeedVideo>), String>),
-    FeedsDone,
+    /// A round of feeds is over; `Some(reason)` if YouTube refused them.
+    FeedsDone(Option<String>),
     Tools(Result<tools::Report, String>),
     Search(String, Result<Vec<Listed>, String>),
     /// A video's related videos.
@@ -79,7 +87,9 @@ pub struct YouTube {
     /// The video whose related videos were last asked for, and them once in.
     pub related: Option<Search>,
     pub refreshing: bool,
-    last_refresh: Option<Instant>,
+    feeds: FeedSchedule,
+    /// Things to tell the user (as toasts), taken by `Shared`.
+    pub notices: Vec<String>,
     /// Suggestions once found (or why not), and whether they're being found now.
     pub for_you: Option<Result<Vec<Listed>, String>>,
     pub for_you_busy: bool,
@@ -104,7 +114,8 @@ impl YouTube {
             search: None,
             related: None,
             refreshing: false,
-            last_refresh: None,
+            feeds: FeedSchedule::default(),
+            notices: Vec::new(),
             for_you: None,
             for_you_busy: false,
             for_you_at: None,
@@ -198,20 +209,35 @@ impl YouTube {
             return;
         }
         self.refreshing = true;
-        self.last_refresh = Some(Instant::now());
         self.spawn(move |tx| {
+            let (mut ok, mut failed_in_a_row, mut reason) = (0, 0, None);
             for id in channels {
-                let result = feeds::fetch_feed(&id).map_err(|e| format!("{e:#}"));
-                let _ = tx.send(Msg::Feed(id, result));
+                let result = feeds::fetch_feed(&id);
+                match &result {
+                    Ok(_) => {
+                        ok += 1;
+                        failed_in_a_row = 0;
+                    }
+                    Err(e) => {
+                        failed_in_a_row += 1;
+                        reason = Some(e.root_cause().to_string());
+                    }
+                }
+                let _ = tx.send(Msg::Feed(id, result.map_err(|e| format!("{e:#}"))));
+                if failed_in_a_row >= REFUSED_AFTER {
+                    log::warn!("youtube: {failed_in_a_row} feeds failed in a row; YouTube seems to be refusing them");
+                    break;
+                }
                 std::thread::sleep(FEED_GAP);
             }
-            let _ = tx.send(Msg::FeedsDone);
+            let refused = failed_in_a_row >= REFUSED_AFTER || (ok == 0 && reason.is_some());
+            let _ = tx.send(Msg::FeedsDone(if refused { reason } else { None }));
         });
     }
 
-    /// Whether feeds are due for their regular refresh.
+    /// Whether feeds are due for their regular refresh (later while backing off).
     pub fn refresh_due(&self) -> bool {
-        !self.refreshing && self.last_refresh.is_none_or(|t| t.elapsed() >= REFRESH_EVERY)
+        !self.refreshing && self.feeds.due(Instant::now())
     }
 
     /// Searches in the background, unless the last search was the same and didn't fail.
@@ -342,9 +368,10 @@ impl YouTube {
                     self.tools = Tools::find();
                     out.push(Msg::Tools(result));
                 }
-                Msg::FeedsDone => {
+                Msg::FeedsDone(refused) => {
                     self.refreshing = false;
-                    out.push(Msg::FeedsDone);
+                    self.notices.extend(self.feeds.finished(Instant::now(), refused.as_deref()));
+                    out.push(Msg::FeedsDone(refused));
                 }
                 Msg::Durations(missing, result) => {
                     self.durations_busy = false;
@@ -362,6 +389,42 @@ impl YouTube {
             }
         }
         out
+    }
+}
+
+/// When to read subscriptions' feeds next: every [`REFRESH_EVERY`], or later while
+/// YouTube is refusing them.
+#[derive(Default)]
+struct FeedSchedule {
+    next: Option<Instant>,
+    /// The current wait, while backing off.
+    backoff: Option<Duration>,
+}
+
+impl FeedSchedule {
+    fn due(&self, now: Instant) -> bool {
+        self.next.is_none_or(|t| now >= t)
+    }
+
+    /// After a round of feeds (`refused`: why YouTube refused them, if it did). Returns
+    /// what to tell the user, if anything.
+    fn finished(&mut self, now: Instant, refused: Option<&str>) -> Option<String> {
+        match refused {
+            Some(reason) => {
+                let wait = self.backoff.map_or(BACKOFF_FIRST, |b| (b * 2).min(BACKOFF_MAX));
+                self.backoff = Some(wait);
+                self.next = Some(now + wait);
+                let hours = wait.as_secs() / 3600;
+                Some(format!(
+                    "YouTube is refusing to list new videos ({reason}). Trying again in {hours} hour{}",
+                    if hours == 1 { "" } else { "s" }
+                ))
+            }
+            None => {
+                self.next = Some(now + REFRESH_EVERY);
+                self.backoff.take().map(|_| "YouTube is listing new videos again".to_owned())
+            }
+        }
     }
 }
 
@@ -499,6 +562,29 @@ pub fn ago(published: i64, now: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::ago;
+
+    #[test]
+    fn backs_off_while_youtube_refuses_feeds() {
+        use super::{FeedSchedule, REFRESH_EVERY};
+        use std::time::{Duration, Instant};
+        let hour = Duration::from_secs(3600);
+        let now = Instant::now();
+        let mut s = FeedSchedule::default();
+        assert!(s.due(now), "straight away at first");
+        assert_eq!(s.finished(now, None), None);
+        assert!(!s.due(now + REFRESH_EVERY - hour) && s.due(now + REFRESH_EVERY));
+        let told = s.finished(now, Some("http status: 404")).unwrap();
+        assert!(told.contains("http status: 404") && told.ends_with("in 1 hour"), "{told}");
+        assert!(!s.due(now + hour / 2) && s.due(now + hour));
+        assert!(s.finished(now, Some("x")).unwrap().ends_with("in 2 hours"));
+        for _ in 0..5 {
+            s.finished(now, Some("x"));
+        }
+        assert!(s.finished(now, Some("x")).unwrap().ends_with("in 12 hours"), "capped");
+        assert_eq!(s.finished(now, None).as_deref(), Some("YouTube is listing new videos again"));
+        assert_eq!(s.finished(now, None), None, "only once");
+        assert!(s.finished(now, Some("x")).unwrap().ends_with("in 1 hour"), "starts over");
+    }
 
     #[test]
     fn says_how_long_ago() {
