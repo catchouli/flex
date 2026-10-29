@@ -34,6 +34,15 @@ pub struct Sync {
     pub error: Option<String>,
 }
 
+/// A change worth telling the user about, from [`Sync::poll`].
+#[derive(Debug, PartialEq)]
+pub enum Notice {
+    /// Syncing started failing (or failed differently).
+    Failing(String),
+    /// It works again after failing.
+    Recovered,
+}
+
 impl Sync {
     pub fn start(db_path: PathBuf, dir: PathBuf, device: String, name: String, ctx: &egui::Context) -> Self {
         let (wake, woken) = channel();
@@ -51,21 +60,30 @@ impl Sync {
         let _ = self.wake.send(());
     }
 
-    /// What the thread applied since last time (the rest updates the status).
-    pub fn poll(&mut self) -> Vec<Applied> {
-        let mut applied = Vec::new();
+    /// What the thread applied since last time, and whether it started or stopped failing
+    /// (the rest updates the status).
+    pub fn poll(&mut self) -> (Vec<Applied>, Vec<Notice>) {
+        let (mut applied, mut notices) = (Vec::new(), Vec::new());
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Applied(a) => applied.push(a),
                 Msg::Peers(p) => self.peers = p,
                 Msg::Wrote(at) => {
                     self.last_written = Some(at);
-                    self.error = None;
+                    if self.error.take().is_some() {
+                        notices.push(Notice::Recovered);
+                    }
                 }
-                Msg::Failed(e) => self.error = Some(e),
+                Msg::Failed(e) => {
+                    // It retries every 30 seconds: only say so when it changes.
+                    if self.error.as_ref() != Some(&e) {
+                        notices.push(Notice::Failing(e.clone()));
+                    }
+                    self.error = Some(e);
+                }
             }
         }
-        applied
+        (applied, notices)
     }
 }
 
@@ -84,6 +102,8 @@ fn run(db_path: &std::path::Path, dir: &std::path::Path, device: &str, name: &st
     };
     // What was last written (without its time), to skip rewriting an unchanged snapshot.
     let mut written: Option<Vec<u8>> = None;
+    // The last write error, so a failure that repeats every round is logged once.
+    let mut last_error: Option<String> = None;
     loop {
         let others = core::read_others(dir, device);
         send(Msg::Peers(others.iter().map(|s| (s.name.clone(), s.written_at)).collect()));
@@ -102,12 +122,19 @@ fn run(db_path: &std::path::Path, dir: &std::path::Path, device: &str, name: &st
                     snapshot.written_at = now();
                     match core::write(dir, &snapshot) {
                         Ok(()) => {
+                            if last_error.take().is_some() {
+                                log::info!("sync: writing works again");
+                            }
                             written = Some(body);
                             send(Msg::Wrote(snapshot.written_at));
                         }
                         Err(e) => {
-                            log::warn!("sync: {e:#}");
-                            send(Msg::Failed(format!("{e:#}")));
+                            let e = format!("{e:#}");
+                            if last_error.as_ref() != Some(&e) {
+                                log::warn!("sync: {e} (retrying every {}s)", EVERY.as_secs());
+                            }
+                            last_error = Some(e.clone());
+                            send(Msg::Failed(e));
                         }
                     }
                 }
@@ -136,6 +163,7 @@ pub fn default_name() -> String {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::mpsc::channel;
     use std::time::{Duration, Instant};
 
     use flex_core::scan::{ScanResult, ScannedFile};
@@ -184,7 +212,7 @@ mod tests {
         mac_sync.nudge();
         let mut reloaded = false;
         wait("the Mac to apply it", &mut || {
-            reloaded |= mac_sync.poll().iter().any(|a| a.files.contains(&mac_lib));
+            reloaded |= mac_sync.poll().0.iter().any(|a| a.files.contains(&mac_lib));
             reloaded && watched(&mac_db, mac_lib, "Show/01.mkv")
         });
 
@@ -209,5 +237,21 @@ mod tests {
         assert!(tv_sync.peers.iter().any(|(name, _)| name == "Mac"), "{:?}", tv_sync.peers);
         drop((tv_sync, mac_sync));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tells_once_when_failing_and_when_working_again() {
+        let (wake, _woken) = channel();
+        let (tx, rx) = channel();
+        let mut sync = super::Sync { wake, rx, peers: Vec::new(), last_written: None, error: None };
+        let failed = || super::Msg::Failed("write protected".into());
+        tx.send(failed()).unwrap();
+        tx.send(failed()).unwrap();
+        assert_eq!(sync.poll().1, [super::Notice::Failing("write protected".into())]);
+        tx.send(failed()).unwrap();
+        assert!(sync.poll().1.is_empty(), "the same failure again: nothing new");
+        tx.send(super::Msg::Wrote(5)).unwrap();
+        tx.send(super::Msg::Wrote(6)).unwrap();
+        assert_eq!(sync.poll().1, [super::Notice::Recovered]);
     }
 }
