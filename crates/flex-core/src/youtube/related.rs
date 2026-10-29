@@ -30,10 +30,12 @@ pub fn related(video_id: &str) -> Result<Vec<Listed>> {
         .limit(16 * 1024 * 1024)
         .read_json()
         .context("reading YouTube's related videos")?;
-    Ok(parse(&json, video_id))
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    Ok(parse(&json, video_id, now))
 }
 
-fn parse(json: &Value, video_id: &str) -> Vec<Listed> {
+/// The videos in YouTube's response; `now` (Unix time) turns "2d ago" into a date.
+fn parse(json: &Value, video_id: &str, now: i64) -> Vec<Listed> {
     let results = json.pointer("/contents/twoColumnWatchNextResults/secondaryResults/secondaryResults/results");
     let mut out: Vec<Listed> = Vec::new();
     for item in results.and_then(Value::as_array).into_iter().flatten() {
@@ -50,14 +52,24 @@ fn parse(json: &Value, video_id: &str) -> Vec<Listed> {
         let channel_id = find_str(&meta["image"], "browseId").filter(|b| b.starts_with("UC"));
         let badge = find(&lockup["contentImage"], "thumbnailBadgeViewModel");
         let duration = badge.and_then(|b| b["text"].as_str()).and_then(parse_duration);
+        // The second row: views, then how long ago ("131K", "13h ago").
+        let second: Vec<&str> = meta
+            .pointer("/metadata/contentMetadataViewModel/metadataRows/1/metadataParts")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.pointer("/text/content").and_then(Value::as_str))
+            .collect();
+        let views = second.iter().find_map(|t| parse_views(t));
+        let published = second.iter().find_map(|t| parse_ago(t)).map(|secs| now - secs);
         out.push(Listed {
             id: id.to_owned(),
             title: meta["title"]["content"].as_str().unwrap_or_default().to_owned(),
             channel: channel.and_then(Value::as_str).unwrap_or_default().to_owned(),
             channel_id: channel_id.unwrap_or_default().to_owned(),
             duration,
-            views: None,
-            published: None,
+            views,
+            published,
         });
     }
     out
@@ -74,6 +86,40 @@ fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn find_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     find(value, key)?.as_str()
+}
+
+/// "950", "131K", "1.1M views" as a number (not "13h ago").
+fn parse_views(s: &str) -> Option<u64> {
+    let s = s.trim().trim_end_matches(" views").trim_end_matches(" view");
+    let (number, scale) = match s.char_indices().last()? {
+        (i, 'K') => (&s[..i], 1e3),
+        (i, 'M') => (&s[..i], 1e6),
+        (i, 'B') => (&s[..i], 1e9),
+        _ => (s, 1.0),
+    };
+    let n: f64 = number.replace(',', "").parse().ok()?;
+    Some((n * scale).round() as u64)
+}
+
+/// "13h ago", "2mo ago", "Streamed 3 years ago" as roughly how many seconds ago.
+fn parse_ago(s: &str) -> Option<i64> {
+    let s = s.trim().strip_suffix(" ago")?;
+    // The number and unit at the end: "13h", "3 years".
+    let digits_end = s.rfind(|c: char| c.is_ascii_digit())? + 1;
+    let digits_start = s[..digits_end].rfind(|c: char| !c.is_ascii_digit()).map_or(0, |i| i + 1);
+    let n: i64 = s[digits_start..digits_end].parse().ok()?;
+    let unit = s[digits_end..].trim();
+    let secs = match unit.trim_end_matches('s') {
+        "" | "sec" | "second" => 1,
+        "m" | "min" | "minute" => 60,
+        "h" | "hr" | "hour" => 3600,
+        "d" | "day" => 86_400,
+        "w" | "wk" | "week" => 7 * 86_400,
+        "mo" | "month" => 30 * 86_400,
+        "y" | "yr" | "year" => 365 * 86_400,
+        _ => return None,
+    };
+    Some(n * secs)
 }
 
 /// "12:45" or "1:02:03" in seconds.
@@ -101,7 +147,7 @@ mod tests {
                     "innertubeCommand": { "browseEndpoint": { "browseId": channel_id } } } } } } },
                 "metadata": { "contentMetadataViewModel": { "metadataRows": [
                     { "metadataParts": [{ "text": { "content": channel } }] },
-                    { "metadataParts": [{ "text": { "content": "31K" } }, { "text": { "content": "2mo ago" } }] },
+                    { "metadataParts": [{ "text": { "content": "31K" } }, { "text": { "content": "2d ago" } }] },
                 ] } },
             } },
         } })
@@ -119,7 +165,7 @@ mod tests {
             { "continuationItemRenderer": {} },
         ]);
         let json = json!({ "contents": { "twoColumnWatchNextResults": { "secondaryResults": { "secondaryResults": { "results": results } } } } });
-        let related = parse(&json, "aqz-KE-bpKQ");
+        let related = parse(&json, "aqz-KE-bpKQ", 1_000_000);
         let ids: Vec<&str> = related.iter().map(|l| l.id.as_str()).collect();
         assert_eq!(ids, ["583N5TMBeVw", "-tbSCMbJA6o"]);
         assert_eq!(related[0].title, "The Ultimate Blender Quickstart Guide");
@@ -127,11 +173,25 @@ mod tests {
         assert_eq!(related[0].channel_id, "UC44unSnzdTRE8gpL5nOFflw");
         assert_eq!(related[0].duration, Some(36.0 * 60.0 + 31.0));
         assert_eq!(related[1].duration, Some(3723.0));
+        assert_eq!((related[0].views, related[0].published), (Some(31_000), Some(1_000_000 - 2 * 86_400)));
+    }
+
+    #[test]
+    fn reads_views_and_ages() {
+        assert_eq!(parse_views("131K"), Some(131_000));
+        assert_eq!(parse_views("1.1M views"), Some(1_100_000));
+        assert_eq!(parse_views("950"), Some(950));
+        assert_eq!(parse_views("13h ago"), None);
+        assert_eq!(parse_ago("13h ago"), Some(13 * 3600));
+        assert_eq!(parse_ago("2mo ago"), Some(60 * 86_400));
+        assert_eq!(parse_ago("Streamed 3 years ago"), Some(3 * 365 * 86_400));
+        assert_eq!(parse_ago("1 day ago"), Some(86_400));
+        assert_eq!(parse_ago("131K"), None);
     }
 
     #[test]
     fn survives_a_different_layout() {
-        assert!(parse(&json!({ "contents": {} }), "aqz-KE-bpKQ").is_empty());
+        assert!(parse(&json!({ "contents": {} }), "aqz-KE-bpKQ", 0).is_empty());
     }
 
     /// Real network: `cargo test -p flex-core related_online -- --ignored --nocapture`.

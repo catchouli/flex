@@ -393,6 +393,7 @@ impl Lazy {
         let (want_tx, want_rx) = channel::<usize>();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            let started = Instant::now();
             let listing = match tools.listing(&url) {
                 Ok(listing) => listing,
                 Err(e) => {
@@ -414,12 +415,16 @@ impl Lazy {
                     continue;
                 }
                 let Some(entry) = listing.next() else { break };
+                if sent == 0 {
+                    log::info!("youtube: listing {url}: first entry after {:.1}s", started.elapsed().as_secs_f64());
+                }
                 if tx.send(Ok(entry)).is_err() {
                     return;
                 }
                 sent += 1;
                 ctx.request_repaint();
             }
+            log::info!("youtube: listed {sent} from {url} in {:.1}s", started.elapsed().as_secs_f64());
             if let Err(e) = listing.finish() {
                 log::warn!("youtube: listing {url}: {e:#}");
                 let _ = tx.send(Err(format!("{e:#}")));

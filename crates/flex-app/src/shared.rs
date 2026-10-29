@@ -1764,6 +1764,11 @@ impl Shared {
         self.db.yt_channel_videos(channel_id, limit, self.youtube_shorts()).unwrap_or_default()
     }
 
+    /// The channel a video is from, when only its name is known (see `Db::yt_channel_id_for`).
+    pub fn yt_channel_id_for(&self, video_id: &str, channel: &str) -> Option<String> {
+        self.db.yt_channel_id_for(video_id, channel).unwrap_or_default()
+    }
+
     /// Remembers how long subscriptions' videos are, from a list that says.
     pub fn save_yt_durations(&mut self, durations: &[(String, f64)]) {
         if let Err(e) = self.db.save_yt_durations(durations) {

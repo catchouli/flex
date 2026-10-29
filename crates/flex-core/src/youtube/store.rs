@@ -127,6 +127,16 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The channel a video is from, for one known only by its channel's name (e.g. from
+    /// watch progress): from a subscription's feed, else a subscription by that name.
+    pub fn yt_channel_id_for(&self, video_id: &str, channel: &str) -> Result<Option<String>> {
+        let from_feed = self.conn.query_row("SELECT channel_id FROM yt_videos WHERE id = ?1", [video_id], |r| r.get(0)).optional()?;
+        if from_feed.is_some() {
+            return Ok(from_feed);
+        }
+        Ok(self.conn.query_row("SELECT id FROM yt_channels WHERE title = ?1 LIMIT 1", [channel], |r| r.get(0)).optional()?)
+    }
+
     /// Saves how long videos are, for those that are stored (from any list that says).
     pub fn save_yt_durations(&mut self, durations: &[(String, f64)]) -> Result<()> {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -297,6 +307,9 @@ mod tests {
         db.save_yt_durations(&[("v1".into(), 61.0), ("elsewhere".into(), 5.0)]).unwrap();
         db.mark_yt_durations_unknown(&["v1".into(), "v2".into()]).unwrap();
         assert!(db.yt_missing_durations().unwrap().is_empty());
+        assert_eq!(db.yt_channel_id_for("v1", "?").unwrap().as_deref(), Some("UCa"), "from the feed");
+        assert_eq!(db.yt_channel_id_for("other", "A").unwrap().as_deref(), Some("UCa"), "by name");
+        assert_eq!(db.yt_channel_id_for("other", "B").unwrap(), None);
         let videos = db.yt_channel_videos("UCa", 10, false).unwrap();
         assert_eq!(videos.iter().map(|v| v.duration).collect::<Vec<_>>(), [None, Some(61.0)], "v2 unknown, v1 kept");
         // A feed read again keeps the lengths.

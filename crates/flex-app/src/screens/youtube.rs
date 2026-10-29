@@ -116,8 +116,14 @@ fn listed_item(l: &Listed, detail: String, progress: &HashMap<String, WatchProgr
     with_progress(item, progress.get(&l.id))
 }
 
+/// "Blender · 12K views · 3 days ago", from whichever is known.
+fn listed_detail(l: &Listed, now: i64) -> String {
+    [l.channel.clone(), video_detail(l.views, l.published, now)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
 fn from_listed(listed: &[Listed], progress: &HashMap<String, WatchProgress>) -> Vec<VideoItem> {
-    listed.iter().map(|l| listed_item(l, l.channel.clone(), progress)).collect()
+    let now = now_unix();
+    listed.iter().map(|l| listed_item(l, listed_detail(l, now), progress)).collect()
 }
 
 /// `detail` ("Blender · 12K views · 3 days ago") without as many of its last parts as it
@@ -859,8 +865,7 @@ impl PlaylistPage {
             .videos()
             .map(|l| {
                 // Playlists can hold other channels' videos.
-                let detail = [l.channel.clone(), video_detail(l.views, l.published, now)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
-                listed_item(l, detail, &progress)
+                listed_item(l, listed_detail(l, now), &progress)
             })
             .collect();
     }
@@ -1093,6 +1098,15 @@ impl VideoOptions {
         Self::new(item)
     }
 
+    /// Videos from Continue Watching or History know only their channel's name.
+    fn find_channel(&mut self, sh: &Shared) {
+        if self.item.channel_id.is_empty()
+            && let Some(id) = sh.yt_channel_id_for(&self.item.id, &self.item.channel)
+        {
+            self.item.channel_id = id;
+        }
+    }
+
     fn choices(&self, sh: &Shared) -> Vec<(Row, VideoChoice)> {
         let progress = sh.yt_progress(&self.item.id);
         let mut out = Vec::new();
@@ -1130,6 +1144,7 @@ impl Screen for VideoOptions {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
+        self.find_channel(sh);
         let choices = self.choices(sh);
         let ListInput::Activate(i) = self.list.handle(press, choices.len()) else { return Nav::None };
         let item = &self.item;
@@ -1171,6 +1186,7 @@ impl Screen for VideoOptions {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
+        self.find_channel(sh);
         let body = widgets::header(ui.painter(), rect, &self.item.title, &self.item.channel, ui.style());
         let rows: Vec<Row> = self.choices(sh).into_iter().map(|c| c.0).collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
