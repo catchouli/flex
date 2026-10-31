@@ -102,6 +102,9 @@ impl ListState {
     pub fn handle(&mut self, press: Press, len: usize) -> ListInput {
         let last = len.saturating_sub(1);
         let before = self.selected;
+        // The list may have shrunk since it was last drawn (or never been drawn): never
+        // hand back a row that isn't there.
+        self.selected = self.selected.min(last);
         match press.action {
             Action::Up if self.selected == 0 => return if press.repeat { ListInput::None } else { ListInput::AtTop },
             Action::Up => self.selected -= 1,
@@ -568,4 +571,19 @@ pub fn grid(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ListInput, ListState};
+    use crate::input::{Action, Press};
+
+    #[test]
+    fn a_list_never_activates_a_row_it_doesnt_have() {
+        let ok = Press { action: Action::Ok, repeat: false };
+        let mut list = ListState::default();
+        list.select(5);
+        assert!(matches!(list.handle(ok, 3), ListInput::Activate(2)), "the list shrank to 3 rows");
+        assert!(matches!(list.handle(ok, 0), ListInput::None), "no rows at all");
+    }
 }

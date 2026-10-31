@@ -730,6 +730,10 @@ impl Screen for MatchAlbum {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
+        // Nothing to choose from until the search is back (the list isn't even shown).
+        if !matches!(self.results.lock().ok().as_deref(), Some(Some(Ok(_)))) {
+            return Nav::None;
+        }
         let found = self.found();
         match self.list.handle(press, 1 + found.len()) {
             ListInput::Activate(0) => {
