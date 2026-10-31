@@ -165,7 +165,7 @@ pub async fn stream(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
     };
     let text_burn = match q.burn.filter(|b| info.subtitles.get(*b).is_some_and(|s| !s.image)) {
-        Some(index) => match state.tools.text_burn(&state.cache_dir, (file.id, file.size), &path, index).await {
+        Some(index) => match state.tools.text_burn(&state.cache_dir, (file.id, file.size), &path, index, &info.fonts).await {
             Ok(burn) => burn,
             Err(e) => {
                 log::warn!("web: preparing subtitles to burn in: {e:#}");
