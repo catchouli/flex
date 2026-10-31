@@ -284,7 +284,7 @@ const PERSON_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
 const TMDB_TOKEN_SETTING: &str = "tmdb_token";
 /// Bump when grouping/matching logic improves: automatic results are redone on the next
 /// start (manual choices are kept).
-const MATCHER_VERSION: &str = "4";
+const MATCHER_VERSION: &str = "5";
 const MATCHER_VERSION_SETTING: &str = "matcher_version";
 const CLOSE_TO_TRAY_SETTING: &str = "close_to_tray";
 const WEB_SETTING: &str = "web_ui";
