@@ -1380,6 +1380,15 @@ impl Shared {
         else {
             return;
         };
+        // The folders left behind stay put too, or Rematch would regroup them into the new
+        // show (which has the same title).
+        let from = self.db.group_matches(library_id).ok().and_then(|m| m.into_iter().find(|m| m.group_key == key)).map(|m| m.show_id);
+        if let Some(from) = from
+            && let Err(e) = self.db.pin_show_groups(from)
+        {
+            self.toast(format!("Couldn't save: {e:#}"));
+            return;
+        }
         match self.db.create_show(library_id, &group.title, group.year) {
             Ok(show_id) => self.place_group(library_id, key, show_id, None),
             Err(e) => self.toast(format!("Couldn't create show: {e:#}")),
