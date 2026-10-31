@@ -482,6 +482,17 @@ impl Db {
         Ok(())
     }
 
+    /// Pins the folders automatically grouped into `show_id` where they are, as if placed by
+    /// hand. Used when a folder is split off, so Rematch doesn't regroup the rest into the
+    /// new show (which has the same title).
+    pub fn pin_show_groups(&self, show_id: i64) -> Result<()> {
+        self.conn.execute(
+            &format!("UPDATE group_matches SET manual = 1, changed_at = {SQL_NOW} WHERE show_id = ?1 AND manual = 0"),
+            [show_id],
+        )?;
+        Ok(())
+    }
+
     /// Assigns a group by hand (to `show_id`, optionally with a season). Never undone by scans.
     pub fn set_group_match(&self, library_id: i64, group_key: &str, show_id: i64, season: Option<i32>) -> Result<()> {
         self.conn.execute(
@@ -512,6 +523,14 @@ impl Db {
             Some(into) => {
                 tx.execute("UPDATE group_matches SET show_id = ?1 WHERE show_id = ?2", params![into, show_id])?;
                 tx.execute("DELETE FROM shows WHERE id = ?1", [show_id])?;
+                // Chosen by hand: the show it joined counts as matched by hand too, so
+                // Rematch keeps it and the choice syncs.
+                if state == "manual" {
+                    tx.execute(
+                        &format!("UPDATE shows SET state = 'manual', manual_at = {SQL_NOW} WHERE id = ?1"),
+                        [into],
+                    )?;
+                }
             }
             None => {
                 tx.execute(
@@ -528,11 +547,16 @@ impl Db {
         Ok(())
     }
 
-    /// Forgets automatic grouping and online matches for a library (manual choices stay),
-    /// so the next organise + match starts afresh.
+    /// Forgets automatic grouping and online matches for a library (manual choices stay,
+    /// including shows matched by hand and the folders in them), so the next organise +
+    /// match starts afresh.
     pub fn reset_matching(&mut self, library_id: i64) -> Result<()> {
         let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute("DELETE FROM group_matches WHERE library_id = ?1 AND manual = 0", [library_id])?;
+        tx.execute(
+            "DELETE FROM group_matches WHERE library_id = ?1 AND manual = 0
+             AND show_id NOT IN (SELECT id FROM shows WHERE library_id = ?1 AND state = 'manual')",
+            [library_id],
+        )?;
         tx.execute("UPDATE shows SET state = 'local' WHERE library_id = ?1 AND state = 'unmatched'", [library_id])?;
         Self::delete_empty_shows(&tx, library_id)?;
         tx.commit()?;
@@ -1170,6 +1194,86 @@ mod tests {
         // A vanished automatic group is dropped.
         db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
         assert_eq!(db.group_matches(lib).unwrap().len(), 2, "A2 and C dropped");
+    }
+
+    fn tv_candidate(id: u64, title: &str) -> crate::metadata::Candidate {
+        crate::metadata::Candidate {
+            kind: crate::metadata::Kind::Tv,
+            id,
+            title: title.into(),
+            original_title: String::new(),
+            year: None,
+            overview: String::new(),
+            poster_path: None,
+            popularity: 0.0,
+            genre_ids: vec![],
+            original_language: String::new(),
+        }
+    }
+
+    fn test_group(key: &str, title: &str) -> crate::catalog::Group {
+        crate::catalog::Group {
+            key: key.into(),
+            title: title.into(),
+            norm: crate::parse::normalize(title),
+            year: None,
+            season: None,
+            disc: false,
+            file_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn rematch_keeps_shows_matched_by_hand() {
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let groups = [test_group("A1", "Show A"), test_group("A2", "Show A"), test_group("B", "Show B")];
+        db.sync_groups(lib, &groups).unwrap();
+        let a = db.shows(lib).unwrap().into_iter().find(|s| s.title == "Show A").unwrap().id;
+        db.set_show_metadata(a, &tv_candidate(7, "The Real Show A"), "manual").unwrap();
+
+        db.reset_matching(lib).unwrap();
+        db.sync_groups(lib, &groups).unwrap();
+        let shows = db.shows(lib).unwrap();
+        let show = shows.iter().find(|s| s.id == a).expect("the hand-matched show survives");
+        assert_eq!((show.state.as_str(), show.provider_id.as_deref()), ("manual", Some("tv:7")));
+        let in_a: Vec<_> = db.group_matches(lib).unwrap().into_iter().filter(|m| m.show_id == a).map(|m| m.group_key).collect();
+        assert_eq!(in_a, ["A1", "A2"]);
+    }
+
+    #[test]
+    fn a_hand_match_onto_an_existing_show_counts_as_manual() {
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let groups = [test_group("A", "Shingeki no Kyojin"), test_group("B", "Attack on Titan")];
+        db.sync_groups(lib, &groups).unwrap();
+        let shows = db.shows(lib).unwrap();
+        let (a, b) = (shows.iter().find(|s| s.title == "Shingeki no Kyojin").unwrap().id, shows.iter().find(|s| s.title == "Attack on Titan").unwrap().id);
+        db.set_show_metadata(b, &tv_candidate(1429, "Attack on Titan"), "matched").unwrap();
+        db.set_show_metadata(a, &tv_candidate(1429, "Attack on Titan"), "manual").unwrap();
+        assert_eq!(db.shows(lib).unwrap().iter().find(|s| s.id == b).unwrap().state, "manual");
+
+        db.reset_matching(lib).unwrap();
+        db.sync_groups(lib, &groups).unwrap();
+        assert!(db.group_matches(lib).unwrap().iter().all(|m| m.show_id == b), "both folders stay in the matched show");
+    }
+
+    #[test]
+    fn rematch_keeps_a_split() {
+        let mut db = Db::open_in_memory().unwrap();
+        let lib = db.add_library("TV", Path::new("/t"), LibraryKind::Tv).unwrap();
+        let groups = [test_group("Office US", "The Office"), test_group("Office UK", "The Office")];
+        db.sync_groups(lib, &groups).unwrap();
+        let original = db.shows(lib).unwrap()[0].id;
+        // As Shared::split_group does it.
+        db.pin_show_groups(original).unwrap();
+        let split = db.create_show(lib, "The Office", None).unwrap();
+        db.set_group_match(lib, "Office UK", split, None).unwrap();
+
+        db.reset_matching(lib).unwrap();
+        db.sync_groups(lib, &groups).unwrap();
+        let show_of = |key: &str| db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == key).unwrap().show_id;
+        assert_eq!((show_of("Office US"), show_of("Office UK")), (original, split));
     }
 
     #[test]

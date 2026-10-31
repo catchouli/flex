@@ -284,7 +284,7 @@ const PERSON_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
 const TMDB_TOKEN_SETTING: &str = "tmdb_token";
 /// Bump when grouping/matching logic improves: automatic results are redone on the next
 /// start (manual choices are kept).
-const MATCHER_VERSION: &str = "4";
+const MATCHER_VERSION: &str = "5";
 const MATCHER_VERSION_SETTING: &str = "matcher_version";
 const CLOSE_TO_TRAY_SETTING: &str = "close_to_tray";
 const WEB_SETTING: &str = "web_ui";
@@ -1380,6 +1380,15 @@ impl Shared {
         else {
             return;
         };
+        // The folders left behind stay put too, or Rematch would regroup them into the new
+        // show (which has the same title).
+        let from = self.db.group_matches(library_id).ok().and_then(|m| m.into_iter().find(|m| m.group_key == key)).map(|m| m.show_id);
+        if let Some(from) = from
+            && let Err(e) = self.db.pin_show_groups(from)
+        {
+            self.toast(format!("Couldn't save: {e:#}"));
+            return;
+        }
         match self.db.create_show(library_id, &group.title, group.year) {
             Ok(show_id) => self.place_group(library_id, key, show_id, None),
             Err(e) => self.toast(format!("Couldn't create show: {e:#}")),

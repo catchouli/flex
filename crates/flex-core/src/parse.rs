@@ -43,9 +43,11 @@ static NOISE: LazyLock<Regex> = LazyLock::new(|| {
     ")
     .unwrap()
 });
-/// Encoding/language leftovers at the end of a title ("1080p;H265", "JP", "tvdb4", "001").
+/// Encoding/language leftovers at the end of a title ("1080p;H265", "JP", "tvdb4"), and a
+/// zero-padded episode number ("001"). Unpadded numbers are part of titles too often
+/// ("Mob Psycho 100", "Steins;Gate 0", "Apollo 13") to strip.
 static TRAILING_TAGS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:[\s._;,-]+(?:(?:480|576|720|1080|2160)p?|[xh]\.?26[45]|hevc|avc|jp|jap|jpn|eng|dub|sub|raw|tvdb[\d-]*))+$|\s\d{1,3}$").unwrap()
+    Regex::new(r"(?i)(?:[\s._;,-]+(?:(?:480|576|720|1080|2160)p?|[xh]\.?26[45]|hevc|avc|jp|jap|jpn|eng|dub|sub|raw|tvdb[\d-]*))+$|\s0\d{1,2}$").unwrap()
 });
 static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
 static TRAILING_JUNK: LazyLock<Regex> = LazyLock::new(|| {
@@ -241,7 +243,7 @@ pub fn parse_library(kind: crate::LibraryKind, files: &[MediaFile]) -> HashMap<i
 }
 
 /// Bump when parsing changes (including a hunch upgrade), so cached results are redone.
-pub const PARSER_VERSION: u32 = 1;
+pub const PARSER_VERSION: u32 = 2;
 
 /// A library's files by folder (relative path, "" for the root).
 pub fn by_folder(files: &[MediaFile]) -> HashMap<&str, Vec<MediaFile>> {
@@ -496,6 +498,10 @@ mod tests {
         assert_eq!(clean_title("Ghost in the Shell 2.0"), "Ghost in the Shell 2.0");
         assert_eq!(clean_title("86"), "86", "never strips a title to nothing");
         assert_eq!(clean_title("Mobile Suit Gundam 0083"), "Mobile Suit Gundam 0083");
+        assert_eq!(clean_title("Show 01"), "Show");
+        for kept in ["Mob Psycho 100", "Steins;Gate 0", "Apollo 13", "Ocean's 11", "Kaiju No. 8", "Blade Runner 2049"] {
+            assert_eq!(clean_title(kept), kept);
+        }
         assert_eq!(normalize("The Lost Universe!"), "lost universe");
         assert_eq!(normalize("Attack On Titan"), normalize("attack on titan"));
     }

@@ -240,6 +240,13 @@ pub struct MediaInfo {
     pub fonts: Vec<(usize, String)>,
 }
 
+/// A safe file name for an attached font: its index, then its own name with anything
+/// but letters, digits, dots and dashes replaced (so it can't be a path).
+fn font_file_name(attachment: usize, name: &str) -> String {
+    let safe: String = name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    format!("{attachment}-{safe}")
+}
+
 /// Subtitle codecs that are pictures rather than text.
 const IMAGE_SUBTITLES: [&str; 4] = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"];
 
@@ -534,28 +541,38 @@ impl Tools {
             .context("starting ffmpeg")
     }
 
-    /// The track's extracted ASS file and a folder with all the file's attached fonts,
-    /// for burning the subtitles in; None until the track is fully extracted.
-    pub async fn text_burn(self: &Arc<Self>, cache_dir: &Path, key: (i64, u64), path: &Path, index: usize) -> Result<Option<TextBurn>> {
+    /// The track's extracted ASS file and a folder with the file's attached fonts (from
+    /// [`MediaInfo::fonts`]), for burning the subtitles in; None until the track is fully
+    /// extracted.
+    pub async fn text_burn(
+        self: &Arc<Self>,
+        cache_dir: &Path,
+        key: (i64, u64),
+        path: &Path,
+        index: usize,
+        fonts: &[(usize, String)],
+    ) -> Result<Option<TextBurn>> {
         if !self.can_burn_text().await || !self.subtitles(cache_dir, key, path, index)?.is_complete() {
             return Ok(None);
         }
-        let fonts_dir = format!("fonts/{}-{}/all", key.0, key.1);
+        let fonts_dir = format!("fonts/{}-{}/burn", key.0, key.1);
         let dir = cache_dir.join(&fonts_dir);
         let lock = self.lock(&dir);
         let _guard = lock.lock().await;
         if !dir.join(".done").exists() {
             let ffmpeg = self.ffmpeg.as_ref().context("ffmpeg isn't installed")?;
             tokio::fs::create_dir_all(&dir).await?;
-            // Dumps every attachment under its own name (ffmpeg complains that there's no
-            // output, but does it).
-            let _ = command(ffmpeg)
-                .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-dump_attachment:t", "", "-i"])
-                .arg(path)
-                .current_dir(&dir)
-                .stdin(Stdio::null())
-                .output()
-                .await;
+            // Only the fonts, each to a name made here: an attachment's own name comes from
+            // the file and could be a path ("../../x.bat") that ffmpeg would write to.
+            // ffmpeg complains that there's no output, but dumps them anyway.
+            if !fonts.is_empty() {
+                let mut cmd = command(ffmpeg);
+                cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
+                for (attachment, name) in fonts {
+                    cmd.arg(format!("-dump_attachment:t:{attachment}")).arg(dir.join(font_file_name(*attachment, name)));
+                }
+                let _ = cmd.arg("-i").arg(path).stdin(Stdio::null()).output().await;
+            }
             tokio::fs::write(dir.join(".done"), b"").await?;
         }
         Ok(Some(TextBurn {
@@ -567,8 +584,7 @@ impl Tools {
 
     /// A font attached to the file, cached in `cache_dir`.
     pub async fn font(&self, cache_dir: &Path, key: (i64, u64), path: &Path, attachment: usize, name: &str) -> Result<PathBuf> {
-        let safe: String = name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
-        let out = cache_dir.join("fonts").join(format!("{}-{}", key.0, key.1)).join(format!("{attachment}-{safe}"));
+        let out = cache_dir.join("fonts").join(format!("{}-{}", key.0, key.1)).join(font_file_name(attachment, name));
         let lock = self.lock(&out);
         let _guard = lock.lock().await;
         if out.exists() {
@@ -706,5 +722,19 @@ impl GrowingFile {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::font_file_name;
+
+    #[test]
+    fn font_file_names_cant_be_paths() {
+        assert_eq!(font_file_name(3, "Font Bold.ttf"), "3-Font_Bold.ttf");
+        for name in ["../../Startup/x.bat", "C:\\Windows\\x.dll", "/etc/x", ".."] {
+            let safe = font_file_name(0, name);
+            assert!(!safe.contains(['/', '\\', ':']) && safe.starts_with("0-"), "{safe}");
+        }
     }
 }

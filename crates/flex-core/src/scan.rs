@@ -151,16 +151,27 @@ impl Queue {
     }
 }
 
+/// A folder that couldn't be looked at. If it's gone, so are its files. Otherwise (a share
+/// that stalled, a folder a downloader has locked) it keeps what the previous scan found
+/// in it, and is read again next time, so a passing error doesn't drop shows from the
+/// library until the next full scan.
+fn unreadable(rel: &str, path: &Path, e: std::io::Error, index: &Index, out: &mut Found) -> Vec<String> {
+    out.errors.push(format!("{}: {e}", path.display()));
+    if e.kind() == std::io::ErrorKind::NotFound {
+        return Vec::new();
+    }
+    out.dirs.push((rel.to_owned(), 0));
+    out.files.extend(index.files.get(rel).into_iter().flatten().map(|f| (*f).clone()));
+    index.subdirs.get(rel).into_iter().flatten().map(|d| (*d).to_owned()).collect()
+}
+
 /// Looks at one folder: reuses the previous scan's findings if it hasn't changed, else
 /// reads it. Returns its subfolders.
 fn visit(root: &Path, kind: LibraryKind, rel: &str, previous: &Previous, index: &Index, settled: i64, out: &mut Found) -> Vec<String> {
     let path = join(root, rel);
     let mtime = match std::fs::metadata(&path).and_then(|m| m.modified()) {
         Ok(t) => nanos(t),
-        Err(e) => {
-            out.errors.push(format!("{}: {e}", path.display()));
-            return Vec::new();
-        }
+        Err(e) => return unreadable(rel, &path, e, index, out),
     };
     if mtime != 0 && previous.dirs.get(rel) == Some(&mtime) {
         out.dirs.push((rel.to_owned(), mtime));
@@ -170,10 +181,7 @@ fn visit(root: &Path, kind: LibraryKind, rel: &str, previous: &Previous, index: 
     out.dirs_read += 1;
     let entries = match std::fs::read_dir(&path) {
         Ok(e) => e,
-        Err(e) => {
-            out.errors.push(format!("{}: {e}", path.display()));
-            return Vec::new();
-        }
+        Err(e) => return unreadable(rel, &path, e, index, out),
     };
     let errors_before = out.errors.len();
     let mut subdirs = Vec::new();
@@ -414,6 +422,46 @@ mod tests {
     fn cancel_stops_the_scan() {
         let dir = std::env::temp_dir();
         assert!(scan(&dir, LibraryKind::Tv, &Previous::default(), &AtomicBool::new(true), |_| {}).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cant_be_read_keeps_its_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("unreadable");
+        for p in ["Show/Season 1/ep1.mkv", "Show/Season 1/Extras/sp1.mkv", "Other/ep1.mkv"] {
+            touch(&dir, p);
+        }
+        let first = rescan(&dir, &ScanResult::default()).unwrap();
+        // Changed, so it has to be read (read_dir fails), and its subfolder can't even
+        // be looked at (metadata fails).
+        touch(&dir, "Show/Season 1/new.mkv");
+        let locked = dir.join("Show/Season 1");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let second = rescan(&dir, &first);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let second = second.unwrap();
+        assert_eq!(second.errors.len(), 2, "{:?}", second.errors);
+        assert_eq!(paths(&second), paths(&first));
+        // Once it's readable again it's read, not dropped.
+        touch(&dir, "Show/Season 1/ep2.mkv");
+        let third = rescan(&dir, &second).unwrap();
+        assert!(third.errors.is_empty());
+        assert_eq!(paths(&third), ["Other/ep1.mkv", "Show/Season 1/Extras/sp1.mkv", "Show/Season 1/ep1.mkv", "Show/Season 1/ep2.mkv", "Show/Season 1/new.mkv"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deleted_folder_loses_its_files() {
+        let dir = temp_dir("deleted");
+        for p in ["Show/ep1.mkv", "Other/ep1.mkv"] {
+            touch(&dir, p);
+        }
+        let first = rescan(&dir, &ScanResult::default()).unwrap();
+        std::fs::remove_dir_all(dir.join("Show")).unwrap();
+        let second = rescan(&dir, &first).unwrap();
+        assert_eq!(paths(&second), ["Other/ep1.mkv"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

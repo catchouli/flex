@@ -61,7 +61,10 @@ async fn cached(state: Arc<State>, file: PathBuf, url: Option<String>) -> Respon
             return Ok((bytes, kind));
         }
         let url = url.ok_or_else(|| anyhow::anyhow!("not cached"))?;
-        let bytes = state.agent.get(&url).call()?.body_mut().with_config().limit(20_000_000).read_to_vec()?;
+        let mut response = state.agent.get(&url).call()?;
+        let image = response.headers().get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|t| t.starts_with("image/"));
+        anyhow::ensure!(image, "{url} isn't an image");
+        let bytes = response.body_mut().with_config().limit(20_000_000).read_to_vec()?;
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -103,13 +106,24 @@ pub struct WebImage {
 /// `/img/web?u=…`: an image by URL, only from the hosts metadata comes from (so the
 /// server can't be used to fetch anything else).
 pub async fn web(AxState(state): AxState<Arc<State>>, Query(q): Query<WebImage>) -> Response {
-    let host = q.u.strip_prefix("https://").and_then(|rest| rest.split('/').next()).unwrap_or("");
-    let allowed = ["anilist.co", "tmdb.org"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")));
-    if !allowed {
+    if !allowed_web_image(&q.u) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let file = web_cache_file(&state.images_dir, &q.u);
     cached(state, file, Some(q.u)).await
+}
+
+/// Whether `url` is a plain https URL on one of the hosts metadata images come from. The
+/// host has to be nothing but a hostname: "https://evil.example?.tmdb.org" or
+/// "https://x.tmdb.org@evil.example" would otherwise pass a suffix check while fetching
+/// somewhere else. No query or fragment either (image URLs don't have them), so the cache
+/// can't be filled with endless variants of one URL.
+fn allowed_web_image(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let hostname = !host.is_empty() && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    let plain_path = !path.contains(['?', '#', '\\']);
+    hostname && plain_path && ["anilist.co", "tmdb.org"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
 
 /// `/shot/{library}/{file}`: a screenshot the app has already taken, if any.
@@ -125,4 +139,29 @@ pub async fn shot(AxState(state): AxState<Arc<State>>, UrlPath((library_id, file
 /// Whether the app has a screenshot for a file (so pages only link ones that exist).
 pub fn has_shot(state: &State, file: &flex_core::MediaFile) -> bool {
     state.shots_dir.join(format!("{}-{}", file.id, file.size)).join(THUMB_SHOT).exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_web_image;
+
+    #[test]
+    fn web_images_only_come_from_metadata_hosts() {
+        assert!(allowed_web_image("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1-abc.png"));
+        assert!(allowed_web_image("https://image.tmdb.org/t/p/w500/abc.jpg"));
+        for bad in [
+            "https://evil.example?.tmdb.org",
+            "https://evil.example#.tmdb.org",
+            "https://x.tmdb.org@evil.example/a.png",
+            "https://evil.example\\.tmdb.org/a.png",
+            "https://image.tmdb.org:8080/a.png",
+            "https://eviltmdb.org/a.png",
+            "http://image.tmdb.org/a.png",
+            "https://image.tmdb.org/a.png?v=1",
+            "https://image.tmdb.org/a.png#x",
+            "https:///a.png",
+        ] {
+            assert!(!allowed_web_image(bad), "{bad}");
+        }
+    }
 }

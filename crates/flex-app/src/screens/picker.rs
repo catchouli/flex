@@ -187,6 +187,11 @@ impl Screen for FolderPicker {
                 None => Nav::Pop,
             };
         }
+        // Still listing: the rows aren't there yet (and the selection to come back to is
+        // kept).
+        if self.pending.is_some() {
+            return Nav::None;
+        }
         match self.list.handle(press, self.dirs.len() + self.offset()) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) if self.offset() == 1 && self.purpose == Purpose::SyncFolder => {

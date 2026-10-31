@@ -60,8 +60,9 @@ pub struct Player {
     /// Set once the file played to the end (progress already recorded as watched).
     finished: bool,
     last_save: f64,
-    /// Last known duration; mpv forgets it once the file ends.
+    /// Last known duration and position; mpv forgets both once the file ends (or fails).
     duration: Option<f64>,
+    position: Option<f64>,
     /// For the history: when this session started, the furthest position recorded, whether
     /// it reached "watched", and whether the session has been logged.
     session_start: i64,
@@ -138,6 +139,7 @@ impl Player {
             finished: false,
             last_save: now,
             duration: None,
+            position: None,
             session_start: crate::shared::now_unix(),
             recorded: None,
             became_watched: false,
@@ -165,11 +167,25 @@ impl Player {
         if self.finished || !self.loaded {
             return;
         }
-        if let (Some(position), Some(duration)) = (self.mpv.get_f64("time-pos"), self.duration)
+        if let (Some(position), Some(duration)) = (self.current_position(), self.duration)
             && let Some(p) = sh.record_progress(&self.req, position, duration)
         {
             self.recorded = Some(position);
             self.became_watched |= p.watched && p.position.is_none();
+        }
+    }
+
+    /// Where playback is, or got to if the file has ended.
+    fn current_position(&self) -> Option<f64> {
+        self.mpv.get_f64("time-pos").or(self.position)
+    }
+
+    /// Whether the file "ended" well before its duration (the demuxer reports a broken
+    /// stream as the end of the file). Allows for durations that are a bit off.
+    fn ended_early(&self) -> bool {
+        match (self.position, self.duration) {
+            (Some(position), Some(duration)) => ended_early(position, duration),
+            _ => false,
         }
     }
 
@@ -512,6 +528,8 @@ impl Player {
         if let Some(nav) = self.update_youtube(sh, &ctx) {
             return nav;
         }
+        // Before handling events: once the file has ended mpv no longer knows.
+        self.position = self.current_position();
         for event in self.mpv.poll_events() {
             match event {
                 mpv::Event::FileLoaded => {
@@ -521,6 +539,15 @@ impl Player {
                 }
                 mpv::Event::EndFile { error: Some(e), .. } => {
                     sh.toast(format!("Couldn't play {}: {e}", self.req.title));
+                    return Nav::Pop;
+                }
+                mpv::Event::EndFile { eof: true, .. } if self.ended_early() => {
+                    // A stream that dropped, or a share that failed mid-file: keep the place
+                    // rather than marking it watched and moving on.
+                    self.save_progress(sh);
+                    self.log_session(sh);
+                    self.finished = true;
+                    sh.toast(format!("{} stopped before the end", self.req.title));
                     return Nav::Pop;
                 }
                 mpv::Event::EndFile { eof: true, .. } => {
@@ -785,7 +812,7 @@ impl Screen for Player {
             state,
             title: self.req.title.clone(),
             kind: "video".into(),
-            position: self.mpv.get_f64("time-pos"),
+            position: self.current_position(),
             duration: self.duration,
             media: None,
         })
@@ -802,5 +829,23 @@ impl Screen for Player {
     fn on_leave(&mut self, sh: &mut Shared) {
         self.save_progress(sh);
         self.log_session(sh);
+    }
+}
+
+fn ended_early(position: f64, duration: f64) -> bool {
+    position < duration - (duration * 0.02).max(15.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ended_early;
+
+    #[test]
+    fn only_a_stop_well_before_the_end_is_early() {
+        assert!(!ended_early(1439.9, 1440.0));
+        assert!(!ended_early(1420.0, 1440.0), "durations can be a little off");
+        assert!(ended_early(900.0, 1440.0));
+        assert!(!ended_early(7180.0, 7200.0), "2% slack on a film");
+        assert!(ended_early(7000.0, 7200.0));
     }
 }
