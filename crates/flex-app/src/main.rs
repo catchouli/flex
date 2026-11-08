@@ -6,6 +6,8 @@ mod app;
 mod awake;
 #[cfg(windows)]
 mod autostart;
+mod depth;
+mod effects;
 mod images;
 mod input;
 mod instance;

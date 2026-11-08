@@ -37,14 +37,17 @@ fn cstr(s: &str) -> CString {
 }
 
 impl Mpv {
+    /// Hardware decoding. Windows: decoding on the GPU but copying frames back avoids the
+    /// D3D11→OpenGL hand-over, which glitches on some GPUs (seen as blocky artefacts on
+    /// motion).
+    pub const HWDEC: &str = if cfg!(windows) { "auto-copy-safe" } else { "auto-safe" };
+
     /// Creates and initialises a player. `options` are applied before initialisation and may
     /// override the defaults below.
     pub fn new(egui_ctx: &egui::Context, options: &[(&str, &str)]) -> Result<Self> {
         let defaults = [
             ("vo", "libmpv"),
-            // Windows: decoding on the GPU but copying frames back avoids the D3D11→OpenGL
-            // hand-over, which glitches on some GPUs (seen as blocky artefacts on motion).
-            ("hwdec", if cfg!(windows) { "auto-copy-safe" } else { "auto-safe" }),
+            ("hwdec", Self::HWDEC),
             // Time video to the display's refresh, resampling audio slightly to match:
             // smoother motion than timing by the audio clock alone.
             ("video-sync", "display-resample"),

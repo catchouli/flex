@@ -32,6 +32,8 @@ for MANIFEST in "$ROOT"/plugins/*/plugin.toml; do
     cp "$MANIFEST" "$BIN/$COMMAND" "$DIR/plugins/$ID/"
 done
 
+# Video effects: shaders and their settings, offered in Settings → Picture.
+cp -R "$ROOT/effects" "$DIR/effects"
 LICENSE_FILE=$(ls "$ROOT"/LICENSE* 2>/dev/null | head -1 || true)
 [[ -n $LICENSE_FILE ]] && cp "$LICENSE_FILE" "$DIR/LICENSE.txt"
 (cd "$ROOT" && cargo about generate --fail about.hbs) >"$DIR/licenses/rust-crates.txt"

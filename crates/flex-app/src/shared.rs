@@ -337,6 +337,12 @@ pub struct Shared {
     pub plugins: flex_core::plugins::Host,
     /// Screen colours for plugins subscribed to `light`.
     pub ambient: crate::ambient::Ambient,
+    /// Video effects found on disk, and which one is on.
+    pub effects: flex_core::effects::Effects,
+    /// Depth for effects that ask for it (runs only while one does).
+    pub depth: crate::depth::Link,
+    /// The effect's GL side, used in the player's paint callback.
+    pub effect_renderer: std::sync::Arc<std::sync::Mutex<crate::effects::Renderer>>,
     /// The last playback state sent to plugins.
     playback_sent: Option<Playback>,
     /// The latest playback seen (with its library file), for where a stop happened.
@@ -360,6 +366,7 @@ impl Shared {
         let waker = ctx.clone();
         let plugins = flex_core::plugins::Host::new(&flex_core::plugins::plugin_dirs(), &db, move || waker.request_repaint());
         let ambient = crate::ambient::Ambient::new(|key| db.setting(key).ok().flatten());
+        let effects = flex_core::effects::Effects::new(&flex_core::effects::effect_dirs(), &db);
         let mut shared = Self {
             ctx: ctx.clone(),
             proc_address,
@@ -390,6 +397,9 @@ impl Shared {
             remote: Vec::new(),
             plugins,
             ambient,
+            effects,
+            effect_renderer: Default::default(),
+            depth: Default::default(),
             playback_sent: None,
             playback_last: None,
             awake: Default::default(),
@@ -2037,6 +2047,15 @@ impl Shared {
     /// Looks for plugins installed since Flex started.
     pub fn refresh_plugins(&mut self) {
         self.plugins.refresh(&flex_core::plugins::plugin_dirs(), &self.db);
+    }
+
+    pub fn refresh_effects(&mut self) {
+        self.effects.refresh(&flex_core::effects::effect_dirs(), &self.db);
+    }
+
+    /// The effects list and the database, for changing effect settings.
+    pub fn effects_mut(&mut self) -> (&mut flex_core::effects::Effects, &flex_core::Db) {
+        (&mut self.effects, &self.db)
     }
 
     /// Sets Settings → Ambient light option `choice` to its `value`th option.

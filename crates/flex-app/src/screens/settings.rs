@@ -133,7 +133,7 @@ impl Screen for Settings {
             Row::new(Icon::None, format!("Skip openings and endings: {}", sh.skip_mode().label()))
                 .detail("For files with OP/ED chapters · OK to change"),
         );
-        rows.push(Row::new(Icon::None, format!("Picture: {}…", picture_summary(sh))).detail("Anime4K upscaling and 60fps (SVP)"));
+        rows.push(Row::new(Icon::None, format!("Picture: {}…", picture_summary(sh))).detail("Anime4K upscaling, 60fps (SVP) and video effects"));
         let sync = if sh.sync_dir().is_some() { "on" } else { "off" };
         rows.push(Row::new(Icon::None, format!("Sync with other devices: {sync}…")).detail("Share what you've watched through a shared folder"));
         rows.push(Row::new(Icon::None, format!("Theme: {}…", crate::theme::current().name)).detail("Dark, Final Fantasy VII, Old School RuneScape, Windows 95 and more"));
@@ -331,13 +331,14 @@ impl Screen for PictureSettings {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        match self.list.handle(press, 2) {
+        match self.list.handle(press, 3) {
             ListInput::AtTop => Nav::FocusTopBar,
             ListInput::Activate(0) => {
                 let next = sh.picture_upscale().next();
                 sh.set_picture_upscale(next);
                 Nav::None
             }
+            ListInput::Activate(2) => Nav::push(super::effects::VideoEffects::default()),
             ListInput::Activate(_) => {
                 let on = !sh.picture_smooth();
                 sh.set_picture_smooth(on);
@@ -359,6 +360,8 @@ impl Screen for PictureSettings {
             Row::new(Icon::None, format!("Anime4K upscaling: {}", upscale.label()))
                 .detail("Sharper lines on lower-resolution video, made for anime · OK to change"),
             Row::new(Icon::None, format!("60fps smoothing: {smooth}")).detail(svp),
+            Row::new(Icon::None, format!("Video effect: {}…", sh.effects.chosen().map_or("off", |e| e.manifest.name.as_str())))
+                .detail("Trippy shaders over the video; hold OK while watching to switch"),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

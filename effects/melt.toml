@@ -1,0 +1,62 @@
+name = "Melt"
+description = "A trippy video effect: a turning kaleidoscope with colour-shifting trails"
+feedback = true
+audio = true
+
+[[settings]]
+key = "speed"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1
+
+[[settings]]
+key = "segments"
+label = "Kaleidoscope"
+type = "number"
+detail = "Mirrored slices; 0 for none"
+min = 0
+max = 12
+step = 2
+default = 6
+
+[[settings]]
+key = "trails"
+label = "Trails"
+type = "number"
+detail = "How long bright things leave a trail"
+min = 0
+max = 95
+step = 5
+unit = "%"
+default = 85
+
+[[settings]]
+key = "colours"
+label = "Colour shifting"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+detail = "Beats kick the picture and the colours; 0 for none"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 60
+
+[[settings]]
+key = "spill"
+label = "Fill the black bars"
+type = "bool"
+default = true

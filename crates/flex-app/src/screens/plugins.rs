@@ -3,6 +3,7 @@
 
 use eframe::egui::{Rect, Ui};
 use flex_core::plugins::{Plugin, SettingKind, SettingSpec};
+use flex_plugin::Choice;
 use flex_plugin::serde_json::{Value, json};
 
 use super::{Nav, Screen, text_entry::TextEntry};
@@ -108,11 +109,10 @@ impl PluginOptions {
 }
 
 /// The value after `current` when OK is pressed on a setting.
-fn next_value(p: &Plugin, spec: &SettingSpec, current: Option<&Value>) -> Option<Value> {
+pub(super) fn next_value(options: &[Choice], spec: &SettingSpec, current: Option<&Value>) -> Option<Value> {
     match spec.kind {
         SettingKind::Bool => Some(json!(!current.and_then(Value::as_bool).unwrap_or(false))),
         SettingKind::Choice => {
-            let options = p.options(spec);
             if options.is_empty() {
                 return None;
             }
@@ -131,12 +131,12 @@ fn next_value(p: &Plugin, spec: &SettingSpec, current: Option<&Value>) -> Option
     }
 }
 
-fn describe(p: &Plugin, spec: &SettingSpec, value: Option<&Value>) -> String {
+pub(super) fn describe(options: &[Choice], spec: &SettingSpec, value: Option<&Value>) -> String {
     let shown = match spec.kind {
         SettingKind::Bool => (if value.and_then(Value::as_bool).unwrap_or(false) { "on" } else { "off" }).to_owned(),
         SettingKind::Choice => {
             let id = value.and_then(Value::as_str).unwrap_or("");
-            match p.options(spec).iter().find(|o| o.id == id) {
+            match options.iter().find(|o| o.id == id) {
                 Some(o) => o.label.clone(),
                 None if id.is_empty() => "none".to_owned(),
                 None => id.to_owned(),
@@ -190,7 +190,7 @@ impl Screen for PluginOptions {
                         Nav::push(TextEntry::plugin_setting(self.index, &spec.key, &spec.label, text, spec.secret))
                     }
                     _ => {
-                        match next_value(p, spec, current.as_ref()) {
+                        match next_value(p.options(spec), spec, current.as_ref()) {
                             Some(value) => {
                                 let (plugins, db) = sh.plugins_mut();
                                 plugins.set_setting(self.index, &spec.key, value, db);
@@ -224,7 +224,7 @@ impl Screen for PluginOptions {
                 SettingKind::Button => String::new(),
                 _ => "OK to change".to_owned(),
             };
-            rows.push(Row::new(icon, describe(p, spec, p.settings.get(&spec.key))).detail(detail).dim(!p.enabled));
+            rows.push(Row::new(icon, describe(p.options(spec), spec, p.settings.get(&spec.key))).detail(detail).dim(!p.enabled));
         }
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

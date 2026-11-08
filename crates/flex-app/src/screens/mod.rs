@@ -3,6 +3,7 @@
 
 pub mod browse;
 pub mod details;
+pub mod effects;
 pub mod history;
 pub mod music;
 pub mod home;

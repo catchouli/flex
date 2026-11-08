@@ -1,9 +1,11 @@
 //! UI-independent parts of Flex: library storage, scanning, folder trees and search.
 
 pub mod ambient;
+pub mod audio;
 pub mod catalog;
 pub mod db;
 pub mod disc;
+pub mod effects;
 pub mod language;
 pub mod library;
 pub mod metadata;
@@ -50,4 +52,15 @@ pub fn data_dir() -> std::path::PathBuf {
     directories::ProjectDirs::from("", "", "Flex")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("flex-data"))
+}
+
+/// A program such as ffmpeg: next to Flex's program, else on the PATH (plus Homebrew's
+/// folders, since apps started from Finder don't get the shell's PATH).
+pub fn find_tool(name: &str) -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
+    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(&exe)));
+    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    let extra = [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
+    beside.into_iter().chain(path_dirs.into_iter().map(|d| d.join(&exe))).chain(extra.iter().map(|d| d.join(&exe))).find(|p| p.is_file())
 }

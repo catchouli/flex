@@ -111,6 +111,30 @@ fn shader_files(upscale: Upscale) -> std::io::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+/// mpv's list of Anime4K shader files for `upscale`.
+fn shader_list(upscale: Upscale) -> Option<String> {
+    match shader_files(upscale) {
+        Ok(files) if !files.is_empty() => {
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            Some(files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(sep))
+        }
+        Ok(_) => None,
+        Err(e) => {
+            log::warn!("writing the Anime4K shaders: {e}");
+            None
+        }
+    }
+}
+
+/// What SVP needs. Its manager watches the IPC pipe and adds its VapourSynth filter;
+/// VapourSynth needs decoded frames in memory, so hardware decoding must copy them back.
+/// (option, with SVP, without)
+const SMOOTH_OPTIONS: [(&str, &str, &str); 3] = [
+    ("input-ipc-server", svp::PIPE, ""),
+    ("hwdec", "auto-copy-safe", crate::mpv::Mpv::HWDEC),
+    ("hr-seek-framedrop", "no", "yes"),
+];
+
 /// What a video gets, from the global settings and its library's.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Picture {
@@ -122,24 +146,34 @@ impl Picture {
     /// Extra mpv options (set before mpv starts).
     pub fn mpv_options(&self) -> Vec<(&'static str, String)> {
         let mut out = Vec::new();
-        if let Some(upscale) = self.upscale {
-            match shader_files(upscale) {
-                Ok(files) => {
-                    let sep = if cfg!(windows) { ";" } else { ":" };
-                    let list: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
-                    out.push(("glsl-shaders", list.join(sep)));
-                }
-                Err(e) => log::warn!("writing the Anime4K shaders: {e}"),
-            }
+        if let Some(list) = self.upscale.and_then(shader_list) {
+            out.push(("glsl-shaders", list));
         }
         if self.smooth {
-            // SVP's manager watches this pipe and adds its VapourSynth filter. VapourSynth
-            // needs decoded frames in memory, so hardware decoding must copy them back.
-            out.push(("input-ipc-server", svp::PIPE.to_owned()));
-            out.push(("hwdec", "auto-copy-safe".to_owned()));
-            out.push(("hr-seek-framedrop", "no".to_owned()));
+            out.extend(SMOOTH_OPTIONS.iter().map(|(k, on, _)| (*k, on.to_string())));
         }
         out
+    }
+
+    /// Changes a playing video's options from `self` to `new` (from the effects window).
+    pub fn apply_live(&self, new: &Picture, mpv: &crate::mpv::Mpv) {
+        if new.upscale != self.upscale {
+            let list = new.upscale.and_then(shader_list).unwrap_or_default();
+            if let Err(e) = mpv.set_string("glsl-shaders", &list) {
+                log::warn!("changing Anime4K: {e:#}");
+            }
+        }
+        if new.smooth != self.smooth {
+            if !new.smooth {
+                // Take SVP's filter out again.
+                let _ = mpv.command(&["vf", "clr", ""]);
+            }
+            for (key, on, off) in SMOOTH_OPTIONS {
+                if let Err(e) = mpv.set_string(key, if new.smooth { on } else { off }) {
+                    log::warn!("changing {key} for SVP: {e:#}");
+                }
+            }
+        }
     }
 
     /// For the stats overlay.

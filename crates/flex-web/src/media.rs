@@ -22,15 +22,6 @@ pub struct Tools {
     text_burn: OnceLock<bool>,
 }
 
-fn find_tool(name: &str) -> Option<PathBuf> {
-    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
-    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(&exe)));
-    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    // Apps started from Finder don't get the shell's PATH.
-    let extra = [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
-    beside.into_iter().chain(path_dirs.into_iter().map(|d| d.join(&exe))).chain(extra.iter().map(|d| d.join(&exe))).find(|p| p.is_file())
-}
-
 /// A command that doesn't flash a console window on Windows.
 fn command(program: &Path) -> tokio::process::Command {
     #[allow(unused_mut)]
@@ -43,8 +34,8 @@ fn command(program: &Path) -> tokio::process::Command {
 impl Tools {
     pub fn find() -> Self {
         let tools = Self {
-            ffmpeg: find_tool("ffmpeg"),
-            ffprobe: find_tool("ffprobe"),
+            ffmpeg: flex_core::find_tool("ffmpeg"),
+            ffprobe: flex_core::find_tool("ffprobe"),
             probes: Mutex::default(),
             encoder: OnceLock::new(),
             locks: Mutex::default(),

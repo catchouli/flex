@@ -1,0 +1,56 @@
+name = "Depth"
+description = "Uses a neural network's guess at how far away everything is: rainbow contours rippling through the scene, or fog"
+audio = true
+depth = true
+
+[[settings]]
+key = "mode"
+label = "Style"
+type = "choice"
+default = "contours"
+options = [
+    { id = "contours", label = "Contours" },
+    { id = "fog", label = "Fog" },
+    { id = "show", label = "Show the depth" },
+]
+
+[[settings]]
+key = "amount"
+label = "Strength"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "bands"
+label = "Contour lines"
+type = "number"
+detail = "How many bands from near to far"
+min = 2
+max = 24
+step = 2
+default = 8
+
+[[settings]]
+key = "speed"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+detail = "Beats push the contours along; 0 for none"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 40

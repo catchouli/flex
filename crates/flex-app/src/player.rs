@@ -1,9 +1,10 @@
 //! Full-screen video playback with a minimal d-pad OSD.
 //!
 //! OK / Play-Pause: pause/play · Left/Right: seek (hold to go faster) · 0–9: jump to
-//! 0%–90% of the way through · Up: subtitles ·
-//! Down: audio · Back: hide the OSD, or stop if it's already hidden · Stop: stop.
-//! F2: playback stats (dropped frames, decoder, refresh rate).
+//! 0%–90% of the way through · Up: subtitles · Down: audio · Hold OK: next video effect ·
+//! Back: hide the OSD, or stop if it's already hidden · Stop: stop.
+//! F2: playback stats (dropped frames, decoder, refresh rate). F3: the video effects
+//! window (choose an effect, change its settings, Anime4K and SVP, while it plays).
 //! Mouse: moving it shows the OSD; click or drag the seek bar to seek.
 //!
 //! The subtitle track chosen with Up is remembered (by name and language, or "off") and
@@ -51,6 +52,8 @@ const SUB_SEP: char = '\u{1f}';
 enum Track {
     Sub,
     Audio,
+    /// The video effect just switched to (`Player::effect_label`).
+    Effect,
 }
 
 pub struct Player {
@@ -64,6 +67,9 @@ pub struct Player {
     /// Last known duration and position; mpv forgets both once the file ends (or fails).
     duration: Option<f64>,
     position: Option<f64>,
+    /// The playback clock and sound for the video effect.
+    effect_inputs: crate::effects::Inputs,
+    effect_label: String,
     /// For the history: when this session started, the furthest position recorded, whether
     /// it reached "watched", and whether the session has been logged.
     session_start: i64,
@@ -85,6 +91,8 @@ pub struct Player {
     /// Display refresh rate last passed to mpv.
     display_fps: Option<f64>,
     show_stats: bool,
+    /// F3: the video effects window.
+    show_effects_window: bool,
     /// Where the OSD panel was last drawn, if it's showing (clicks there don't pause).
     osd_panel: Option<Rect>,
     /// While the seek bar is held: the position under the mouse, and when it last seeked.
@@ -141,6 +149,8 @@ impl Player {
             last_save: now,
             duration: None,
             position: None,
+            effect_inputs: Default::default(),
+            effect_label: String::new(),
             session_start: crate::shared::now_unix(),
             recorded: None,
             became_watched: false,
@@ -153,6 +163,7 @@ impl Player {
             up_held: None,
             display_fps: None,
             show_stats: false,
+            show_effects_window: false,
             osd_panel: None,
             drag: None,
             youtube,
@@ -435,10 +446,30 @@ impl Player {
     }
 
     /// `light`: what the ambient light shows, with a swatch, when it's on.
-    fn draw_stats(&self, ui: &egui::Ui, safe: Rect, light: Option<&Light>) {
+    fn draw_stats(&self, ui: &egui::Ui, safe: Rect, light: Option<&Light>, frame: Option<&crate::effects::Frame>) {
         let painter = ui.painter();
         let mono = TextStyle::Monospace.resolve(ui.style());
         let mut lines = self.stats_lines();
+        if let Some(frame) = frame {
+            let e = &frame.effect;
+            let feedback = if e.feedback { " · feedback" } else { "" };
+            lines.push(format!("Effect: {} at {:.0}%{feedback} · time {:.2}", e.name, e.scale * 100.0, frame.video_time));
+            match &frame.audio {
+                Some(a) => lines.push(format!(
+                    "Effect sound: level {:.2} · bass {:.2} · mid {:.2} · treble {:.2}{}",
+                    a.level,
+                    a.bass,
+                    a.mid,
+                    a.treble,
+                    if a.beat > 0.5 { " · BEAT" } else { "" }
+                )),
+                None if e.audio => lines.push("Effect sound: none (not a local file, or no ffmpeg)".into()),
+                None => {}
+            }
+            if let Some(depth) = &frame.depth {
+                lines.push(format!("Effect depth: {}", depth.status().describe()));
+            }
+        }
         if let Some(light) = light {
             let [r, g, b] = light.zones[0];
             lines.push(format!("Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%", light.brightness * 100.0));
@@ -463,6 +494,7 @@ impl Player {
         let (kind, name) = match track {
             Track::Sub => ("sub", "Subtitles"),
             Track::Audio => ("audio", "Audio"),
+            Track::Effect => return self.effect_label.clone(),
         };
         let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/{kind}/{p}")).filter(|s| !s.is_empty());
         let Some(id) = self.mpv.get_i64(&format!("current-tracks/{kind}/id")) else {
@@ -603,6 +635,9 @@ impl Player {
         if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
             self.show_stats = !self.show_stats;
         }
+        if ctx.input(|i| i.key_pressed(egui::Key::F3)) {
+            self.show_effects_window = !self.show_effects_window;
+        }
         if self.loaded {
             self.duration = self.mpv.get_f64("duration").or(self.duration);
             if now - self.last_save >= SAVE_EVERY_SECS {
@@ -616,8 +651,33 @@ impl Player {
         let renderer = self.renderer.clone();
         // Ambient light: sample the picture (without the black bars) right after it's drawn.
         let sampler = sh.plugins.wants_light().then(|| sh.ambient.sampler.clone());
+        // The video effect: drawn every frame, so it moves while paused too.
+        let effect = sh.effects.active();
+        if let Some(effect) = &effect {
+            let status = sh.effect_renderer.lock().unwrap_or_else(|e| e.into_inner()).status(effect).cloned();
+            if status.is_some() && sh.effects.status != status {
+                sh.effects.status = status;
+            }
+            ctx.request_repaint();
+        }
+        let effects = sh.effect_renderer.clone();
+        let frame = match &effect {
+            Some(effect) => {
+                let (video_time, audio) = self.effect_inputs.tick(&self.mpv, &self.req.path, effect);
+                let depth = effect.depth.then(|| {
+                    sh.depth.wanted();
+                    sh.depth.clone()
+                });
+                Some(crate::effects::Frame { effect: effect.clone(), rect: [0.0, 0.0, 1.0, 1.0], video_time, audio, depth })
+            }
+            None => {
+                self.effect_inputs = Default::default();
+                None
+            }
+        };
+        let painted = frame.clone();
         let margin = |k: &str| self.mpv.get_i64(&format!("osd-dimensions/{k}")).unwrap_or(0) as i32;
-        let margins = if sampler.is_some() {
+        let margins = if sampler.is_some() || effect.is_some() {
             Margins { left: margin("ml"), right: margin("mr"), top: margin("mt"), bottom: margin("mb") }
         } else {
             Margins::default()
@@ -626,10 +686,36 @@ impl Player {
             let target = painter.intermediate_fbo();
             let fbo = target.map_or(0, |f| f.0.get() as i32);
             let [w, h] = info.screen_size_px;
-            renderer.render(fbo, w as i32, h as i32, target.is_none());
+            let (w, h) = (w as i32, h as i32);
+            let mut effects = effects.lock().unwrap_or_else(|e| e.into_inner());
+            let drawn = match &painted {
+                Some(frame) => {
+                    // Where the picture is, from the bottom left, without black bars.
+                    let (wf, hf) = (w.max(1) as f32, h.max(1) as f32);
+                    let mut frame = frame.clone();
+                    frame.rect = [
+                        margins.left as f32 / wf,
+                        margins.bottom as f32 / hf,
+                        1.0 - margins.right as f32 / wf,
+                        1.0 - margins.top as f32 / hf,
+                    ];
+                    let draw = |fbo, w, h| renderer.render(fbo, w, h, true);
+                    unsafe { effects.paint(painter.gl(), &frame, target, (w, h), draw) }
+                }
+                None => {
+                    if effects.holds_gl() {
+                        unsafe { effects.release(painter.gl()) };
+                    }
+                    false
+                }
+            };
+            drop(effects);
+            if !drawn {
+                renderer.render(fbo, w, h, target.is_none());
+            }
             if let Some(sampler) = &sampler {
                 let mut sampler = sampler.lock().unwrap_or_else(|e| e.into_inner());
-                unsafe { sampler.capture(painter.gl(), target, w as i32, h as i32, margins, target.is_none()) };
+                unsafe { sampler.capture(painter.gl(), target, w, h, margins, target.is_none()) };
             }
             // mpv doesn't restore GL state; egui resets the rest after callbacks.
             unsafe { painter.gl().bind_framebuffer(glow::FRAMEBUFFER, target) };
@@ -657,7 +743,7 @@ impl Player {
             self.skip_button = Some(rect);
         }
         if self.show_stats {
-            self.draw_stats(ui, safe, sh.ambient.current.as_ref());
+            self.draw_stats(ui, safe, sh.ambient.current.as_ref(), frame.as_ref());
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
         if ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
@@ -674,6 +760,14 @@ impl Player {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         } else {
             self.osd_panel = None;
+        }
+        if self.show_effects_window {
+            let mut open = true;
+            if let Some(new) = crate::effects::window(&ctx, &mut open, sh, frame.as_ref(), self.picture) {
+                self.picture.apply_live(&new, &self.mpv);
+                self.picture = new;
+            }
+            self.show_effects_window = open;
         }
         if let Some((track, until)) = self.message {
             if now < until {
@@ -776,6 +870,18 @@ impl Screen for Player {
     fn handle(&mut self, sh: &mut Shared, press: Press) -> Nav {
         let now = sh.ctx.input(|i| i.time);
         match press.action {
+            // Holding OK: the next video effect.
+            Action::Menu if !press.repeat => {
+                let (effects, db) = sh.effects_mut();
+                effects.cycle(db);
+                self.effect_label = match sh.effects.chosen() {
+                    Some(e) => format!("Effect: {}", e.manifest.name),
+                    None if sh.effects.list().is_empty() => "No video effects (see Settings → Picture)".to_owned(),
+                    None => "Effect: off".to_owned(),
+                };
+                self.message = Some((Track::Effect, now + MESSAGE_SECS));
+                Nav::None
+            }
             Action::Next if !press.repeat => match sh.next_after(&self.req) {
                 Some(req) => Nav::Play { req, replace: true },
                 None => {

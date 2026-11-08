@@ -1,0 +1,70 @@
+name = "Dream"
+description = "A DeepDream-like effect: the picture swirls, blossoms and sprouts detail as it feeds back on itself"
+feedback = true
+audio = true
+
+[[settings]]
+key = "dream"
+label = "Dreaminess"
+type = "number"
+detail = "How much of each frame carries on into the next"
+min = 50
+max = 95
+step = 5
+unit = "%"
+default = 85
+
+[[settings]]
+key = "swirl"
+label = "Swirling"
+type = "number"
+detail = "Edges curl into tendrils"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "grow"
+label = "Blossoming"
+type = "number"
+detail = "Bright patches bulge outwards"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "detail"
+label = "Detail"
+type = "number"
+detail = "Small details are amplified over and over"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "colours"
+label = "Colours"
+type = "number"
+detail = "Psychedelic colour along the swirls"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+detail = "Beats and bass speed up the swirling a little; 0 for none"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 60
