@@ -1,0 +1,37 @@
+name = "Big Hands"
+description = "Everyone's hands swell up to huge cartoon mitts (or their feet do), throbbing with the bass."
+suits = ["close", "dialogue"]
+segment = true
+audio = true
+
+[[settings]]
+key = "which"
+label = "What grows"
+type = "choice"
+default = "hands"
+options = [
+    { id = "hands", label = "Hands" },
+    { id = "feet", label = "Feet" },
+    { id = "both", label = "Hands and feet" },
+]
+
+[[settings]]
+key = "grow"
+label = "Size"
+type = "number"
+detail = "How much bigger"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 120
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

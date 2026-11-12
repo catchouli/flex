@@ -1,0 +1,55 @@
+name = "Stage Lights"
+description = "The house lights go down and everyone gets their own follow spot, a beam slanting down through the haze to a pool of light that follows them about."
+suits = ["wide", "dialogue"]
+segment = true
+audio = true
+
+[[settings]]
+key = "dark"
+label = "House lights down"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 80
+
+[[settings]]
+key = "colours"
+label = "Lights"
+type = "choice"
+default = "white"
+options = [
+    { id = "white", label = "White" },
+    { id = "gels", label = "A colour each" },
+]
+
+[[settings]]
+key = "size"
+label = "Spot size"
+type = "number"
+min = 50
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "haze"
+label = "Haze"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

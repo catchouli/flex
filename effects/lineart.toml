@@ -1,0 +1,46 @@
+name = "Line Art"
+description = "The film as a line drawing: outlines drawn by a neural network (Informative Drawings, by Chan, Durand and Isola; MIT licence), in ink on paper or over the film's own colours, flattened like a comic's. The style picked is downloaded the first time (17 MB)."
+restyle = "style"
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "lines"
+options = [
+    { id = "lines", label = "Contour lines" },
+    { id = "lines-anime", label = "Anime lines" },
+]
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+detail = "The film's colours under the lines (none: ink on paper)"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "flatten"
+label = "Flatten"
+type = "number"
+detail = "Colours in flat bands, like a comic's"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "ink"
+label = "Ink"
+type = "number"
+detail = "How dark the lines are"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100

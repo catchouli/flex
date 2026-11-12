@@ -1,0 +1,46 @@
+name = "Fish Shoal"
+description = "A shoal of glowing fish swims loops through the room, weaving behind and in front of people, and stays there as the camera moves, scattering when something bangs or someone shouts."
+suits = ["wide"]
+camera = true
+cuts = true
+audio = true
+
+[[settings]]
+key = "count"
+label = "Fish in a shoal"
+type = "number"
+min = 3
+max = 30
+step = 1
+default = 12
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 40
+max = 250
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "speed"
+label = "Speed"
+type = "number"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 100
+drift = "off"
+
+[[settings]]
+key = "react"
+label = "React to sound"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100

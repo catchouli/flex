@@ -1,0 +1,25 @@
+name = "Ego Death"
+description = "People leave rainbow ghosts of themselves that spiral away and never quite leave."
+segment = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "trails"
+label = "Trails"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 80
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,259 @@
+From abdfcc0ed237652a020624e2ae87161a581155db Mon Sep 17 00:00:00 2001
+From: flex-build <build@localhost>
+Date: Mon, 9 Nov 2026 20:53:31 +0000
+Subject: [PATCH] Flex: subtitles in their own framebuffer, and an audio tap
+
+---
+ audio/filter/af_flextap.c  | 90 ++++++++++++++++++++++++++++++++++++++
+ filters/user_filters.c     |  1 +
+ filters/user_filters.h     |  1 +
+ include/mpv/client.h       | 11 +++++
+ include/mpv/render.h       |  7 +++
+ meson.build                |  1 +
+ video/out/gpu/libmpv_gpu.c | 20 ++++++++-
+ video/out/gpu/video.c      | 10 +++++
+ video/out/gpu/video.h      |  1 +
+ 9 files changed, 141 insertions(+), 1 deletion(-)
+ create mode 100644 audio/filter/af_flextap.c
+
+diff --git a/audio/filter/af_flextap.c b/audio/filter/af_flextap.c
+new file mode 100644
+index 0000000..dde4866
+--- /dev/null
++++ b/audio/filter/af_flextap.c
+@@ -0,0 +1,90 @@
++// Flex's patch: hands the audio passing through to a callback, as interleaved floats, leaving
++// it unchanged. Added like any other filter (af add flextap).
++
++#include <stdatomic.h>
++
++#include "audio/aframe.h"
++#include "audio/format.h"
++#include "common/common.h"
++#include "filters/f_autoconvert.h"
++#include "filters/filter_internal.h"
++#include "filters/user_filters.h"
++#include "mpv/client.h"
++#include "osdep/threads.h"
++
++static mp_static_mutex tap_lock = MP_STATIC_MUTEX_INITIALIZER;
++static mpv_flex_audio_tap tap_fn;
++static void *tap_ctx;
++
++void mpv_flex_set_audio_tap(mpv_flex_audio_tap fn, void *ctx)
++{
++    mp_mutex_lock(&tap_lock);
++    tap_fn = fn;
++    tap_ctx = ctx;
++    mp_mutex_unlock(&tap_lock);
++}
++
++struct priv {
++    struct mp_pin *in;
++};
++
++static void af_flextap_process(struct mp_filter *f)
++{
++    struct priv *p = f->priv;
++
++    if (!mp_pin_can_transfer_data(f->ppins[1], p->in))
++        return;
++
++    struct mp_frame frame = mp_pin_out_read(p->in);
++    if (frame.type == MP_FRAME_AUDIO) {
++        struct mp_aframe *a = frame.data;
++        uint8_t **data = mp_aframe_get_data_ro(a);
++        if (data && mp_aframe_get_format(a) == AF_FORMAT_FLOAT) {
++            mp_mutex_lock(&tap_lock);
++            if (tap_fn) {
++                tap_fn(tap_ctx, (const float *)data[0], mp_aframe_get_channels(a),
++                       mp_aframe_get_size(a), mp_aframe_get_rate(a),
++                       mp_aframe_get_pts(a));
++            }
++            mp_mutex_unlock(&tap_lock);
++        }
++    }
++    mp_pin_in_write(f->ppins[1], frame);
++}
++
++static const struct mp_filter_info af_flextap_filter = {
++    .name = "flextap",
++    .priv_size = sizeof(struct priv),
++    .process = af_flextap_process,
++};
++
++static struct mp_filter *af_flextap_create(struct mp_filter *parent, void *options)
++{
++    struct mp_filter *f = mp_filter_create(parent, &af_flextap_filter);
++    if (!f) {
++        talloc_free(options);
++        return NULL;
++    }
++
++    mp_filter_add_pin(f, MP_PIN_IN, "in");
++    mp_filter_add_pin(f, MP_PIN_OUT, "out");
++
++    struct priv *p = f->priv;
++    struct mp_autoconvert *conv = mp_autoconvert_create(f);
++    if (!conv)
++        abort();
++    mp_autoconvert_add_afmt(conv, AF_FORMAT_FLOAT);
++    mp_pin_connect(conv->f->pins[0], f->ppins[0]);
++    p->in = conv->f->pins[1];
++
++    talloc_free(options);
++    return f;
++}
++
++const struct mp_user_filter_entry af_flextap = {
++    .desc = {
++        .name = "flextap",
++        .description = "Hand the audio to Flex",
++    },
++    .create = af_flextap_create,
++};
+diff --git a/filters/user_filters.c b/filters/user_filters.c
+index ea7b69c..0365c17 100644
+--- a/filters/user_filters.c
++++ b/filters/user_filters.c
+@@ -42,6 +42,7 @@ const struct mp_user_filter_entry *af_list[] = {
+ #endif
+     &af_lavcac3enc,
+     &af_drop,
++    &af_flextap,
+ };
+ 
+ static bool get_af_desc(struct m_obj_desc *dst, int index)
+diff --git a/filters/user_filters.h b/filters/user_filters.h
+index f2c31ef..7b00581 100644
+--- a/filters/user_filters.h
++++ b/filters/user_filters.h
+@@ -27,6 +27,7 @@ extern const struct mp_user_filter_entry af_format;
+ extern const struct mp_user_filter_entry af_rubberband;
+ extern const struct mp_user_filter_entry af_lavcac3enc;
+ extern const struct mp_user_filter_entry af_drop;
++extern const struct mp_user_filter_entry af_flextap;
+ 
+ extern const struct mp_user_filter_entry vf_lavfi;
+ extern const struct mp_user_filter_entry vf_lavfi_bridge;
+diff --git a/include/mpv/client.h b/include/mpv/client.h
+index f970b9a..44d9272 100644
+--- a/include/mpv/client.h
++++ b/include/mpv/client.h
+@@ -2026,6 +2026,17 @@ MPV_DEFINE_SYM_PTR(mpv_get_wakeup_pipe)
+ 
+ #endif
+ 
++/**
++ * Flex's patch: called with the audio going through the "flextap" filter, as interleaved
++ * floats. frames is how many frames of channels samples there are, pts their time (or
++ * negative if unknown). It's called on an audio thread, and has to return quickly.
++ */
++typedef void (*mpv_flex_audio_tap)(void *ctx, const float *samples, int channels,
++                                   int frames, int rate, double pts);
++
++/** Sets the function the "flextap" filter calls, for the whole process, or NULL for none. */
++MPV_EXPORT void mpv_flex_set_audio_tap(mpv_flex_audio_tap fn, void *ctx);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/mpv/render.h b/include/mpv/render.h
+index 0b59982..c8db811 100644
+--- a/include/mpv/render.h
++++ b/include/mpv/render.h
+@@ -435,6 +435,13 @@ typedef enum mpv_render_param_type {
+      * Type: mpv_d3d11_fbo*
+      */
+     MPV_RENDER_PARAM_D3D11_FBO = 22,
++    /**
++     * Flex's patch: draw subtitles into this mpv_opengl_fbo instead of onto the
++     * picture. It's cleared to transparent, and holds premultiplied alpha.
++     * Valid for mpv_render_context_render().
++     * Type: mpv_opengl_fbo*
++     */
++    MPV_RENDER_PARAM_OPENGL_SUBTITLE_FBO = 1000,
+ } mpv_render_param_type;
+ 
+ /**
+diff --git a/meson.build b/meson.build
+index 327a432..1c17fd4 100644
+--- a/meson.build
++++ b/meson.build
+@@ -67,6 +67,7 @@ sources = files(
+     'audio/filter/af_format.c',
+     'audio/filter/af_lavcac3enc.c',
+     'audio/filter/af_lavfi_tempo.c',
++    'audio/filter/af_flextap.c',
+     'audio/filter/af_scaletempo.c',
+     'audio/filter/af_scaletempo2.c',
+     'audio/filter/af_scaletempo2_internals.c',
+diff --git a/video/out/gpu/libmpv_gpu.c b/video/out/gpu/libmpv_gpu.c
+index 2d8f442..1737eaf 100644
+--- a/video/out/gpu/libmpv_gpu.c
++++ b/video/out/gpu/libmpv_gpu.c
+@@ -192,9 +192,27 @@ static int render(struct render_backend *ctx, mpv_render_param *params,
+                                              &(int){0});
+ 
+     struct ra_fbo target = {.tex = tex, .flip = flip};
+-    gl_video_render_frame(p->renderer, frame, &target, RENDER_FRAME_DEF);
++    void *subtitle_fbo =
++        get_mpv_render_param(params, MPV_RENDER_PARAM_OPENGL_SUBTITLE_FBO, NULL);
++    int flags = RENDER_FRAME_DEF;
++    if (subtitle_fbo)
++        flags &= ~RENDER_FRAME_SUBS;
++    gl_video_render_frame(p->renderer, frame, &target, flags);
+     p->context->fns->done_frame(p->context, frame->display_synced);
+ 
++    if (subtitle_fbo) {
++        mpv_render_param sub_params[] = {
++            {MPV_RENDER_PARAM_OPENGL_FBO, subtitle_fbo},
++            {MPV_RENDER_PARAM_INVALID, NULL},
++        };
++        err = p->context->fns->wrap_fbo(p->context, sub_params, &tex);
++        if (err < 0)
++            return err;
++        struct ra_fbo sub_target = {.tex = tex, .flip = flip};
++        gl_video_render_subtitles(p->renderer, &sub_target);
++        p->context->fns->done_frame(p->context, frame->display_synced);
++    }
++
+     return 0;
+ }
+ 
+diff --git a/video/out/gpu/video.c b/video/out/gpu/video.c
+index 6122e51..b3553f3 100644
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -3546,6 +3546,16 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
+     p->frames_drawn += 1;
+ }
+ 
++// Subtitles for the frame just rendered, alone on transparency.
++void gl_video_render_subtitles(struct gl_video *p, const struct ra_fbo *fbo)
++{
++    struct mp_rect target_rc = {0, 0, fbo->tex->params.w, fbo->tex->params.h};
++    float transparent[4] = {0.0, 0.0, 0.0, 0.0};
++    p->ra->fns->clear(p->ra, fbo->tex, transparent, &target_rc);
++    if (p->osd)
++        pass_draw_osd(p, OSD_DRAW_SUB_ONLY, RENDER_FRAME_SUBS, p->osd_pts, p->osd_rect, fbo, true);
++}
++
+ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
+                            const struct ra_fbo *fbo, int flags)
+ {
+diff --git a/video/out/gpu/video.h b/video/out/gpu/video.h
+index cb4bd16..0ecfbf7 100644
+--- a/video/out/gpu/video.h
++++ b/video/out/gpu/video.h
+@@ -205,6 +205,7 @@ void gl_video_uninit(struct gl_video *p);
+ void gl_video_set_osd_source(struct gl_video *p, struct osd_state *osd);
+ bool gl_video_check_format(struct gl_video *p, int mp_format);
+ void gl_video_config(struct gl_video *p, struct mp_image_params *params);
++void gl_video_render_subtitles(struct gl_video *p, const struct ra_fbo *fbo);
+ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
+                            const struct ra_fbo *fbo, int flags);
+ void gl_video_resize(struct gl_video *p,
+-- 
+2.47.3
+

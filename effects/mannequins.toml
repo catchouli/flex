@@ -1,0 +1,26 @@
+name = "Mannequins"
+description = "People become artists' wooden figures, plastic toys or chrome statues, with a seam at every joint and a blank egg for a head."
+suits = ["wide", "close"]
+segment = true
+depth = true
+
+[[settings]]
+key = "style"
+label = "Made of"
+type = "choice"
+default = "wood"
+options = [
+    { id = "wood", label = "Wood" },
+    { id = "plastic", label = "Plastic" },
+    { id = "chrome", label = "Chrome" },
+]
+
+[[settings]]
+key = "seams"
+label = "Seams"
+type = "number"
+min = 0
+max = 300
+step = 25
+unit = "%"
+default = 100

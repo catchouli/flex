@@ -1,0 +1,46 @@
+name = "Everyone's Colour"
+description = "Each person is washed in their own colour, which follows them about."
+segment = true
+faces = true
+audio = true
+
+[[settings]]
+key = "wash"
+label = "Colour"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "turn"
+drift = "off"
+label = "Colours turning"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "world"
+label = "Dim the rest"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

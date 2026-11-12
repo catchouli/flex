@@ -1,0 +1,60 @@
+name = "Datamosh"
+description = "Frames smear into each other as if the file had been corrupted, and the beat knocks chunks of it clean."
+suits = ["action"]
+flow = true
+depth = true
+feedback = true
+audio = true
+scale = 0.75
+
+[[settings]]
+key = "smear"
+label = "Smear"
+type = "number"
+detail = "How far things get dragged"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 150
+
+[[settings]]
+key = "block"
+label = "Block size"
+type = "number"
+min = 8
+max = 48
+step = 4
+unit = ""
+default = 16
+
+[[settings]]
+key = "clean"
+label = "Cleaned by the beat"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "rot"
+label = "Rot"
+type = "number"
+detail = "How long it goes before fading back"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "near"
+label = "Keep close things clean"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

@@ -1,0 +1,4 @@
+name = "Faces"
+description = "Shows what Flex can see of the faces in the picture: a box for each, and its eyes, nose and mouth. Handy when making an effect."
+shuffle = false
+faces = true

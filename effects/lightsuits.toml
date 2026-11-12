@@ -1,0 +1,46 @@
+name = "Light Suits"
+description = "People go dark in suits of neon, glowing along their outlines and the seams of their joints, with light rippling down their bodies on the beat."
+suits = ["action", "wide"]
+segment = true
+audio = true
+
+[[settings]]
+key = "dim"
+label = "Darken the world"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 60
+
+[[settings]]
+key = "hue"
+label = "Colour"
+type = "number"
+detail = "Everyone's colour is different; this turns them all round the colour wheel"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 180
+
+[[settings]]
+key = "speed"
+label = "Ripple speed"
+type = "number"
+min = 0
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

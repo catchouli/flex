@@ -1,6 +1,8 @@
 // Melt: a test video effect for Flex. Folds the picture into a slowly turning
 // kaleidoscope, shifts its colours, and leaves trails that spiral outwards and change
-// colour as they fade. Beats in the sound kick the picture outwards and jolt the colours.
+// colour as they fade. Beats in the sound kick the picture outwards and jolt the colours. Fading
+// in, each point slides from where it is to where the fold puts it, and the colours and trails
+// come in.
 //
 // Flex declares these for you (see EFFECTS.md):
 //   u_video       the video frame          u_prev        this effect's last output
@@ -10,16 +12,12 @@
 //   u_video_time  the playback position (stops when paused)
 //   u_level, u_bass, u_mid, u_treble, u_beat             the sound, 0-1 (audio = true in melt.toml)
 //   u_spectrum    x: frequency, y: age (0 = now)
-//   s_speed, s_segments, s_trails, s_colours, s_react, s_spill   the settings in melt.toml
+//   s_speed, s_segments, s_trails, s_colours, s_react, s_spill, s_relief
+//                 the settings in melt.toml
 //
 // Edit this file while a video plays: Flex reloads it as soon as it's saved.
 
 const float TAU = 6.2831853;
-
-vec2 rotate(vec2 p, float a) {
-    float c = cos(a), s = sin(a);
-    return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
-}
 
 // Turns a colour around the grey axis.
 vec3 hue_shift(vec3 c, float a) {
@@ -57,17 +55,20 @@ vec4 effect(vec2 uv) {
     float zoom = 1.0 + 0.08 * sin(t * 0.7) - 0.15 * u_beat * react;
     vec2 pic = k / vec2(aspect, 1.0) * zoom + 0.5;
     pic = (pic - lo) / size;
+    // Near things bulge out of the pattern.
+    pic = 0.5 + (pic - 0.5) * (1.0 - (depth_at(lo + mirror(pic) * size) - 0.5) * s_relief / 100.0 * 0.6);
     bool inside = all(greaterThanEqual(uv, lo)) && all(lessThanEqual(uv, lo + size));
-    vec3 video = texture(u_video, lo + mirror(pic) * size).rgb;
+    vec3 video = texture(u_video, mix(uv, lo + mirror(pic) * size, u_amount)).rgb;
     if (s_spill < 0.5 && !inside) video = vec3(0.0);
-    video = hue_shift(video, (t * 0.3 + u_beat * react * 1.5) * s_colours / 100.0);
+    // Blended towards it: the shift grows with time, so scaling it would wander on the way in.
+    video = mix(video, hue_shift(video, (t * 0.3 + u_beat * react * 1.5) * s_colours / 100.0), u_amount);
 
     // Last frame, zoomed in a touch and turned, so trails spiral outwards.
     vec2 q = rotate(p, 0.004 * sin(t * 0.5)) * 0.992;
     vec3 prev = texture(u_prev, q / vec2(aspect, 1.0) + 0.5).rgb;
     // Bass makes the trails last longer.
     float keep = min(s_trails / 100.0 + 0.08 * u_bass * react, 0.97);
-    prev = hue_shift(prev, 0.06 * s_colours / 100.0) * keep;
+    prev = hue_shift(prev, 0.06 * s_colours / 100.0) * keep * u_amount;
 
     // Bright things leave glowing trails.
     return vec4(max(video, prev), 1.0);

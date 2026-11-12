@@ -1,0 +1,48 @@
+name = "Colour Thief"
+description = "The world is grey and only people have colour, or the other way round, or only animals, vehicles, plants or the sky."
+segment = true
+audio = true
+
+[[settings]]
+key = "who"
+label = "Who has the colour"
+type = "choice"
+default = "people"
+options = [
+    { id = "people", label = "People" },
+    { id = "world", label = "The world" },
+    { id = "animals", label = "Animals" },
+    { id = "vehicles", label = "Vehicles" },
+    { id = "plants", label = "Plants" },
+    { id = "sky", label = "Sky" },
+]
+
+[[settings]]
+key = "boost"
+label = "Colour boost"
+type = "number"
+min = 50
+max = 300
+step = 10
+unit = "%"
+default = 140
+
+[[settings]]
+key = "grey"
+label = "Greyness"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

@@ -1,0 +1,37 @@
+name = "Googly Eyes"
+description = "Everyone has plastic googly eyes, with pupils that roll around and bounce as they move, and rattle at bangs and explosions."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 130
+
+[[settings]]
+key = "bounce"
+label = "Bounciness"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Shaken by the sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

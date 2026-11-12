@@ -1,0 +1,128 @@
+name = "Aquarium"
+description = "The room really floods: a water surface lying level with the floor or table that wraps around people and furniture, with reflections, wakes, caustics, fish, and bubbles from people's mouths."
+suits = ["wide"]
+depth = true
+segment = true
+faces = true
+audio = true
+
+[[settings]]
+key = "level"
+label = "Water level"
+type = "number"
+detail = "Past about 70, the camera is underwater too"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 30
+
+[[settings]]
+key = "rise"
+label = "Time to fill"
+type = "number"
+min = 0
+max = 60
+step = 5
+unit = " s"
+default = 12
+
+[[settings]]
+key = "find"
+label = "Level with the room"
+type = "bool"
+detail = "Finds the floor or a table and lies level with it, however the camera's tilted"
+default = true
+
+[[settings]]
+key = "horizon"
+label = "Horizon"
+type = "number"
+detail = "Where the water's far edge heads when no floor or table can be seen"
+min = 20
+max = 90
+step = 5
+unit = "%"
+default = 60
+
+[[settings]]
+key = "waves"
+label = "Waves"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "murk"
+label = "Murk"
+type = "number"
+detail = "How quickly things fade to blue underwater"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "light"
+label = "Rippling light"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "mirror"
+label = "Reflections"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "wake"
+label = "Wakes"
+type = "number"
+detail = "Ripples spreading from people in the water"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "bubbles"
+label = "Bubbles"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "fish"
+label = "Fish"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

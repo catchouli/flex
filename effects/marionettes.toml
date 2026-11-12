@@ -1,0 +1,25 @@
+name = "Marionettes"
+description = "Everyone is a puppet on strings, tied to their hands and head and hanging from a wooden bar that rocks above them."
+suits = ["wide", "dialogue"]
+segment = true
+audio = true
+
+[[settings]]
+key = "thickness"
+label = "String thickness"
+type = "number"
+min = 50
+max = 400
+step = 25
+unit = "%"
+default = 125
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

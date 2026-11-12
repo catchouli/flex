@@ -1,0 +1,15 @@
+name = "Upside-Down Face"
+description = "Eyes and mouth are turned upside down inside each face, which looks far more wrong than it should."
+suits = ["close"]
+faces = true
+mesh = true
+
+[[settings]]
+key = "style"
+label = "Flip"
+type = "choice"
+default = "features"
+options = [
+    { id = "features", label = "Eyes and mouth" },
+    { id = "whole", label = "The whole face" },
+]

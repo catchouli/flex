@@ -1,0 +1,35 @@
+name = "8D"
+description = "The sound goes round and round your head. For headphones: each ear hears it a little later, quieter and duller when it's on the other side."
+
+[[settings]]
+key = "turn"
+label = "Once round"
+type = "number"
+detail = "How long it takes to go round"
+min = 2
+max = 30
+step = 1
+unit = "s"
+default = 8
+drift = "off"
+
+[[settings]]
+key = "room"
+label = "Room"
+type = "number"
+detail = "How much of a room it's in"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 30
+
+[[settings]]
+key = "move"
+label = "Going round"
+type = "choice"
+default = "everything"
+options = [
+    { id = "everything", label = "Everything" },
+    { id = "voices", label = "Voices" },
+]

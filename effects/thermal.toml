@@ -1,0 +1,39 @@
+name = "Thermal Vision"
+description = "Predator-style heat colours, with people, faces and animals burning hottest, and cold hands, feet and clothes."
+depth = true
+segment = true
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "palette"
+label = "Colours"
+type = "choice"
+default = "iron"
+options = [
+    { id = "iron", label = "Ironbow" },
+    { id = "hunter", label = "Hunter" },
+    { id = "white", label = "White hot" },
+]
+
+[[settings]]
+key = "people"
+label = "People"
+type = "number"
+detail = "How much hotter people are than the room"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "sights"
+label = "Targeting"
+type = "choice"
+default = "on"
+options = [
+    { id = "on", label = "On" },
+    { id = "off", label = "Off" },
+]

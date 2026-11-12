@@ -1,0 +1,57 @@
+name = "Kaleidoface"
+description = "A kaleidoscope with someone's nose at the middle, which follows them around the screen."
+suits = ["close"]
+faces = true
+audio = true
+
+[[settings]]
+key = "arms"
+drift = "smooth"
+label = "Arms"
+type = "number"
+min = 2
+max = 24
+step = 1
+unit = ""
+default = 8
+
+[[settings]]
+key = "zoom"
+label = "Zoom"
+type = "number"
+min = 30
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "spin"
+drift = "off"
+label = "Spin"
+type = "number"
+min = -200
+max = 200
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "film"
+label = "Keep the film"
+type = "number"
+min = 0
+max = 90
+step = 10
+unit = "%"
+default = 0
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

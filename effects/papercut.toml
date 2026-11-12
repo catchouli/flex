@@ -1,0 +1,55 @@
+name = "Paper Theatre"
+description = "The scene is cut into flat cardboard layers that sway on strings and cast shadows on each other."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "layers"
+label = "Layers"
+type = "number"
+min = 2
+max = 12
+step = 1
+unit = ""
+default = 6
+
+[[settings]]
+key = "sway"
+label = "Sway"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "shadow"
+label = "Shadows"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "edge"
+label = "White edges"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

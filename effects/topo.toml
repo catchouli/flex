@@ -1,0 +1,46 @@
+name = "Topographic Map"
+description = "The scene turned into a contour map, with hills where things are close."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "lines"
+label = "Contours"
+type = "number"
+min = 5
+max = 50
+step = 5
+unit = ""
+default = 20
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "land"
+options = [
+    { id = "land", label = "Land and sea" },
+    { id = "paper", label = "Paper map" },
+    { id = "night", label = "Neon" },
+]
+
+[[settings]]
+key = "film"
+label = "Film showing"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 25
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

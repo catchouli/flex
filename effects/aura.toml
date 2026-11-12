@@ -1,0 +1,57 @@
+name = "Aura"
+description = "A coloured energy field streams off each person (or animal), pulsing with the bass."
+segment = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "colours"
+label = "Colour"
+type = "number"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 200
+
+[[settings]]
+key = "spread"
+label = "Rainbow"
+type = "number"
+detail = "How much the colours vary"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "who"
+label = "Who glows"
+type = "choice"
+default = "people"
+options = [
+    { id = "people", label = "People" },
+    { id = "animals", label = "Animals" },
+    { id = "both", label = "People and animals" },
+]

@@ -1,0 +1,36 @@
+name = "Halos"
+description = "Everyone gets something on their head: a glowing halo, a pair of devil's horns or a gold crown, that stays with them as they move."
+suits = ["close", "dialogue"]
+segment = true
+audio = true
+
+[[settings]]
+key = "kind"
+label = "Wearing"
+type = "choice"
+default = "halo"
+options = [
+    { id = "halo", label = "Halos" },
+    { id = "horns", label = "Horns" },
+    { id = "crown", label = "Crowns" },
+]
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 50
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

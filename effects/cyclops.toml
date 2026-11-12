@@ -1,0 +1,26 @@
+name = "Cyclops"
+description = "Everyone's eyes merge into one big eye in the middle of their face."
+suits = ["close"]
+faces = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Eye size"
+type = "number"
+min = 60
+max = 250
+step = 10
+unit = "%"
+default = 130
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+detail = "How much the eye widens with the sound"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

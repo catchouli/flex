@@ -1,0 +1,36 @@
+name = "Graffiti"
+description = "Neon tags, stencils and splashes sprayed on the walls and buildings, staying put as the camera moves."
+suits = ["wide"]
+camera = true
+segment = true
+cuts = true
+
+[[settings]]
+key = "amount"
+label = "Paint"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 40
+max = 250
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "glow"
+label = "Neon glow"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

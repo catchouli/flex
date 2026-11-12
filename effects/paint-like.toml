@@ -1,0 +1,68 @@
+name = "Paint Like"
+description = "The film painted in the style of a painting: The Starry Night, The Great Wave, The Scream and eighteen more (all public domain), or drifting from one to the next, or any picture of your own put in the styles folder. By Magenta's arbitrary image stylization (Ghiasi et al.; Apache-2.0 licence), downloaded the first time it's used (86 MB)."
+restyle = "style"
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "art:morph"
+detail = "Pictures you put in the styles folder are added at the end"
+options = [
+    { id = "art:morph", label = "Drifting through them all" },
+    { id = "art:morph-mine", label = "Drifting through your own" },
+    { id = "art:starry-night", label = "The Starry Night (van Gogh)" },
+    { id = "art:great-wave", label = "The Great Wave (Hokusai)" },
+    { id = "art:scream", label = "The Scream (Munch)" },
+    { id = "art:kiss", label = "The Kiss (Klimt)" },
+    { id = "art:composition-vii", label = "Composition VII (Kandinsky)" },
+    { id = "art:impression-sunrise", label = "Impression, Sunrise (Monet)" },
+    { id = "art:temeraire", label = "The Fighting Temeraire (Turner)" },
+    { id = "art:sudden-shower", label = "Sudden Shower (Hiroshige)" },
+    { id = "art:wheatfield-crows", label = "Wheatfield with Crows (van Gogh)" },
+    { id = "art:blue-horses", label = "The Large Blue Horses (Marc)" },
+    { id = "art:castle-sun", label = "Castle and Sun (Klee)" },
+    { id = "art:earthly-delights", label = "The Garden of Earthly Delights (Bosch)" },
+    { id = "art:zodiac", label = "Zodiac (Mucha)" },
+    { id = "art:tiger-storm", label = "Tiger in a Tropical Storm (Rousseau)" },
+    { id = "art:city-rises", label = "The City Rises (Boccioni)" },
+    { id = "art:strawberry-thief", label = "Strawberry Thief (Morris)" },
+    { id = "art:jellyfish", label = "Jellyfish (Haeckel)" },
+    { id = "art:ten-largest", label = "The Ten Largest, No. 3 (Klint)" },
+    { id = "art:feneon", label = "Portrait of Félix Fénéon (Signac)" },
+    { id = "art:skeleton-spectre", label = "Takiyasha and the Skeleton Spectre (Kuniyoshi)" },
+    { id = "art:windows", label = "Windows Open Simultaneously (Delaunay)" },
+]
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+detail = "How much of the painting, over the real picture"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "detail"
+label = "Detail"
+detail = "The film's fine detail over the painting, which is painted smaller than the screen"
+type = "number"
+min = 0
+max = 150
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "own_colours"
+label = "Film's colours"
+type = "number"
+detail = "The painting's brushwork in the film's own colours"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 0

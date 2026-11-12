@@ -1,5 +1,7 @@
 name = "Dream"
 description = "A DeepDream-like effect: the picture swirls, blossoms and sprouts detail as it feeds back on itself"
+suits = ["quiet"]
+depth = true
 feedback = true
 audio = true
 
@@ -68,3 +70,14 @@ max = 100
 step = 20
 unit = "%"
 default = 60
+
+[[settings]]
+key = "near"
+label = "Keep close things clear"
+type = "number"
+detail = "Lets people and things up close stay recognisable"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

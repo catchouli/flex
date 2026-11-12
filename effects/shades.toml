@@ -1,0 +1,37 @@
+name = "Deal With It"
+description = "Pixel sunglasses drop out of the sky and land on every face."
+suits = ["close"]
+faces = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "drop"
+label = "Drop time"
+type = "number"
+detail = "Tenths of a second it takes to land"
+min = 2
+max = 30
+step = 2
+unit = ""
+default = 8
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 60
+max = 200
+step = 10
+unit = "%"
+default = 110
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

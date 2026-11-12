@@ -1,0 +1,45 @@
+name = "Magic Eye"
+description = "The film as a working stereogram: cross or relax your eyes and the scene stands out in 3D."
+depth = true
+
+[[settings]]
+key = "strips"
+label = "Repeats"
+type = "number"
+min = 4
+max = 16
+step = 1
+unit = ""
+default = 9
+
+[[settings]]
+key = "depth"
+label = "Depth"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "pattern"
+label = "Pattern"
+type = "choice"
+default = "dots"
+options = [
+    { id = "dots", label = "Colour dots" },
+    { id = "film", label = "The film" },
+]
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Change"
+type = "number"
+detail = "How fast the dots shimmer"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 0

@@ -1,0 +1,25 @@
+name = "Synth voice"
+description = "Plays everyone's voice on a synth that follows its pitch and loudness while they talk: a chiptune (a square wave in semitones, with noise for the consonants), a theremin, or a vocoder (the classic robot). Their pitch is heard by DDSP-VST's pitch network (Apache-2.0), downloaded the first time."
+
+[[settings]]
+key = "sound"
+label = "Synth"
+type = "choice"
+default = "chiptune"
+options = [
+    { id = "chiptune", label = "Chiptune" },
+    { id = "theremin", label = "Theremin" },
+    { id = "vocoder", label = "Vocoder" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of the synth, against the voice as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

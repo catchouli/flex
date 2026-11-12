@@ -1,0 +1,39 @@
+name = "Puppet Jaw"
+description = "Everyone's jaw drops open and flaps in time with the voices, like a cut-out puppet, and keeps still for music and bangs."
+suits = ["close", "dialogue"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "flap"
+label = "Flap"
+type = "number"
+detail = "How far jaws open with the sound"
+min = 0
+max = 300
+step = 10
+unit = "%"
+default = 130
+
+[[settings]]
+key = "teeth"
+label = "Teeth"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "listen"
+label = "Listens to"
+type = "choice"
+default = "voices"
+options = [
+    { id = "voices", label = "Voices" },
+    { id = "everything", label = "Everything" },
+    { id = "bass", label = "Bass" },
+    { id = "mouth", label = "Their own mouth" },
+]

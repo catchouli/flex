@@ -80,6 +80,23 @@ pub struct SettingSpec {
     /// For `text`: a password or key, shown only as "set" and typed in hidden.
     #[serde(default)]
     pub secret: bool,
+    /// For video effects' `number`s: how it may drift over time.
+    #[serde(default)]
+    pub drift: SettingDrift,
+}
+
+/// How a number setting may move when an effect's settings drift.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingDrift {
+    /// Whole-numbered counts go in steps, anything else smoothly.
+    #[default]
+    Auto,
+    Smooth,
+    Steps,
+    /// Not at all: for rates a shader multiplies by the time, where any change would make
+    /// the picture jump, by more the longer it's been running.
+    Off,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]

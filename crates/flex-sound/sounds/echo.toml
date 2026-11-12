@@ -1,0 +1,34 @@
+name = "Echo"
+description = "What's heard comes back, again and again, darker and quieter each time. Everything, or only the voices."
+
+[[settings]]
+key = "time"
+label = "Time"
+type = "number"
+detail = "How long until it comes back"
+min = 50
+max = 1000
+step = 10
+unit = "ms"
+default = 300
+
+[[settings]]
+key = "repeats"
+label = "Repeats"
+type = "number"
+detail = "How much comes back each time"
+min = 0
+max = 90
+step = 5
+unit = "%"
+default = 45
+
+[[settings]]
+key = "on"
+label = "Echoing"
+type = "choice"
+default = "everything"
+options = [
+    { id = "everything", label = "Everything" },
+    { id = "voices", label = "Voices" },
+]

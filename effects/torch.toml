@@ -1,0 +1,68 @@
+name = "Torchlight"
+description = "A dark room with a torch beam sweeping around it, picking out shapes by their distance and surface."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Sweep speed"
+type = "number"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "size"
+label = "Beam size"
+type = "number"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "dark"
+label = "Darkness"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 90
+
+[[settings]]
+key = "flicker"
+label = "Flicker"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "colour"
+label = "Light"
+type = "choice"
+default = "warm"
+options = [
+    { id = "warm", label = "Warm" },
+    { id = "white", label = "White" },
+    { id = "blue", label = "Cold blue" },
+    { id = "red", label = "Red" },
+]
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

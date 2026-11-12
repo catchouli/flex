@@ -1,0 +1,25 @@
+name = "Voices"
+description = "The voices and everything else apart: the background dropping while people talk, the voices taken out (only the world, or karaoke for songs), or only the voices. Best with the voice network, downloaded the first time."
+
+[[settings]]
+key = "mode"
+label = "Mode"
+type = "choice"
+default = "focus"
+options = [
+    { id = "focus", label = "Dialogue focus" },
+    { id = "no_voices", label = "No voices" },
+    { id = "only_voices", label = "Only voices" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

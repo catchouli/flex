@@ -1,0 +1,33 @@
+name = "Voice changer"
+description = "Changes everyone's voice: chipmunk, deep, robot, telephone, monster, alien, whisper, megaphone, a giant's, a child's, or high and low voices swapped, only while someone's talking. The voice is found by DeepFilterNet3 (MIT/Apache-2.0) and talking heard by Silero VAD (MIT), and for the giant, child and swapped voices their pitch by DDSP-VST's pitch network (Apache-2.0), downloaded the first time; music and singing are left alone."
+
+[[settings]]
+key = "voice"
+label = "Voice"
+type = "choice"
+default = "chipmunk"
+options = [
+    { id = "chipmunk", label = "Chipmunk" },
+    { id = "deep", label = "Deep" },
+    { id = "robot", label = "Robot" },
+    { id = "telephone", label = "Telephone" },
+    { id = "monster", label = "Monster" },
+    { id = "alien", label = "Alien" },
+    { id = "whisper", label = "Whisper" },
+    { id = "megaphone", label = "Megaphone" },
+    { id = "giant", label = "Giant" },
+    { id = "child", label = "Child" },
+    { id = "swap", label = "Swap high and low" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of the changed voice, against the voice as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

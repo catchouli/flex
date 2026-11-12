@@ -1,0 +1,112 @@
+name = "Distance"
+description = "An effect that grows with distance, or closeness: fog, prisms, heat haze, blocks, colour or a rush of speed"
+audio = true
+depth = true
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "fog"
+options = [
+    { id = "fog", label = "Fog" },
+    { id = "prism", label = "Prism" },
+    { id = "shimmer", label = "Heat haze" },
+    { id = "blocks", label = "Blocks" },
+    { id = "spin", label = "Colour spin" },
+    { id = "rush", label = "Rush" },
+]
+
+[[settings]]
+key = "where"
+label = "Stronger"
+type = "choice"
+default = "far"
+options = [
+    { id = "far", label = "In the distance" },
+    { id = "near", label = "Up close" },
+]
+
+[[settings]]
+key = "from"
+label = "Starts at"
+type = "number"
+detail = "How far into the scene it begins"
+min = 0
+max = 90
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "amount"
+label = "Strength"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 40
+
+[[settings]]
+key = "fog_start"
+label = "Fog colour: starts"
+type = "choice"
+detail = "The colour where the fog begins, nearest the camera"
+default = "rainbow"
+options = [
+    { id = "rainbow", label = "Rainbow" },
+    { id = "white", label = "White" },
+    { id = "grey", label = "Grey" },
+    { id = "black", label = "Black" },
+    { id = "red", label = "Red" },
+    { id = "orange", label = "Orange" },
+    { id = "yellow", label = "Yellow" },
+    { id = "green", label = "Green" },
+    { id = "teal", label = "Teal" },
+    { id = "blue", label = "Blue" },
+    { id = "purple", label = "Purple" },
+    { id = "pink", label = "Pink" },
+]
+
+[[settings]]
+key = "fog_end"
+label = "Fog colour: ends"
+type = "choice"
+detail = "The colour where the fog is thickest"
+default = "rainbow"
+options = [
+    { id = "rainbow", label = "Rainbow" },
+    { id = "white", label = "White" },
+    { id = "grey", label = "Grey" },
+    { id = "black", label = "Black" },
+    { id = "red", label = "Red" },
+    { id = "orange", label = "Orange" },
+    { id = "yellow", label = "Yellow" },
+    { id = "green", label = "Green" },
+    { id = "teal", label = "Teal" },
+    { id = "blue", label = "Blue" },
+    { id = "purple", label = "Purple" },
+    { id = "pink", label = "Pink" },
+]

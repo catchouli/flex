@@ -1,0 +1,28 @@
+name = "Stop Motion People"
+description = "People move like stop-motion puppets, a few poses a second, while everything around them plays on smoothly."
+suits = ["action"]
+segment = true
+plate = true
+feedback = true
+cuts = true
+
+[[settings]]
+key = "fps"
+label = "Poses a second"
+type = "number"
+min = 2
+max = 15
+step = 1
+default = 6
+drift = "off"
+
+[[settings]]
+key = "wobble"
+label = "Wobble"
+type = "number"
+detail = "How much each pose shifts and flickers, as handmade animation does"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

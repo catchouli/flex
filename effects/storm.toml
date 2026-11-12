@@ -1,0 +1,56 @@
+name = "Thunderstorm"
+description = "Rain sheets down through the scene behind whatever's close, lit by lightning that catches the distance first, and it pours and flashes harder when the film sounds stormy."
+suits = ["wide"]
+camera = true
+depth = true
+audio = true
+
+[[settings]]
+key = "rain"
+label = "Rain"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "wind"
+label = "Wind"
+type = "number"
+min = -100
+max = 100
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "dark"
+label = "Gloom"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "lightning"
+label = "Lightning"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,22 @@
+name = "Stutter"
+description = "Now and then a short slice of what was just heard plays again a few times, sometimes backwards, like a scratched CD. On the voices, people stutter while they talk."
+
+[[settings]]
+key = "often"
+label = "How often"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 40
+
+[[settings]]
+key = "on"
+label = "Stuttering"
+type = "choice"
+default = "everything"
+options = [
+    { id = "everything", label = "Everything" },
+    { id = "voices", label = "Voices" },
+]

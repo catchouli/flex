@@ -12,11 +12,15 @@ env_logger = "0.11.11"
 flex-core = { version = "0.23.1", path = "../flex-core" }
 flex-depth = { version = "0.23.1", path = "../flex-depth" }
 flex-plugin = { version = "0.23.1", path = "../flex-plugin" }
+flex-sound = { version = "0.23.1", path = "../flex-sound" }
 flex-web = { version = "0.23.1", path = "../flex-web" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# The sound the computer is playing (loopback), for video effects.
+cpal = "0.18.2"
 libloading = "0.9"
 log = "0.4.34"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 toml = "0.8"
 ureq = "3"
 winit = { version = "0.30", default-features = false }
@@ -25,6 +29,8 @@ winit = { version = "0.30", default-features = false }
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Input", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Com", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Power"] }
 
 [target."cfg(target_os = \"linux\")".dependencies]
+# The sound server's own protocol, in Rust: nothing to install to build.
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
 # Remote buttons egui doesn't report (media keys), read from /dev/input.
 evdev = "0.13"
 # A window on Linux needs a display backend: Wayland (e.g. cage) or X11, both loaded at

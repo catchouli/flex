@@ -1,0 +1,24 @@
+name = "Time Smear"
+description = "Time runs slower the further away something is: the background is stuck in the past while the people up close carry on."
+depth = true
+feedback = true
+
+[[settings]]
+key = "past"
+label = "How far back"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 85
+
+[[settings]]
+key = "split"
+label = "Colour split"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 40

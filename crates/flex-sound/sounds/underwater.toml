@@ -1,0 +1,24 @@
+name = "Underwater"
+description = "Everything muffled and wobbling, as if heard under water, with bubbles (more while someone's talking)."
+
+[[settings]]
+key = "depth"
+label = "Depth"
+type = "number"
+detail = "How muffled"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 60
+
+[[settings]]
+key = "bubbles"
+label = "Bubbles"
+type = "number"
+detail = "How many bubbles"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 40

@@ -1,0 +1,44 @@
+name = "Tiny World"
+description = "Everything looks like a model railway: a thin slice in focus, and toy-bright colours."
+suits = ["wide"]
+depth = true
+
+[[settings]]
+key = "blur"
+label = "Blur"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "band"
+label = "Sharp slice"
+type = "number"
+min = 5
+max = 60
+step = 5
+unit = "%"
+default = 20
+
+[[settings]]
+key = "at"
+label = "Slice distance"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 55
+
+[[settings]]
+key = "colour"
+label = "Toy colours"
+type = "number"
+min = 100
+max = 250
+step = 10
+unit = "%"
+default = 170

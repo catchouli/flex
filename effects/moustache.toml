@@ -1,0 +1,38 @@
+name = "Moustache Everyone"
+description = "A curly handlebar moustache pinned under every nose, twirling on the beat."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 110
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "choice"
+default = "black"
+options = [
+    { id = "black", label = "Black" },
+    { id = "brown", label = "Brown" },
+    { id = "ginger", label = "Ginger" },
+    { id = "grey", label = "Grey" },
+]
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

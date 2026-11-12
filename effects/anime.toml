@@ -1,0 +1,50 @@
+name = "Anime"
+description = "The whole picture redrawn as anime, in the style of Hayao Miyazaki's films, Makoto Shinkai's or Studio Ghibli's, or as an ink sketch, by AnimeGANv3 (Asher Chan's network, free for non-commercial use only). The style picked is downloaded the first time (4–7 MB)."
+restyle = "style"
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "hayao"
+options = [
+    { id = "hayao", label = "Hayao" },
+    { id = "hayao-warm", label = "Hayao, warmer" },
+    { id = "hayao-vivid", label = "Hayao, more vivid" },
+    { id = "shinkai", label = "Shinkai" },
+    { id = "shinkai-bold", label = "Shinkai, bolder" },
+    { id = "ghibli", label = "Ghibli" },
+    { id = "sketch", label = "Ink sketch" },
+]
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+detail = "How much of the drawing, over the real picture"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "outlines"
+label = "Outlines"
+type = "number"
+detail = "Ink along the drawing's edges"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 110

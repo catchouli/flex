@@ -1,0 +1,37 @@
+name = "Painting"
+description = "The whole picture repainted in a painting's style: a stained-glass mosaic, Candy's pop colours, Rain Princess's brushstrokes, Udnie's flat planes or pointillist dots. By fast neural style (Johnson et al.'s network, as trained by PyTorch's examples, from the ONNX Model Zoo; BSD licence). The style picked is downloaded the first time (7 MB)."
+restyle = "style"
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "rain-princess"
+options = [
+    { id = "mosaic", label = "Mosaic" },
+    { id = "candy", label = "Candy" },
+    { id = "rain-princess", label = "Rain princess" },
+    { id = "udnie", label = "Udnie" },
+    { id = "pointilism", label = "Pointillism" },
+]
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+detail = "How much of the painting, over the real picture"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100

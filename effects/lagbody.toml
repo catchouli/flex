@@ -1,0 +1,48 @@
+name = "Time-Lagged Body"
+description = "The tops of people run behind their bottoms, so they ripple and smear as they move."
+history = true
+segment = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "lag"
+label = "Lag"
+type = "number"
+detail = "How far behind the top of a body runs"
+min = 10
+max = 100
+step = 5
+unit = "%"
+default = 70
+
+[[settings]]
+key = "ripple"
+label = "Ripple"
+type = "number"
+detail = "A wave running up through them"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "colour"
+label = "Colour split"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

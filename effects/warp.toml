@@ -1,0 +1,56 @@
+name = "Warp Speed"
+description = "The distance streaks into hyperspace while whoever's up close stays still."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "amount"
+label = "Stretch"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "from"
+label = "Starts at"
+type = "number"
+detail = "How far away the streaking begins"
+min = 0
+max = 90
+step = 5
+unit = "%"
+default = 35
+
+[[settings]]
+key = "stars"
+label = "Stars"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "tint"
+label = "Blue shift"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

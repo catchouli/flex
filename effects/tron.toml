@@ -1,0 +1,56 @@
+name = "Neon Grid"
+description = "The world goes dark and the edges of everything light up in neon, over a glowing grid."
+suits = ["wide"]
+camera = true
+depth = true
+audio = true
+
+[[settings]]
+key = "lines"
+label = "Glow"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "grid"
+label = "Grid"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "film"
+label = "Film showing"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 190
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

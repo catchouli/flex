@@ -1,0 +1,25 @@
+name = "Long Face"
+description = "Faces stretch like toffee, chins sagging further with the bass."
+suits = ["close"]
+faces = true
+audio = true
+
+[[settings]]
+key = "length"
+label = "Stretch"
+type = "number"
+min = 120
+max = 400
+step = 10
+unit = "%"
+default = 220
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

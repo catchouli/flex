@@ -1,0 +1,16 @@
+name = "Perfect Symmetry"
+description = "Each face is one half mirrored, which is much more unsettling than you'd think."
+suits = ["close"]
+faces = true
+mesh = true
+
+[[settings]]
+key = "side"
+label = "Half"
+type = "choice"
+default = "better"
+options = [
+    { id = "better", label = "The one facing us" },
+    { id = "left", label = "Screen left" },
+    { id = "right", label = "Screen right" },
+]

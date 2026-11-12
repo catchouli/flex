@@ -1,0 +1,57 @@
+name = "Film Mountains"
+description = "The picture turned into a landscape you fly over: close things are peaks, far things are valleys."
+suits = ["wide"]
+depth = true
+audio = true
+scale = 0.75
+
+[[settings]]
+key = "height"
+label = "Peak height"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "tilt"
+label = "Camera height"
+type = "number"
+min = 10
+max = 100
+step = 5
+unit = "%"
+default = 50
+
+[[settings]]
+key = "fly"
+drift = "off"
+label = "Flying"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "fog"
+label = "Haze"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

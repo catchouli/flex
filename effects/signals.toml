@@ -1,0 +1,26 @@
+name = "Signals"
+description = "Shows what Flex can work out from the picture, for checking and for making effects."
+shuffle = false
+history = true
+flow = true
+plate = true
+cuts = true
+stats = true
+faces = true
+depth = true
+segment = true
+
+[[settings]]
+key = "view"
+label = "Show"
+type = "choice"
+default = "flow"
+options = [
+    { id = "flow", label = "Movement" },
+    { id = "history", label = "Half a second ago" },
+    { id = "room", label = "The room behind people" },
+    { id = "known", label = "How much of the room is known" },
+    { id = "who", label = "Who is who" },
+    { id = "look", label = "Palette and cuts" },
+    { id = "ground", label = "The ground and the light" },
+]

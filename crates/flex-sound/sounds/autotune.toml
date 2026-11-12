@@ -1,0 +1,71 @@
+name = "Auto-tune"
+description = "Snaps everyone's voice to the notes of a scale while they talk, hard for the robotic sound or gently, with harmonies sung along if you like. Their pitch is heard by DDSP-VST's pitch network (Apache-2.0), downloaded the first time, and moved keeping the voice's own sound."
+
+[[settings]]
+key = "key"
+label = "Key"
+type = "choice"
+default = "c"
+options = [
+    { id = "c", label = "C" },
+    { id = "cs", label = "C♯" },
+    { id = "d", label = "D" },
+    { id = "ds", label = "E♭" },
+    { id = "e", label = "E" },
+    { id = "f", label = "F" },
+    { id = "fs", label = "F♯" },
+    { id = "g", label = "G" },
+    { id = "gs", label = "A♭" },
+    { id = "a", label = "A" },
+    { id = "as", label = "B♭" },
+    { id = "b", label = "B" },
+]
+
+[[settings]]
+key = "scale"
+label = "Scale"
+type = "choice"
+default = "major"
+options = [
+    { id = "chromatic", label = "Every note" },
+    { id = "major", label = "Major" },
+    { id = "minor", label = "Minor" },
+    { id = "pentatonic", label = "Pentatonic" },
+    { id = "blues", label = "Blues" },
+]
+
+[[settings]]
+key = "snap"
+label = "Snap"
+type = "number"
+detail = "How hard it snaps to the note: all the way is the robotic sound"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+
+[[settings]]
+key = "harmony"
+label = "Harmony"
+type = "choice"
+default = "none"
+options = [
+    { id = "none", label = "None" },
+    { id = "third", label = "A third above" },
+    { id = "triad", label = "A third and a fifth" },
+    { id = "octave", label = "An octave below" },
+    { id = "choir", label = "Choir" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of the tuned voice, against the voice as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

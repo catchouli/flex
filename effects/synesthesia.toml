@@ -1,0 +1,35 @@
+name = "Synesthesia"
+description = "The picture shows what kind of sound it hears: explosions send out shockwaves, music lights up neon edges on the beat, singing glows gold, laughter throws confetti, rain falls, fire burns, thunder flashes, crowds snap cameras, engines rush and silence goes still."
+suits = ["action"]
+audio = true
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "motion"
+label = "Shaking and warping"
+type = "number"
+detail = "Turn down if the shockwaves and shaking are too much"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "specks"
+label = "Sparks, confetti and rain"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70

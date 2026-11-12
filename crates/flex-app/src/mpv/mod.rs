@@ -111,6 +111,30 @@ impl Mpv {
         self.check(code, &format!("option {name}={value}"))
     }
 
+    /// Has `change` change the audio going through the "flexsound" filter, and tells `reset`
+    /// when the filter's cleared, if this libmpv is patched for it. Returns whether it is.
+    pub fn set_sound(&self, change: ffi::SoundChange, reset: ffi::Callback, ctx: *mut c_void) -> bool {
+        match self.api.flex_set_sound {
+            Some(set) => {
+                unsafe { set(Some(change), Some(reset), ctx) };
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sends the audio through the "flextap" filter to `tap`, if this is Flex's patched libmpv.
+    /// Returns whether it is.
+    pub fn set_audio_tap(&self, tap: ffi::AudioTap) -> bool {
+        match self.api.flex_set_audio_tap {
+            Some(set) => {
+                unsafe { set(Some(tap), ptr::null_mut()) };
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn command(&self, args: &[&str]) -> Result<()> {
         let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|a| a.as_ptr()).collect();
@@ -319,14 +343,20 @@ impl Renderer {
     /// Also reports the previous frame as shown: egui swaps buffers right after painting,
     /// so by the next paint the last frame is on screen. Without this mpv can only guess
     /// when frames appear, which shows up as stutter on fast motion.
-    pub fn render(&self, fbo: i32, w: i32, h: i32, flip_y: bool) {
+    ///
+    /// With `subtitles`, and Flex's patched libmpv, subtitles go there on their own instead of
+    /// onto the picture.
+    pub fn render(&self, fbo: i32, w: i32, h: i32, flip_y: bool, subtitles: Option<i32>) {
         let api = self.mpv.api;
         unsafe { (api.mpv_render_context_report_swap)(self.ctx) };
         let mut target = ffi::OpenGlFbo { fbo, w, h, internal_format: 0 };
+        let mut words = ffi::OpenGlFbo { fbo: subtitles.unwrap_or(0), w, h, internal_format: 0 };
         let mut flip: c_int = flip_y.into();
         let mut params = [
             ffi::RenderParam { kind: ffi::RENDER_PARAM_OPENGL_FBO, data: (&raw mut target).cast() },
             ffi::RenderParam { kind: ffi::RENDER_PARAM_FLIP_Y, data: (&raw mut flip).cast() },
+            // A kind libmpv doesn't know is ignored, as is this if there are no subtitles.
+            ffi::RenderParam { kind: if subtitles.is_some() { ffi::RENDER_PARAM_OPENGL_SUBTITLE_FBO } else { ffi::RENDER_PARAM_INVALID }, data: (&raw mut words).cast() },
             ffi::RenderParam { kind: ffi::RENDER_PARAM_INVALID, data: ptr::null_mut() },
         ];
         unsafe {

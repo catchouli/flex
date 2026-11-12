@@ -1,0 +1,91 @@
+name = "Black Hole"
+description = "A real black hole hangs in the room: it bends everything behind it into a ring, people pass in front of it, and its glowing disc lights up the walls."
+suits = ["wide"]
+camera = true
+depth = true
+segment = true
+plate = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "pull"
+label = "Bending"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "distance"
+label = "How close"
+type = "number"
+detail = "0 hangs it just in front of the back of the room, higher brings it forward past things"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "tilt"
+label = "Disc tilt"
+type = "number"
+detail = "From edge on to face on"
+min = 0
+max = 80
+step = 5
+unit = "°"
+default = 15
+
+[[settings]]
+key = "glow"
+label = "Disc brightness"
+type = "number"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "light"
+label = "Lights the room"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "drift"
+drift = "off"
+label = "Drift"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

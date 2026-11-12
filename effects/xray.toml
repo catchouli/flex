@@ -1,0 +1,28 @@
+name = "X-Ray"
+description = "A scanner sweeps across the picture, and wherever it passes, faces turn into grinning skulls."
+suits = ["close"]
+mesh = true
+audio = true
+
+[[settings]]
+key = "speed"
+label = "Speed"
+type = "number"
+detail = "How fast the scanner sweeps"
+default = 40
+min = 5
+max = 100
+step = 5
+unit = "%"
+drift = "off"
+
+[[settings]]
+key = "wide"
+label = "Width"
+type = "number"
+detail = "How much of the picture the scanner covers"
+default = 35
+min = 5
+max = 100
+step = 5
+unit = "%"

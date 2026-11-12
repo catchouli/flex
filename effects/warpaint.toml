@@ -1,0 +1,27 @@
+name = "War Paint"
+description = "Glowing tribal markings painted on every face, stuck to the skin whichever way it turns, flaring on the beat."
+suits = ["close"]
+mesh = true
+audio = true
+
+[[settings]]
+key = "glow"
+label = "Glow"
+type = "number"
+detail = "How brightly the paint shines"
+default = 70
+min = 0
+max = 100
+step = 5
+unit = "%"
+
+[[settings]]
+key = "react"
+label = "Beat"
+type = "number"
+detail = "How much the beat flares it"
+default = 70
+min = 0
+max = 100
+step = 5
+unit = "%"

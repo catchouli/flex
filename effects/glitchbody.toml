@@ -1,0 +1,47 @@
+name = "Glitch Bodies"
+description = "People tear into sliding horizontal strips on each beat, like a signal breaking up."
+suits = ["action"]
+plate = true
+segment = true
+audio = true
+
+[[settings]]
+key = "tear"
+label = "Tearing"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "strips"
+label = "Strip size"
+type = "number"
+min = 4
+max = 60
+step = 2
+unit = ""
+default = 18
+
+[[settings]]
+key = "split"
+label = "Colour split"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "always"
+label = "Always a bit"
+type = "number"
+detail = "How much it glitches between beats"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 25

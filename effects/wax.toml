@@ -1,0 +1,25 @@
+name = "Wax Museum"
+description = "Faces soften like candle wax and run slowly down people's necks."
+suits = ["close", "quiet"]
+faces = true
+
+[[settings]]
+key = "melt"
+label = "Melt"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 60
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.1
+unit = "×"
+default = 0.5

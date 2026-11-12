@@ -1,0 +1,24 @@
+name = "Liquid Mercury"
+description = "The whole world turns to rippling liquid metal, reflecting a warped copy of the film."
+depth = true
+audio = true
+
+[[settings]]
+key = "metal"
+label = "Metal"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 85
+
+[[settings]]
+key = "slosh"
+label = "Slosh"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 50

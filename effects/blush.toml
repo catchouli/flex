@@ -1,0 +1,37 @@
+name = "Blush Meter"
+description = "Faces go redder the louder the scene gets, until steam comes out of their ears; laughter makes them blush, and shouting makes them boil."
+suits = ["close", "dialogue"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "blush"
+label = "Blush"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "steam"
+label = "Steam"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "boil"
+label = "Boiling point"
+type = "number"
+detail = "How loud it has to get before the steam starts"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 50

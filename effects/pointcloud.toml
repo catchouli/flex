@@ -1,0 +1,56 @@
+name = "Point Cloud"
+description = "The scene becomes millions of floating dots in 3D, while the camera drifts around them."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Dot spacing"
+type = "number"
+min = 3
+max = 16
+step = 1
+unit = ""
+default = 6
+
+[[settings]]
+key = "sway"
+label = "Camera movement"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "depth"
+label = "Depth"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "glow"
+label = "Colour"
+type = "number"
+detail = "Full film colour, or a cool monochrome"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

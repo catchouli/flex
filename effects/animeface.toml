@@ -1,0 +1,109 @@
+name = "Anime Face"
+description = "Everyone gets an anime face: a smaller nose and mouth, a narrower jaw, skin evened into flat cel shading, thin arched brows that rise and frown with the real ones, and big drawn eyes in several styles (drawn from the side in profile, where the face is reshaped too), inked and shining, that blink when the real ones do, look where they look and sparkle on the beat."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 100
+max = 300
+step = 10
+unit = "%"
+default = 220
+
+[[settings]]
+key = "shape"
+label = "Face shape"
+type = "number"
+detail = "How far the nose, mouth, jaw and chin are reshaped"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 80
+
+[[settings]]
+key = "skin"
+label = "Even skin"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "style"
+label = "Eyes"
+type = "choice"
+detail = "To suit each face: wide-open eyes are drawn round, hooded ones sleepy or narrow, a square jaw fierce"
+default = "mix"
+options = [
+    { id = "mix", label = "To suit each face" },
+    { id = "sparkly", label = "Sparkly" },
+    { id = "round", label = "Round" },
+    { id = "narrow", label = "Narrow" },
+    { id = "sleepy", label = "Sleepy" },
+    { id = "fierce", label = "Fierce" },
+]
+
+[[settings]]
+key = "sparkle"
+label = "Sparkle"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "choice"
+default = "each"
+options = [
+    { id = "each", label = "Each their own" },
+    { id = "blue", label = "Blue" },
+    { id = "violet", label = "Violet" },
+    { id = "green", label = "Green" },
+    { id = "amber", label = "Amber" },
+    { id = "red", label = "Red" },
+]
+
+[[settings]]
+key = "blush"
+label = "Blush"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "brows"
+label = "Drawn eyebrows"
+type = "bool"
+default = true
+
+[[settings]]
+key = "blink"
+label = "Blinking"
+type = "bool"
+default = true
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

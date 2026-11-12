@@ -1,0 +1,414 @@
+name = "Kaleidoscope"
+description = "A kaleidoscope with every part of it on a slider: arms, nested folds, tiling, tunnels, source, colour and trails."
+depth = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "arms"
+drift = "smooth"
+label = "Arms"
+type = "number"
+detail = "How many times the picture repeats around the middle"
+min = 1
+max = 24
+step = 1
+unit = ""
+default = 8
+
+[[settings]]
+key = "reflect"
+label = "Reflect"
+type = "bool"
+detail = "Mirror every other slice, like a real kaleidoscope"
+default = true
+
+[[settings]]
+key = "folds"
+label = "Folds"
+type = "number"
+detail = "Kaleidoscopes inside the kaleidoscope"
+min = 1
+max = 5
+step = 1
+unit = ""
+default = 1
+
+[[settings]]
+key = "fold_shift"
+label = "Fold shift"
+type = "number"
+detail = "How far each fold moves off centre"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 35
+
+[[settings]]
+key = "fold_turn"
+label = "Fold turn"
+type = "number"
+detail = "How much each fold is turned"
+min = -180
+max = 180
+step = 5
+unit = "°"
+default = 20
+
+[[settings]]
+key = "layout"
+label = "Layout"
+type = "choice"
+default = "single"
+options = [
+    { id = "single", label = "One" },
+    { id = "squares", label = "Square tiles" },
+    { id = "hexes", label = "Hex tiles" },
+]
+
+[[settings]]
+key = "tile"
+label = "Tile size"
+type = "number"
+detail = "Size of the tiles, when tiled"
+min = 20
+max = 200
+step = 5
+unit = "%"
+default = 70
+
+[[settings]]
+key = "zoom"
+label = "Zoom"
+type = "number"
+detail = "How close it looks at the film"
+min = 20
+max = 500
+step = 5
+unit = "%"
+default = 100
+
+[[settings]]
+key = "breathe"
+label = "Breathing"
+type = "number"
+detail = "Zooming gently in and out"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 15
+
+[[settings]]
+key = "turn"
+label = "Turn"
+type = "number"
+detail = "The whole pattern, turned"
+min = -180
+max = 180
+step = 5
+unit = "°"
+default = 0
+
+[[settings]]
+key = "spin"
+drift = "off"
+label = "Spin"
+type = "number"
+detail = "Keeps turning at this rate"
+min = -200
+max = 200
+step = 5
+unit = "%"
+default = 25
+
+[[settings]]
+key = "twist"
+label = "Twist"
+type = "number"
+detail = "Turns more the further out it is"
+min = -300
+max = 300
+step = 10
+unit = "%"
+default = 0
+
+[[settings]]
+key = "swirl"
+label = "Swirl"
+type = "number"
+detail = "Ripples running around the pattern"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "rings"
+label = "Rings"
+type = "number"
+detail = "Repeats outwards in rings, like a tunnel"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "rush"
+drift = "off"
+label = "Rush"
+type = "number"
+detail = "How fast the rings fly past"
+min = -200
+max = 200
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "centre_x"
+label = "Centre across"
+type = "number"
+min = -100
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "centre_y"
+label = "Centre up"
+type = "number"
+min = -100
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "orbit"
+label = "Orbit"
+type = "number"
+detail = "The middle circling around"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "pan_x"
+label = "Look across"
+type = "number"
+detail = "Which part of the film goes in the slice"
+min = -100
+max = 100
+step = 1
+unit = "%"
+default = 0
+
+[[settings]]
+key = "pan_y"
+label = "Look up"
+type = "number"
+min = -100
+max = 100
+step = 1
+unit = "%"
+default = 0
+
+[[settings]]
+key = "look_turn"
+label = "Look turn"
+type = "number"
+detail = "The film turned before it goes in the slice"
+min = -180
+max = 180
+step = 5
+unit = "°"
+default = 0
+
+[[settings]]
+key = "roam"
+drift = "off"
+label = "Roam"
+type = "number"
+detail = "Slowly moves around the film"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "hue"
+label = "Colour"
+type = "number"
+detail = "Turns all the colours"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 0
+
+[[settings]]
+key = "flow"
+drift = "off"
+label = "Colour flow"
+type = "number"
+detail = "Keeps turning the colours at this rate"
+min = -200
+max = 200
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "rainbow"
+label = "Rainbow"
+type = "number"
+detail = "Colours change going outwards"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 0
+
+[[settings]]
+key = "saturation"
+label = "Saturation"
+type = "number"
+min = 0
+max = 250
+step = 10
+unit = "%"
+default = 115
+
+[[settings]]
+key = "contrast"
+label = "Contrast"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 110
+
+[[settings]]
+key = "layers"
+label = "Posterise"
+type = "number"
+detail = "Fewer colours, for a poster look: 0 leaves it alone"
+min = 0
+max = 16
+step = 1
+unit = ""
+default = 0
+
+[[settings]]
+key = "trails"
+label = "Trails"
+type = "number"
+detail = "How long bright things linger"
+min = 0
+max = 98
+step = 2
+unit = "%"
+default = 45
+
+[[settings]]
+key = "trail_zoom"
+label = "Trail zoom"
+type = "number"
+detail = "Trails move outwards, or in if less than 0"
+min = -40
+max = 40
+step = 2
+unit = ""
+default = 8
+
+[[settings]]
+key = "trail_turn"
+label = "Trail turn"
+type = "number"
+detail = "Trails spiral round"
+min = -40
+max = 40
+step = 2
+unit = ""
+default = 0
+
+[[settings]]
+key = "trail_colour"
+label = "Trail colour"
+type = "number"
+detail = "Trails change colour as they fade"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 20
+
+[[settings]]
+key = "vignette"
+label = "Vignette"
+type = "number"
+detail = "Dark towards the edges"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 0
+
+[[settings]]
+key = "kick"
+label = "Kick"
+type = "number"
+detail = "How hard the beat punches it"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 45
+
+[[settings]]
+key = "pulse"
+label = "Bass"
+type = "number"
+detail = "How much the bass zooms it"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 35
+
+[[settings]]
+key = "bass_arms"
+drift = "smooth"
+label = "Bass adds arms"
+type = "number"
+min = 0
+max = 12
+step = 1
+unit = ""
+default = 0
+
+[[settings]]
+key = "fill"
+label = "Fill the black bars"
+type = "bool"
+default = true
+
+[[settings]]
+key = "relief"
+label = "Depth relief"
+type = "number"
+detail = "Near things bulge out of the pattern"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 35

@@ -1,0 +1,67 @@
+name = "Undertow"
+description = "The background melts and pours away in colour while whoever's up close stays solid"
+suits = ["quiet"]
+feedback = true
+audio = true
+depth = true
+
+[[settings]]
+key = "where"
+label = "What melts"
+type = "choice"
+default = "far"
+options = [
+    { id = "far", label = "The background" },
+    { id = "near", label = "The foreground" },
+]
+
+[[settings]]
+key = "edge"
+label = "Keeps solid"
+type = "number"
+detail = "How much of the scene stays sharp"
+min = 0
+max = 90
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "trails"
+label = "Trails"
+type = "number"
+min = 50
+max = 98
+step = 4
+unit = "%"
+default = 86
+
+[[settings]]
+key = "flow"
+label = "Flow"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "colour"
+label = "Colour change"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 40

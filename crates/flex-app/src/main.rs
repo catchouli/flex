@@ -2,24 +2,42 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod ambient;
+mod art;
+mod audio_tap;
 mod app;
 mod awake;
+mod bars;
 #[cfg(windows)]
 mod autostart;
 mod depth;
+mod effect_panel;
 mod effects;
+mod face_map;
+mod faces;
+mod flow;
+mod camera;
+mod gpu;
+mod shot_type;
+mod ground;
 mod images;
 mod input;
 mod instance;
 mod logging;
 mod mpv;
 mod music_player;
+mod nca;
+mod people;
 mod picture;
+mod restyle;
 mod player;
 mod scenery;
 mod screens;
 mod shared;
+mod signals;
+mod sound_effects;
+mod sound_kind;
 mod sync;
+mod system_sound;
 mod shots;
 mod theme;
 mod topbar;
@@ -28,6 +46,7 @@ mod update;
 mod volume;
 mod youtube;
 mod widgets;
+mod worker;
 
 use std::path::PathBuf;
 

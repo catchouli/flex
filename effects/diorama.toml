@@ -1,0 +1,59 @@
+name = "Diorama"
+description = "Moves the camera inside the shot: the picture becomes layers that drift apart, a dolly-zoom, or red and cyan 3D"
+suits = ["wide"]
+audio = true
+depth = true
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "drift"
+options = [
+    { id = "drift", label = "Floating camera" },
+    { id = "vertigo", label = "Vertigo" },
+    { id = "stereo", label = "Red and cyan 3D" },
+]
+
+[[settings]]
+key = "size"
+label = "Movement"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "focus"
+label = "Stays still"
+type = "number"
+detail = "Which distance doesn't move: 0 is the far end, 100 is closest"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+detail = "Beats push the camera"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 30

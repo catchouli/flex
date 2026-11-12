@@ -1,0 +1,45 @@
+name = "Slow Burn"
+description = "The picture gets stranger the longer a shot goes on, and every cut snaps it back."
+suits = ["quiet"]
+cuts = true
+
+[[settings]]
+key = "time"
+label = "Takes"
+type = "number"
+detail = "How long a shot has to run to get fully strange"
+min = 2
+max = 30
+step = 1
+unit = " s"
+default = 10
+
+[[settings]]
+key = "warp"
+label = "Warp"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "flash"
+label = "Flash on the cut"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

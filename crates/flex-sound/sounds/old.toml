@@ -1,0 +1,27 @@
+name = "Old sound"
+description = "The sound as it'd come from an old radio, a gramophone (crackling), a walkie-talkie (only open while someone's talking), worn tape, or an 8-bit computer."
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "radio"
+options = [
+    { id = "radio", label = "Old radio" },
+    { id = "gramophone", label = "Gramophone" },
+    { id = "walkie", label = "Walkie-talkie" },
+    { id = "tape", label = "Worn tape" },
+    { id = "bits", label = "8-bit" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of it, against the sound as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

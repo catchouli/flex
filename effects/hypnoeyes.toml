@@ -1,0 +1,57 @@
+name = "Hypno Eyes"
+description = "Everyone's eyes turn into spinning hypnotic spirals."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 120
+
+[[settings]]
+key = "spin"
+drift = "off"
+label = "Spin"
+type = "number"
+min = -300
+max = 300
+step = 10
+unit = "%"
+default = 120
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "where"
+label = "Spirals"
+type = "choice"
+default = "real"
+options = [
+    { id = "real", label = "In their real eyes" },
+    { id = "big", label = "Big discs over them" },
+]

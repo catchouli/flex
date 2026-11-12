@@ -1,0 +1,38 @@
+name = "Big Heads"
+description = "Everyone's head swells up on top of a normal-sized body."
+suits = ["close"]
+faces = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+detail = "How big heads are, compared with life size"
+min = 120
+max = 400
+step = 10
+unit = "%"
+default = 180
+
+[[settings]]
+key = "bobble"
+label = "Bobble"
+type = "number"
+detail = "How much heads wobble about on their necks"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+detail = "How much heads pulse with the bass and the beat"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

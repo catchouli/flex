@@ -1,0 +1,59 @@
+name = "Inkblot"
+description = "The picture folds down the middle into a mirrored Rorschach blot that never stops changing."
+depth = true
+audio = true
+
+[[settings]]
+key = "film"
+label = "Film"
+type = "number"
+detail = "How much of the picture shows in the ink"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 25
+
+[[settings]]
+key = "wander"
+drift = "off"
+label = "Change"
+type = "number"
+detail = "How fast the blot changes"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "fold"
+label = "Fold"
+type = "choice"
+default = "side"
+options = [
+    { id = "side", label = "Left and right" },
+    { id = "four", label = "Four ways" },
+]
+
+[[settings]]
+key = "ink"
+label = "Ink"
+type = "number"
+detail = "How much is covered"
+min = 10
+max = 90
+step = 5
+unit = "%"
+default = 30
+
+[[settings]]
+key = "shapes"
+label = "Near things in ink"
+type = "number"
+detail = "People and things up close stand out as solid shapes"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

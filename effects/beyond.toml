@@ -1,0 +1,57 @@
+name = "Beyond the Veil"
+description = "Past a shimmering line in the distance, the world turns into something else."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "distance"
+label = "Veil distance"
+type = "number"
+detail = "How far away the other world begins"
+min = 10
+max = 95
+step = 5
+unit = "%"
+default = 45
+
+[[settings]]
+key = "shimmer"
+label = "Shimmer"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "flow"
+drift = "off"
+label = "Flow"
+type = "number"
+min = 0
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "arms"
+label = "Pattern arms"
+type = "number"
+min = 2
+max = 16
+step = 1
+unit = ""
+default = 6
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,40 @@
+name = "Wallpaper Crawl"
+description = "Walls writhe, and now and then eyes open in them and watch the people in the room: more of them when it goes quiet or the music turns scary, and all at once at a scream."
+suits = ["wide"]
+camera = true
+segment = true
+faces = true
+audio = true
+
+[[settings]]
+key = "crawl"
+label = "Crawl"
+type = "number"
+detail = "How much the walls move"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "eyes"
+label = "Eyes"
+type = "number"
+detail = "How many open up"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+detail = "How far the walls drift from their real colour"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

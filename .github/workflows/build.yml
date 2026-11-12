@@ -17,6 +17,30 @@ permissions:
   contents: read
 
 jobs:
+  # Flex's patched libmpv for Linux, rebuilt only when its patches change. Pull requests skip it.
+  libmpv-linux:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    container:
+      image: debian:13
+    steps:
+      - name: What the steps below need
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git tar zstd
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: libmpv-linux
+          key: libmpv-linux-${{ hashFiles('packaging/mpv/v0.40.0/**', '.github/scripts/build-libmpv-linux.sh', '.github/scripts/bundle-libmpv-linux.sh') }}
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash .github/scripts/build-libmpv-linux.sh libmpv-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flex-libmpv-linux
+          path: libmpv-linux
+          retention-days: 14
+
   windows:
     runs-on: windows-latest
     # Keep symbols (flex.pdb, beside the exe; the exe stays the same size) so crash
@@ -33,6 +57,10 @@ jobs:
         run: cargo build --release --locked --workspace
       - name: Test
         run: cargo test --release --locked --workspace
+      # The networks video effects use, which go next to flex.exe.
+      - name: Models
+        shell: bash
+        run: mkdir -p target/release/models && cp models/*.bin models/*.safetensors target/release/models/
       - uses: actions/upload-artifact@v4
         with:
           name: flex-windows-x64
@@ -40,12 +68,23 @@ jobs:
             target/release/flex.exe
             target/release/flex.pdb
             target/release/flex-*.exe
+            target/release/models/
           retention-days: 14
 
   linux:
+    needs: [libmpv-linux]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: flex-libmpv-linux
+          path: libmpv-linux
+      - name: What the build needs
+        # ALSA's headers, for recording the computer's sound (cpal).
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
@@ -56,7 +95,9 @@ jobs:
         with:
           tool: cargo-about
       - name: Package
-        run: .github/scripts/package-linux.sh "$GITHUB_REF_NAME" target/release dist
+        run: |
+          [[ -d libmpv-linux ]] && export LIBMPV_DIR=$PWD/libmpv-linux
+          .github/scripts/package-linux.sh "$GITHUB_REF_NAME" target/release dist
       - uses: actions/upload-artifact@v4
         with:
           name: flex-linux-x64

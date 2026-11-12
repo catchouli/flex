@@ -1,0 +1,36 @@
+name = "Clown Car"
+description = "White greasepaint on the skin, a big red smile, diamond eyes and a red nose that swells on the beat."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "paint"
+label = "Greasepaint"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 75
+
+[[settings]]
+key = "nose"
+label = "Nose"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 120
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

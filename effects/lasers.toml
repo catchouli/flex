@@ -1,0 +1,49 @@
+name = "Laser Eyes"
+description = "Everyone fires laser beams from their eyes, the way they're facing, flaring on the beat."
+suits = ["close"]
+depth = true
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "power"
+label = "Power"
+type = "number"
+min = 10
+max = 100
+step = 5
+unit = "%"
+default = 60
+
+[[settings]]
+key = "sweep"
+label = "Sweep"
+type = "number"
+detail = "How much the beams wander from where the face is pointing"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "choice"
+default = "red"
+options = [
+    { id = "red", label = "Red" },
+    { id = "green", label = "Green" },
+    { id = "blue", label = "Blue" },
+]
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

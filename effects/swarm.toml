@@ -1,0 +1,47 @@
+name = "Swarm"
+description = "People dissolve into thousands of specks that buzz about, holding their shape until the bass scatters them."
+suits = ["action"]
+plate = true
+segment = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Speck size"
+type = "number"
+min = 4
+max = 24
+step = 1
+unit = ""
+default = 9
+
+[[settings]]
+key = "buzz"
+label = "Buzz"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "scatter"
+label = "Scatter on the beat"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "solid"
+label = "Solidity"
+type = "number"
+detail = "How much of the person still shows between the specks"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

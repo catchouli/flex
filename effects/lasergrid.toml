@@ -1,0 +1,46 @@
+name = "Laser Grid"
+description = "Security laser beams strung across the room, fixed in place as the camera moves, glowing where anyone breaks them."
+suits = ["wide", "action"]
+camera = true
+segment = true
+cuts = true
+audio = true
+
+[[settings]]
+key = "beams"
+label = "Beams"
+type = "number"
+min = 1
+max = 16
+step = 1
+default = 4
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 0
+
+[[settings]]
+key = "haze"
+label = "Haze"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "react"
+label = "React to sound"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100

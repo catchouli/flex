@@ -1,0 +1,33 @@
+name = "Film Palette"
+description = "The film redrawn in just its own four main colours, changing as the film does."
+stats = true
+
+[[settings]]
+key = "flat"
+label = "Flatness"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 85
+
+[[settings]]
+key = "wobble"
+label = "Wobbly edges"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "bright"
+label = "Brightness"
+type = "number"
+min = 50
+max = 200
+step = 10
+unit = "%"
+default = 110

@@ -68,7 +68,7 @@ impl Screen for VideoEffects {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let subtitle = "Shaders drawn over the video. Hold OK while watching to switch.";
+        let subtitle = "Shaders drawn over the video. Hold OK while watching to change them.";
         let body = widgets::header(ui.painter(), rect, "Video effects", subtitle, ui.style());
         let chosen = chosen(sh);
         let effect_row = match &chosen {

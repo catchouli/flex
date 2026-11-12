@@ -1,0 +1,37 @@
+name = "Reverb"
+description = "Puts the sound in a room, a bathroom, a concert hall, a cathedral or a cave, or far away. Everything, or only the voices."
+
+[[settings]]
+key = "space"
+label = "Space"
+type = "choice"
+default = "hall"
+options = [
+    { id = "room", label = "Room" },
+    { id = "bathroom", label = "Bathroom" },
+    { id = "hall", label = "Concert hall" },
+    { id = "cathedral", label = "Cathedral" },
+    { id = "cave", label = "Cave" },
+    { id = "far", label = "Far away" },
+]
+
+[[settings]]
+key = "on"
+label = "In it"
+type = "choice"
+default = "everything"
+options = [
+    { id = "everything", label = "Everything" },
+    { id = "voices", label = "Voices" },
+]
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of the space, against the sound as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 50
+drift = "off"

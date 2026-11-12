@@ -1,0 +1,26 @@
+name = "Third Eye"
+description = "Everyone grows a real eye in the middle of their forehead, which opens up on the beat, flies wide at bangs and screams, and lights the room."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 40
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "aura"
+label = "Aura"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 60

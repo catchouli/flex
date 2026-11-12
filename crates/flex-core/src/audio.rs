@@ -1,208 +1,196 @@
-//! Sound for video effects. libmpv can't hand over the samples it plays, so `Tap` has
-//! ffmpeg decode the same file's audio a second time, a little ahead of playback, and
-//! `Analyser` turns the part at the playback position into levels, a beat and a
-//! spectrum. Going by the playback position keeps it in step through pauses and seeks.
+//! Sound for video effects. The computer's own sound, recorded back, or the samples Flex's
+//! patched libmpv hands over, are measured by `SampleBands` about a hundred times a second.
+//! Without either, a filter inside mpv splits the sound into frequency bands and reports how loud
+//! each one is, several times a second (`filter_graph`, `read_levels`). `Analyser` turns any of them into
+//! levels, a beat and a spectrum. Nothing reads the file a second time, and it works for
+//! anything mpv can play.
 
-use std::collections::VecDeque;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::collections::{HashMap, VecDeque};
 
-use realfft::{RealFftPlanner, RealToComplex};
-
-/// Samples per second decoded (mono): enough for everything up to 11 kHz.
-pub const RATE: u32 = 22_050;
-/// Frequency bands in the spectrum, log-spaced from `LOW_HZ` to `HIGH_HZ`.
+/// Bands in the spectrum effects get, log-spaced from `LOW_HZ` to `HIGH_HZ`.
 pub const BANDS: usize = 64;
 /// Rows of spectrum history (row 0 is now), `ROWS_PER_SEC` apart in video time.
 pub const HISTORY: usize = 128;
 pub const ROWS_PER_SEC: f64 = 60.0;
 const LOW_HZ: f32 = 30.0;
 const HIGH_HZ: f32 = 11_000.0;
-/// Samples analysed per frame (~93 ms).
-pub const WINDOW: usize = 2048;
-/// How far ahead of playback ffmpeg decodes, and how much is kept behind.
-const AHEAD: f64 = 8.0;
-const BEHIND: f64 = 2.0;
-/// A position this far past what's decoded is a seek: start ffmpeg again there.
-const SEEK_GAP: f64 = 3.0;
+/// Bands mpv's filter measures; `BANDS` are stretched from these. amerge takes 64 inputs at
+/// most, and more bands cost more of the audio thread.
+pub const FILTER_BANDS: usize = 32;
+/// The filter's label in mpv: `af-metadata/<label>` has what it measures.
+pub const FILTER_LABEL: &str = "flex-audio";
+/// How narrow each band's filter is. Neighbours overlap a little, so nothing falls between them.
+const FILTER_Q: f32 = 2.63;
 /// Quietest sound shown, below the loudest recently.
 const RANGE_DB: f32 = 50.0;
 /// How quickly the loudness reference falls after something loud.
 const REF_FALL_DB_PER_SEC: f32 = 2.5;
 
-#[derive(Default)]
-struct Buffer {
-    /// Time of `samples[0]`, in seconds of video.
-    start: f64,
-    samples: VecDeque<f32>,
-    /// Where playback is (for how far ahead to decode, and what to drop).
-    position: f64,
-    /// ffmpeg finished (or failed).
-    done: bool,
-    /// The tap moved on: the reader stops.
-    stopped: bool,
+fn filter_hz(band: usize) -> f32 {
+    LOW_HZ * (HIGH_HZ / LOW_HZ).powf((band as f32 + 0.5) / FILTER_BANDS as f32)
 }
 
-impl Buffer {
-    fn end(&self) -> f64 {
-        self.start + self.samples.len() as f64 / RATE as f64
+/// The libavfilter graph measuring the sound, for audio with this many channels and this
+/// layout (mpv's `audio-params`). Each band becomes an extra channel beside the originals so a
+/// single astats reports them all on the frames mpv sees; pan then drops them, leaving the
+/// sound as it was.
+pub fn filter_graph(channels: usize, layout: &str) -> String {
+    let labels = || (0..FILTER_BANDS).map(|b| format!("[b{b}]"));
+    let mut graph = format!("asplit={}[o]{};", FILTER_BANDS + 1, labels().collect::<String>());
+    for b in 0..FILTER_BANDS {
+        graph += &format!("[b{b}]aformat=channel_layouts=mono,bandpass=f={:.1}:width_type=q:w={FILTER_Q}[m{b}];", filter_hz(b));
     }
+    graph += "[o]";
+    for b in 0..FILTER_BANDS {
+        graph += &format!("[m{b}]");
+    }
+    let keep: Vec<String> = (0..channels).map(|c| format!("c{c}=c{c}")).collect();
+    graph += &format!(
+        "amerge=inputs={},astats=metadata=1:reset=1:measure_overall=none:measure_perchannel=RMS_level,pan={layout}|{}",
+        FILTER_BANDS + 1,
+        keep.join("|")
+    );
+    graph
 }
 
-type Shared = Arc<(Mutex<Buffer>, Condvar)>;
-
-fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, Buffer> {
-    shared.0.lock().unwrap_or_else(|e| e.into_inner())
+/// What the filter measured once, as power.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Levels {
+    pub overall: f32,
+    pub bands: [f32; FILTER_BANDS],
 }
 
-/// ffmpeg decoding one file's audio near the playback position.
-pub struct Tap {
-    ffmpeg: PathBuf,
-    path: PathBuf,
-    /// ffmpeg's index of the audio stream (mpv's `ff-index`), else the first audio stream.
-    stream: Option<i64>,
-    current: Option<(Shared, Child)>,
-}
-
-impl Tap {
-    pub fn new(ffmpeg: &Path, path: &Path, stream: Option<i64>) -> Self {
-        Self { ffmpeg: ffmpeg.to_owned(), path: path.to_owned(), stream, current: None }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn stream(&self) -> Option<i64> {
-        self.stream
-    }
-
-    /// Fills `out` with the samples centred on `at` (seconds of video). False while
-    /// they haven't been decoded yet (just started, or after a seek), or if there's no
-    /// audio.
-    pub fn window(&mut self, at: f64, out: &mut [f32]) -> bool {
-        let half = out.len() as f64 / 2.0 / RATE as f64;
-        let restart = match &self.current {
-            None => true,
-            Some((shared, _)) => {
-                let mut buf = lock(shared);
-                buf.position = at;
-                shared.1.notify_all();
-                at + half < buf.start || at > buf.end() + SEEK_GAP || (buf.done && at > buf.end() + half)
-            }
-        };
-        if restart {
-            if self.current.as_ref().is_some_and(|(s, _)| lock(s).done && lock(s).samples.is_empty()) {
-                return false; // no audio at all: don't keep trying
-            }
-            self.start(at);
+impl Levels {
+    /// The louder of these and `other`, band by band.
+    pub fn loudest_of(&self, other: &Levels) -> Levels {
+        let mut bands = self.bands;
+        for (a, b) in bands.iter_mut().zip(&other.bands) {
+            *a = a.max(*b);
         }
-        let Some((shared, _)) = &self.current else { return false };
-        let buf = lock(shared);
-        let first = ((at - half - buf.start) * RATE as f64).round();
-        if first < 0.0 || first as usize + out.len() > buf.samples.len() {
-            return false;
-        }
-        for (o, s) in out.iter_mut().zip(buf.samples.range(first as usize..)) {
-            *o = *s;
-        }
-        true
-    }
-
-    fn stop(&mut self) {
-        if let Some((shared, mut child)) = self.current.take() {
-            lock(&shared).stopped = true;
-            shared.1.notify_all();
-            let _ = child.kill();
-            std::thread::spawn(move || child.wait());
-        }
-    }
-
-    fn start(&mut self, at: f64) {
-        self.stop();
-        let from = (at - 1.0).max(0.0);
-        let map = match self.stream {
-            Some(i) => format!("0:{i}"),
-            None => "0:a:0?".to_owned(),
-        };
-        let mut cmd = Command::new(&self.ffmpeg);
-        cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", &format!("{from:.3}"), "-i"])
-            .arg(&self.path)
-            .args(["-map", &map, "-vn", "-sn", "-dn", "-ac", "1", "-ar", &RATE.to_string(), "-f", "f32le", "pipe:1"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let shared: Shared = Arc::new((Mutex::new(Buffer { start: from, position: at, ..Default::default() }), Condvar::new()));
-        let mut child = match cmd.spawn() {
-            Ok(child) => child,
-            Err(e) => {
-                log::warn!("audio for effects: running {}: {e}", self.ffmpeg.display());
-                lock(&shared).done = true;
-                return;
-            }
-        };
-        let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else { return };
-        let reader = Arc::clone(&shared);
-        let _ = std::thread::Builder::new().name("effect-audio".into()).spawn(move || read(stdout, &reader));
-        let _ = std::thread::Builder::new().name("effect-audio-err".into()).spawn(move || {
-            let (mut stderr, mut text) = (stderr, String::new());
-            let _ = stderr.read_to_string(&mut text);
-            let text = text.trim();
-            if !text.is_empty() {
-                log::info!("audio for effects: ffmpeg: {text}");
-            }
-        });
-        log::debug!("audio for effects: decoding from {from:.1}s");
-        self.current = Some((shared, child));
+        Levels { overall: self.overall.max(other.overall), bands }
     }
 }
 
-impl Drop for Tap {
-    fn drop(&mut self) {
-        self.stop();
+/// How many samples each measurement looks at, and how many it moves on by.
+const WINDOW: usize = 2048;
+const HOP: usize = 512;
+/// A gap this big (seconds) between what's expected and what comes is a seek.
+const SAMPLE_JUMP: f64 = 0.2;
+
+/// Measures sound as it comes, into the same bands the filter would give.
+pub struct SampleBands {
+    buffer: VecDeque<f32>,
+    /// When the sample at the front of `buffer` plays, and the sample rate.
+    front_pts: f64,
+    rate: u32,
+    window: Vec<f32>,
+    window_power: f32,
+}
+
+impl Default for SampleBands {
+    fn default() -> Self {
+        let window: Vec<f32> = (0..WINDOW).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / WINDOW as f32).cos()).collect();
+        let window_power = window.iter().map(|w| w * w).sum();
+        Self { buffer: VecDeque::new(), front_pts: 0.0, rate: 48_000, window, window_power }
     }
 }
 
-/// Reads ffmpeg's samples into the buffer, staying `AHEAD` of playback.
-fn read(mut stdout: impl Read, shared: &Shared) {
-    let mut bytes = vec![0u8; 16 * 1024];
-    let mut carry: Vec<u8> = Vec::new();
-    loop {
-        {
-            let mut buf = lock(shared);
-            while !buf.stopped && buf.end() > buf.position + AHEAD {
-                buf = shared.1.wait_timeout(buf, Duration::from_millis(200)).unwrap_or_else(|e| e.into_inner()).0;
-            }
-            if buf.stopped {
-                return;
+impl SampleBands {
+    /// Some more sound, starting at `pts` (negative if that's unknown).
+    pub fn push(&mut self, pts: f64, rate: u32, mono: &[f32]) {
+        let expected = self.front_pts + self.buffer.len() as f64 / f64::from(self.rate);
+        if self.buffer.is_empty() || rate != self.rate || (pts >= 0.0 && (pts - expected).abs() > SAMPLE_JUMP) {
+            self.buffer.clear();
+            self.rate = rate;
+            self.front_pts = pts.max(0.0);
+        }
+        self.buffer.extend(mono);
+    }
+
+    /// The next measurement, if there's enough sound for one, and the moment it's centred on.
+    pub fn measure(&mut self) -> Option<(f64, Levels)> {
+        if self.buffer.len() < WINDOW {
+            return None;
+        }
+        let mut re = [0f32; WINDOW];
+        let mut im = [0f32; WINDOW];
+        let mut overall = 0.0;
+        for (i, sample) in self.buffer.iter().take(WINDOW).enumerate() {
+            overall += sample * sample;
+            re[i] = sample * self.window[i];
+        }
+        fft(&mut re, &mut im);
+        let scale = 2.0 / (WINDOW as f32 * self.window_power);
+        let hz_per_bin = self.rate as f32 / WINDOW as f32;
+        let mut bands = [0f32; FILTER_BANDS];
+        for (b, band) in bands.iter_mut().enumerate() {
+            let edge = |at: f32| LOW_HZ * (HIGH_HZ / LOW_HZ).powf(at / FILTER_BANDS as f32) / hz_per_bin;
+            let (low, high) = (edge(b as f32), edge(b as f32 + 1.0));
+            let first = (low + 0.5).floor().max(1.0) as usize;
+            let last = ((high + 0.5).floor() as usize).min(WINDOW / 2 - 1);
+            for k in first..=last.max(first) {
+                // How much of this bin is inside the band, so narrow low bands still get a share.
+                let inside = ((k as f32 + 0.5).min(high) - (k as f32 - 0.5).max(low)).clamp(0.0, 1.0);
+                *band += (re[k] * re[k] + im[k] * im[k]) * scale * inside;
             }
         }
-        let n = match stdout.read(&mut bytes) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        carry.extend_from_slice(&bytes[..n]);
-        let whole = carry.len() / 4 * 4;
-        let mut buf = lock(shared);
-        buf.samples.extend(carry[..whole].as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)));
-        carry.drain(..whole);
-        // Drop what's well behind playback.
-        let old = ((buf.position - BEHIND - buf.start) * RATE as f64).floor();
-        if old > 0.0 {
-            let n = (old as usize).min(buf.samples.len());
-            buf.samples.drain(..n);
-            buf.start += n as f64 / RATE as f64;
+        let centre = self.front_pts + (WINDOW / 2) as f64 / f64::from(self.rate);
+        self.buffer.drain(..HOP);
+        self.front_pts += HOP as f64 / f64::from(self.rate);
+        Some((centre, Levels { overall: overall / WINDOW as f32, bands }))
+    }
+}
+
+/// A fast Fourier transform, in place. The length has to be a power of two.
+fn fft(re: &mut [f32], im: &mut [f32]) {
+    let n = re.len();
+    let mut j = 0;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
         }
     }
-    lock(shared).done = true;
+    let mut size = 2;
+    while size <= n {
+        let (sin, cos) = (-std::f32::consts::TAU / size as f32).sin_cos();
+        for start in (0..n).step_by(size) {
+            let (mut wr, mut wi) = (1.0f32, 0.0f32);
+            for k in 0..size / 2 {
+                let (a, b) = (start + k, start + k + size / 2);
+                let (tr, ti) = (re[b] * wr - im[b] * wi, re[b] * wi + im[b] * wr);
+                (re[b], im[b]) = (re[a] - tr, im[a] - ti);
+                (re[a], im[a]) = (re[a] + tr, im[a] + ti);
+                (wr, wi) = (wr * cos - wi * sin, wr * sin + wi * cos);
+            }
+        }
+        size *= 2;
+    }
+}
+
+/// Reads mpv's `af-metadata/<FILTER_LABEL>` (JSON), for audio with `channels` channels. astats
+/// numbers channels from 1, the originals first.
+pub fn read_levels(metadata: &str, channels: usize) -> Option<Levels> {
+    let map: HashMap<String, String> = serde_json::from_str(metadata).ok()?;
+    let power = |channel: usize| -> Option<f32> {
+        let db: f32 = map.get(&format!("lavfi.astats.{channel}.RMS_level"))?.parse().ok()?;
+        Some(10f32.powf(db / 10.0))
+    };
+    let mut overall = 0.0;
+    for c in 1..=channels {
+        overall += power(c)?;
+    }
+    let mut bands = [0.0; FILTER_BANDS];
+    for (b, band) in bands.iter_mut().enumerate() {
+        *band = power(channels + 1 + b)?;
+    }
+    Some(Levels { overall: overall / channels.max(1) as f32, bands })
 }
 
 /// What effects get each frame. Levels run 0–1 against the loudest sound recently, so
@@ -217,19 +205,20 @@ pub struct Features {
     pub beat: f32,
     /// `HISTORY` rows of `BANDS` values, row 0 the newest.
     pub spectrum: Vec<f32>,
+    /// What kind of sound it is, 0 to 1 for each of flex-depth's `sound::KINDS`, eased. Empty
+    /// until it's known.
+    pub kinds: Vec<f32>,
+    /// The likeliest kinds of sound, for showing.
+    pub heard: String,
 }
 
 impl Default for Features {
     fn default() -> Self {
-        Self { level: 0.0, bass: 0.0, mid: 0.0, treble: 0.0, beat: 0.0, spectrum: vec![0.0; BANDS * HISTORY] }
+        Self { level: 0.0, bass: 0.0, mid: 0.0, treble: 0.0, beat: 0.0, spectrum: vec![0.0; BANDS * HISTORY], kinds: Vec::new(), heard: String::new() }
     }
 }
 
 pub struct Analyser {
-    fft: Arc<dyn RealToComplex<f32>>,
-    hann: Vec<f32>,
-    /// FFT bins per band, and each band's middle frequency.
-    bands: Vec<(usize, usize, f32)>,
     /// Loudness references (power) for the bands and for the overall level.
     band_ref: f32,
     level_ref: f32,
@@ -240,8 +229,6 @@ pub struct Analyser {
     history: VecDeque<[f32; BANDS]>,
     last_row: Option<i64>,
     features: Features,
-    scratch: Vec<f32>,
-    spectrum: Vec<realfft::num_complex::Complex<f32>>,
 }
 
 impl Default for Analyser {
@@ -258,23 +245,7 @@ fn ease(current: f32, target: f32, dt: f32, rise: f32, fall: f32) -> f32 {
 
 impl Analyser {
     pub fn new() -> Self {
-        let fft = RealFftPlanner::<f32>::new().plan_fft_forward(WINDOW);
-        let hann = (0..WINDOW).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / WINDOW as f32).cos()).collect();
-        let bin_hz = RATE as f32 / WINDOW as f32;
-        let bands = (0..BANDS)
-            .map(|b| {
-                let f = |b: f32| LOW_HZ * (HIGH_HZ / LOW_HZ).powf(b / BANDS as f32);
-                let (lo, hi) = (f(b as f32), f(b as f32 + 1.0));
-                let first = (lo / bin_hz).round() as usize;
-                let last = ((hi / bin_hz).round() as usize).max(first + 1).min(WINDOW / 2);
-                (first.min(last - 1), last, (lo * hi).sqrt())
-            })
-            .collect();
-        let spectrum = fft.make_output_vec();
         Self {
-            fft,
-            hann,
-            bands,
             band_ref: 1e-9,
             level_ref: 1e-9,
             smooth: [0.0; BANDS],
@@ -283,47 +254,39 @@ impl Analyser {
             history: VecDeque::new(),
             last_row: None,
             features: Features::default(),
-            scratch: vec![0.0; WINDOW],
-            spectrum,
         }
     }
 
-    /// Analyses `window` (`WINDOW` samples centred on the playback position, `None` when
-    /// there's no sound to give) at `video_time`; `dt` is the time since the last call.
-    pub fn update(&mut self, window: Option<&[f32]>, video_time: f64, dt: f32) -> &Features {
+    /// Takes the latest `levels` (`None` when there's no sound to give) at `video_time`; `dt`
+    /// is the time since the last call. Call every frame: the filter reports less often than
+    /// that, so the same levels are given again in between and everything eases towards them.
+    pub fn update(&mut self, levels: Option<&Levels>, video_time: f64, dt: f32) -> &Features {
         let dt = dt.clamp(0.0, 0.25);
         let fall = 10f32.powf(-REF_FALL_DB_PER_SEC * dt / 10.0);
         let to_unit = |power: f32, reference: f32| (1.0 + 10.0 * (power / reference).max(1e-12).log10() / RANGE_DB).clamp(0.0, 1.0);
         let mut bass_power = 0.0;
-        let mut bands = [0.0f32; BANDS];
-        if let Some(window) = window.filter(|w| w.len() == WINDOW) {
-            for ((s, w), h) in self.scratch.iter_mut().zip(window).zip(&self.hann) {
-                *s = w * h;
-            }
-            let _ = self.fft.process(&mut self.scratch, &mut self.spectrum);
-            let norm = 1.0 / (WINDOW as f32 * WINDOW as f32);
-            let mut loudest = 0.0f32;
-            for (b, &(first, last, _)) in self.bands.iter().enumerate() {
-                let p: f32 = self.spectrum[first..last].iter().map(|c| c.norm_sqr() * norm).sum();
-                bands[b] = p;
-                loudest = loudest.max(p);
-            }
+        if let Some(levels) = levels {
+            let bands = &levels.bands;
+            let loudest = bands.iter().fold(0.0f32, |a, b| a.max(*b));
             self.band_ref = (self.band_ref * fall).max(loudest).max(1e-9);
-            let rms = window.iter().map(|s| s * s).sum::<f32>() / WINDOW as f32;
+            let rms = levels.overall;
             self.level_ref = (self.level_ref * fall).max(rms).max(1e-9);
             self.features.level = ease(self.features.level, to_unit(rms, self.level_ref), dt, 30.0, 8.0);
             // Each range's total power, against the same reference as the bands.
             let range = |lo: f32, hi: f32| -> f32 {
-                self.bands.iter().zip(&bands).filter(|((_, _, hz), _)| (lo..hi).contains(hz)).map(|(_, p)| p).sum()
+                bands.iter().enumerate().filter(|(b, _)| (lo..hi).contains(&filter_hz(*b))).map(|(_, p)| p).sum()
             };
             bass_power = range(0.0, 150.0);
             let (mid, treble) = (range(150.0, 2000.0), range(2000.0, f32::MAX));
             self.features.bass = ease(self.features.bass, to_unit(bass_power, self.band_ref), dt, 30.0, 6.0);
             self.features.mid = ease(self.features.mid, to_unit(mid, self.band_ref), dt, 30.0, 6.0);
             self.features.treble = ease(self.features.treble, to_unit(treble, self.band_ref), dt, 30.0, 6.0);
-            for (b, p) in bands.iter_mut().enumerate() {
-                *p = to_unit(*p, self.band_ref);
-                self.smooth[b] = ease(self.smooth[b], *p, dt, 30.0, 6.0);
+            // Stretched to `BANDS`, blending between the filter's bands.
+            for (b, smooth) in self.smooth.iter_mut().enumerate() {
+                let at = ((b as f32 + 0.5) * FILTER_BANDS as f32 / BANDS as f32 - 0.5).clamp(0.0, FILTER_BANDS as f32 - 1.0);
+                let (i, t) = (at as usize, at.fract());
+                let (a, z) = (to_unit(bands[i], self.band_ref), to_unit(bands[(i + 1).min(FILTER_BANDS - 1)], self.band_ref));
+                *smooth = ease(*smooth, a + (z - a) * t, dt, 30.0, 6.0);
             }
         } else {
             for s in &mut self.smooth {
@@ -374,8 +337,85 @@ impl Analyser {
 mod tests {
     use super::*;
 
-    fn tone(hz: f32, amp: f32, from: usize) -> Vec<f32> {
-        (from..from + WINDOW).map(|i| amp * (std::f32::consts::TAU * hz * i as f32 / RATE as f32).sin()).collect()
+    fn sine(hz: f32, count: usize) -> Vec<f32> {
+        (0..count).map(|i| (std::f32::consts::TAU * hz * i as f32 / 48_000.0).sin()).collect()
+    }
+
+    #[test]
+    fn a_tone_lands_in_its_own_band_at_its_own_loudness() {
+        let mut bands = SampleBands::default();
+        bands.push(0.0, 48_000, &sine(1000.0, 4096));
+        let (_, levels) = bands.measure().unwrap();
+        let loudest = (0..FILTER_BANDS).max_by(|a, b| levels.bands[*a].total_cmp(&levels.bands[*b])).unwrap();
+        assert!((filter_hz(loudest) / 1000.0 - 1.0).abs() < 0.2, "band {loudest} at {}", filter_hz(loudest));
+        let total: f32 = levels.bands.iter().sum();
+        assert!((total - 0.5).abs() < 0.03, "a sine of amplitude 1 has a power of a half: {total}");
+        assert!((levels.overall - 0.5).abs() < 0.01, "{}", levels.overall);
+    }
+
+    #[test]
+    fn measurements_say_when_they_are_about() {
+        let mut bands = SampleBands::default();
+        bands.push(10.0, 48_000, &vec![0.0; 3000]);
+        let (first, _) = bands.measure().unwrap();
+        assert!((first - (10.0 + 1024.0 / 48_000.0)).abs() < 1e-6);
+        let (second, _) = bands.measure().unwrap();
+        assert!((second - first - 512.0 / 48_000.0).abs() < 1e-6);
+        assert!(bands.measure().is_none(), "not enough left");
+    }
+
+    #[test]
+    fn a_seek_starts_again() {
+        let mut bands = SampleBands::default();
+        bands.push(5.0, 48_000, &vec![0.0; 1000]);
+        bands.push(60.0, 48_000, &vec![0.0; 2048]);
+        let (at, _) = bands.measure().unwrap();
+        assert!((at - (60.0 + 1024.0 / 48_000.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_loudest_of_two_readings_keeps_each_peak() {
+        let quiet = Levels { overall: 0.1, bands: [0.2; FILTER_BANDS] };
+        let mut loud = quiet.clone();
+        loud.bands[3] = 0.9;
+        let both = quiet.loudest_of(&loud);
+        assert_eq!((both.bands[3], both.bands[4], both.overall), (0.9, 0.2, 0.1));
+    }
+
+    /// What the filter would report for one tone over a very quiet floor.
+    fn tone(hz: f32, amp: f32) -> Levels {
+        let mut bands = [1e-9; FILTER_BANDS];
+        let nearest = (0..FILTER_BANDS).min_by(|a, b| (filter_hz(*a) / hz).ln().abs().total_cmp(&(filter_hz(*b) / hz).ln().abs())).unwrap();
+        bands[nearest] = amp * amp / 2.0;
+        Levels { overall: amp * amp / 2.0, bands }
+    }
+
+    fn spectrum_hz(band: usize) -> f32 {
+        LOW_HZ * (HIGH_HZ / LOW_HZ).powf((band as f32 + 0.5) / BANDS as f32)
+    }
+
+    #[test]
+    fn the_graph_measures_bands_and_restores_the_channels() {
+        let graph = filter_graph(6, "5.1");
+        assert!(graph.starts_with("asplit=33[o]"), "{graph}");
+        assert_eq!(graph.matches("bandpass=").count(), FILTER_BANDS);
+        assert!(graph.contains("amerge=inputs=33,astats="), "{graph}");
+        assert!(graph.ends_with("pan=5.1|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5"), "{graph}");
+    }
+
+    #[test]
+    fn levels_are_read_after_the_original_channels() {
+        let mut map: Vec<String> = vec![r#""lavfi.astats.1.RMS_level":"-10""#.into(), r#""lavfi.astats.2.RMS_level":"-30""#.into()];
+        for b in 0..FILTER_BANDS {
+            let db = if b == 4 { "-20" } else { "-inf" };
+            map.push(format!(r#""lavfi.astats.{}.RMS_level":"{db}""#, b + 3));
+        }
+        let levels = read_levels(&format!("{{{}}}", map.join(",")), 2).unwrap();
+        assert!((levels.bands[4] - 0.01).abs() < 1e-5, "{:?}", levels.bands[4]);
+        assert_eq!(levels.bands[5], 0.0);
+        assert!((levels.overall - 0.0505).abs() < 1e-4, "{}", levels.overall);
+        assert!(read_levels("{}", 2).is_none());
+        assert!(read_levels("nonsense", 2).is_none());
     }
 
     #[test]
@@ -383,15 +423,14 @@ mod tests {
         let mut a = Analyser::new();
         let mut f = Features::default();
         for i in 0..60 {
-            f = a.update(Some(&tone(60.0, 0.5, i * 368)), i as f64 / 60.0, 1.0 / 60.0).clone();
+            f = a.update(Some(&tone(60.0, 0.5)), i as f64 / 60.0, 1.0 / 60.0).clone();
         }
         assert!(f.bass > 0.8 && f.treble < 0.3, "bass {} treble {}", f.bass, f.treble);
         let loudest = (0..BANDS).max_by(|x, y| f.spectrum[*x].total_cmp(&f.spectrum[*y])).unwrap();
-        let hz = a.bands[loudest].2;
-        assert!((40.0..90.0).contains(&hz), "60 Hz showed up at {hz} Hz");
+        assert!((40.0..90.0).contains(&spectrum_hz(loudest)), "60 Hz showed up at {} Hz", spectrum_hz(loudest));
 
         for i in 60..120 {
-            f = a.update(Some(&tone(5000.0, 0.5, i * 368)), i as f64 / 60.0, 1.0 / 60.0).clone();
+            f = a.update(Some(&tone(5000.0, 0.5)), i as f64 / 60.0, 1.0 / 60.0).clone();
         }
         assert!(f.treble > 0.7 && f.bass < 0.3, "bass {} treble {}", f.bass, f.treble);
     }
@@ -401,38 +440,37 @@ mod tests {
         let mut a = Analyser::new();
         let mut f = Features::default();
         for i in 0..30 {
-            f = a.update(Some(&tone(440.0, 0.8, i * 368)), i as f64 / 60.0, 1.0 / 60.0).clone();
+            f = a.update(Some(&tone(440.0, 0.8)), i as f64 / 60.0, 1.0 / 60.0).clone();
         }
         let loud = f.level;
         // 30 dB quieter: dim at first, then the reference comes down to meet it.
-        f = a.update(Some(&tone(440.0, 0.025, 0)), 0.5, 1.0 / 60.0).clone();
+        f = a.update(Some(&tone(440.0, 0.025)), 0.5, 1.0 / 60.0).clone();
         let first = f.level;
         for i in 0..600 {
-            f = a.update(Some(&tone(440.0, 0.025, i * 368)), 0.5 + i as f64 / 60.0, 1.0 / 60.0).clone();
+            f = a.update(Some(&tone(440.0, 0.025)), 0.5 + i as f64 / 60.0, 1.0 / 60.0).clone();
         }
         assert!(loud > 0.9 && first < loud && f.level > 0.85, "loud {loud} first {first} later {}", f.level);
     }
 
     #[test]
-    fn beats_come_from_jumps_in_the_bass() {
+    fn beats_come_from_jumps_in_the_bass_even_with_few_reports() {
         let mut a = Analyser::new();
         let mut beats = 0;
         for i in 0..240 {
-            // A kick every half second: 80 ms of 60 Hz, then quiet hum.
-            let kick = i % 30 < 5;
-            let w = if kick { tone(60.0, 0.8, i * 368) } else { tone(60.0, 0.02, i * 368) };
-            let f = a.update(Some(&w), i as f64 / 60.0, 1.0 / 60.0);
-            if f.beat == 1.0 {
+            // A kick every half second, with the filter reporting 10 times a second.
+            let report = i / 6;
+            let w = if report % 5 == 0 { tone(60.0, 0.8) } else { tone(60.0, 0.02) };
+            if a.update(Some(&w), i as f64 / 60.0, 1.0 / 60.0).beat == 1.0 {
                 beats += 1;
             }
         }
-        assert!((6..=8).contains(&beats), "{beats} beats in 4 seconds of kicks every 0.5s");
+        assert!((7..=9).contains(&beats), "{beats} beats in 4 seconds of kicks every 0.5s");
     }
 
     #[test]
     fn history_follows_video_time() {
         let mut a = Analyser::new();
-        let w = tone(1000.0, 0.5, 0);
+        let w = tone(1000.0, 0.5);
         for i in 0..10 {
             a.update(Some(&w), 10.0 + i as f64 / ROWS_PER_SEC, 1.0 / 60.0);
         }
@@ -447,41 +485,5 @@ mod tests {
         // Seeking back starts afresh.
         a.update(None, 2.0, 1.0 / 60.0);
         assert_eq!(a.last_row, Some(120));
-    }
-
-    /// Decodes a real file through ffmpeg (needs ffmpeg; run with --ignored).
-    #[test]
-    #[ignore]
-    fn taps_a_file() {
-        let ffmpeg = crate::find_tool("ffmpeg").expect("ffmpeg");
-        let dir = std::env::temp_dir().join(format!("flex-audio-tap-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("tone.mkv");
-        let status = Command::new(&ffmpeg)
-            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=200:duration=20", "-c:a", "flac"])
-            .arg(&file)
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let mut tap = Tap::new(&ffmpeg, &file, None);
-        let mut out = vec![0.0; WINDOW];
-        let wait = |tap: &mut Tap, at: f64, out: &mut [f32]| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while !tap.window(at, out) {
-                assert!(std::time::Instant::now() < deadline, "no samples at {at}");
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        };
-        wait(&mut tap, 2.0, &mut out);
-        let rms = (out.iter().map(|s| s * s).sum::<f32>() / WINDOW as f32).sqrt();
-        assert!(rms > 0.05, "rms {rms}");
-        // The phase of a 200 Hz sine at t: check the samples line up with the time asked for.
-        let at = 15.3;
-        wait(&mut tap, at, &mut out);
-        let start = at - WINDOW as f64 / 2.0 / RATE as f64;
-        let expected: Vec<f32> = (0..WINDOW).map(|i| (std::f64::consts::TAU * 200.0 * (start + i as f64 / RATE as f64)).sin() as f32).collect();
-        let corr: f32 = out.iter().zip(&expected).map(|(a, b)| a * b).sum::<f32>() / WINDOW as f32;
-        assert!(corr > 0.05, "samples don't line up with the position (correlation {corr})");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

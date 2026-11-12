@@ -1,0 +1,35 @@
+name = "Pixel People"
+description = "People turn into chunky pixels in a sharp world, and the blocks change size on the beat."
+segment = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Block size"
+type = "number"
+min = 4
+max = 80
+step = 2
+unit = ""
+default = 24
+
+[[settings]]
+key = "colours"
+label = "Colours"
+type = "number"
+detail = "Fewer colours per channel, for an old console look: 0 leaves them alone"
+min = 0
+max = 16
+step = 1
+unit = ""
+default = 5
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

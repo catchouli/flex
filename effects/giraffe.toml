@@ -1,0 +1,35 @@
+name = "Giraffe Necks"
+description = "Heads rise up on long stretchy necks, swaying and bobbing to the music."
+suits = ["close"]
+faces = true
+audio = true
+
+[[settings]]
+key = "lift"
+label = "Height"
+type = "number"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 120
+
+[[settings]]
+key = "sway"
+label = "Sway"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

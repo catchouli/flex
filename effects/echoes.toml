@@ -1,0 +1,56 @@
+name = "Echoes"
+description = "Everything leaves a trail of coloured copies of where it was a moment ago."
+suits = ["action"]
+history = true
+audio = true
+
+[[settings]]
+key = "copies"
+label = "Copies"
+type = "number"
+min = 1
+max = 8
+step = 1
+unit = ""
+default = 5
+
+[[settings]]
+key = "gap"
+label = "Gap"
+type = "number"
+detail = "Hundredths of a second between copies"
+min = 2
+max = 20
+step = 1
+unit = ""
+default = 8
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

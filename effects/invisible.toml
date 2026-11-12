@@ -1,0 +1,15 @@
+name = "Invisible Man"
+description = "People vanish, leaving only a shimmer in the air, and the room is filled in from what's been seen behind them."
+plate = true
+segment = true
+
+[[settings]]
+key = "shimmer"
+label = "Shimmer"
+type = "number"
+detail = "How much the air moves where someone is standing"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,14 @@
+name = "Surveillance"
+description = "A security camera's view: grey or night-vision green, with every person tracked in numbered brackets and a sight on their head, animals and vehicles outlined, and a blinking REC."
+suits = ["wide", "action"]
+segment = true
+
+[[settings]]
+key = "look"
+label = "Camera"
+type = "choice"
+default = "grey"
+options = [
+    { id = "grey", label = "Security camera" },
+    { id = "green", label = "Night vision" },
+]

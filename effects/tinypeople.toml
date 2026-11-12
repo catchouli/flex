@@ -1,0 +1,26 @@
+name = "Tiny People"
+description = "People shrink down where they are, leaving the room around them huge."
+plate = true
+segment = true
+faces = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 20
+max = 90
+step = 5
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Bounce to the beat"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30

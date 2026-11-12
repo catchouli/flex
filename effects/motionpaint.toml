@@ -1,0 +1,56 @@
+name = "Motion Paint"
+description = "The film goes dark and only what's moving shows, painted in colours for each direction, leaving trails."
+suits = ["action"]
+flow = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "film"
+label = "Film showing"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 25
+
+[[settings]]
+key = "gain"
+label = "Sensitivity"
+type = "number"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "trail"
+label = "Trails"
+type = "number"
+min = 0
+max = 98
+step = 2
+unit = "%"
+default = 85
+
+[[settings]]
+key = "film_moving"
+label = "Film where it moves"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

@@ -1,0 +1,47 @@
+name = "Smoke People"
+description = "People come apart at the edges and blow away as smoke."
+plate = true
+segment = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "holes"
+label = "Coming apart"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "smoke"
+label = "Smoke"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "wind"
+label = "Wind"
+type = "number"
+detail = "Which way it blows"
+min = -100
+max = 100
+step = 10
+unit = "%"
+default = 20
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

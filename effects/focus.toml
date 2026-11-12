@@ -1,0 +1,48 @@
+name = "Focus Pull"
+description = "A film lens with a shallow focus that drifts between near and far, or stays on someone's face."
+depth = true
+faces = true
+
+[[settings]]
+key = "blur"
+label = "Blur"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "on"
+label = "Focus on"
+type = "choice"
+default = "wander"
+options = [
+    { id = "wander", label = "Wandering" },
+    { id = "face", label = "The first face" },
+    { id = "near", label = "Whatever is closest" },
+    { id = "far", label = "The distance" },
+]
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "sparkle"
+label = "Sparkle"
+type = "number"
+detail = "How much bright points bloom into discs"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

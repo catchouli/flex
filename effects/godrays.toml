@@ -1,0 +1,104 @@
+name = "God Rays"
+description = "Shafts of light through the air of the room, coming from the brightest thing in the shot and taking its colour. People cut dark shadows through them, dust glitters in them and swirls as things move. Singing swells them and thunder flashes them."
+suits = ["wide"]
+depth = true
+segment = true
+faces = true
+audio = true
+feedback = true
+stats = true
+cuts = true
+flow = true
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "find"
+label = "Follow the film's light"
+type = "number"
+detail = "How much the beams come from the brightest place in the shot rather than from above"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 80
+
+[[settings]]
+key = "land"
+label = "Lights up surfaces"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "dust"
+label = "Dust"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Light moves"
+type = "number"
+min = 0
+max = 300
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "film"
+label = "Colour from the film"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 80
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+detail = "Used as far as the colour isn't coming from the film"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 40
+
+[[settings]]
+key = "rainbow"
+label = "Rainbow"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 0
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,46 @@
+name = "Soundstage"
+description = "The music travels into the picture: what you hear now lights the things up close, and rolls away into the distance"
+audio = true
+depth = true
+
+[[settings]]
+key = "reach"
+label = "Travels"
+type = "number"
+detail = "How much of the two seconds of sound is spread through the scene"
+min = 20
+max = 100
+step = 20
+unit = "%"
+default = 80
+
+[[settings]]
+key = "amount"
+label = "Strength"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "dim"
+label = "Darken the film"
+type = "number"
+min = 0
+max = 90
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Colour speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1

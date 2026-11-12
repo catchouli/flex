@@ -1,0 +1,26 @@
+name = "Hall of Faces"
+description = "Each face sprouts a turning ring of copies of itself, in colours it should not be."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "copies"
+label = "Copies"
+type = "number"
+min = 3
+max = 12
+step = 1
+default = 7
+
+[[settings]]
+key = "reach"
+label = "Reach"
+type = "number"
+detail = "How far out the ring sits"
+min = 100
+max = 300
+step = 10
+unit = "%"
+default = 170

@@ -1,0 +1,66 @@
+name = "Silhouette Cosmos"
+description = "People become person-shaped windows into a drifting galaxy, or stand in front of one."
+segment = true
+audio = true
+
+[[settings]]
+key = "stars"
+label = "Stars"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Drift"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "rim"
+label = "Glowing edge"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "where"
+label = "Space is"
+type = "choice"
+default = "people"
+options = [
+    { id = "people", label = "Inside the people" },
+    { id = "world", label = "Everywhere else" },
+]
+
+[[settings]]
+key = "keep"
+label = "Keep close things"
+type = "number"
+detail = "With space everywhere else, keeps furniture and things up close"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 0

@@ -1,0 +1,35 @@
+name = "Clone Army"
+description = "Rows of the same people stretch away into the distance behind them."
+segment = true
+audio = true
+
+[[settings]]
+key = "rows"
+label = "Rows"
+type = "number"
+min = 1
+max = 6
+step = 1
+unit = ""
+default = 4
+
+[[settings]]
+key = "fog"
+label = "Fog"
+type = "number"
+detail = "How much the far rows fade"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "react"
+label = "Marching to the beat"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

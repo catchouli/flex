@@ -1,0 +1,27 @@
+name = "Witness Protection"
+description = "Faces get a black bar over the eyes, get pixelated or blurred, or lose their features altogether."
+suits = ["close", "dialogue"]
+faces = true
+mesh = true
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "bar"
+options = [
+    { id = "bar", label = "Black bar" },
+    { id = "pixels", label = "Pixelated" },
+    { id = "blur", label = "Blurred" },
+    { id = "blank", label = "No features at all" },
+]
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 60
+max = 200
+step = 10
+unit = "%"
+default = 100

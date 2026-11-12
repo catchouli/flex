@@ -1,0 +1,58 @@
+name = "Oil on Water"
+description = "Slow rainbow bands slide over the picture like petrol on a puddle, curling around people."
+suits = ["quiet"]
+segment = true
+audio = true
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "bands"
+label = "Bands"
+type = "number"
+detail = "How tightly packed the colours are"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "people"
+label = "Keep off people"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "surfaces"
+label = "Follow the surfaces"
+type = "number"
+detail = "How much the bands wrap around the shapes in the scene"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

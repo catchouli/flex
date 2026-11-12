@@ -1,0 +1,93 @@
+name = "Breathing Walls"
+description = "The room is inside something alive: the walls swell and sink with each breath, buckling into wet folds and throbbing veins, while the people carry on."
+suits = ["wide"]
+segment = true
+depth = true
+plate = true
+audio = true
+
+[[settings]]
+key = "breath"
+label = "Breathing"
+type = "number"
+detail = "How far the walls move"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "rate"
+drift = "off"
+label = "Breaths a minute"
+type = "number"
+min = 4
+max = 40
+step = 2
+unit = ""
+default = 14
+
+[[settings]]
+key = "folds"
+label = "Folds"
+type = "number"
+detail = "How much the surface buckles and the light catches it"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "flesh"
+label = "Flesh"
+type = "number"
+detail = "0 keeps the wall's own colours"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 35
+
+[[settings]]
+key = "veins"
+label = "Veins"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "wet"
+label = "Wetness"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "whole"
+label = "Floor and furniture"
+type = "number"
+detail = "How much the rest of the room breathes with the walls"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+detail = "The bass makes it heave and the beat makes the veins throb"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

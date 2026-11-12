@@ -1,0 +1,4 @@
+name = "World Grid"
+description = "Draws a lattice fixed to the world, to show how well Flex can tell where the camera is. Handy when making an effect."
+shuffle = false
+camera = true

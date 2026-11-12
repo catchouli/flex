@@ -1,0 +1,65 @@
+name = "Drawn People"
+description = "Drawn or painted people in the real world: only people redrawn in the style picked, as anime by AnimeGANv3 (Asher Chan's network, free for non-commercial use only), painted by fast neural style (Johnson et al.'s, from the ONNX Model Zoo; BSD licence), line-drawn by Informative Drawings (Chan, Durand and Isola's; MIT licence), in famous paintings' styles by Magenta's arbitrary stylization (Ghiasi et al.; Apache-2.0 licence), or grown over with a living texture (Self-Organising Textures, Distill; CC BY 4.0). The style's network is downloaded the first time it's picked: 4–17 MB, or 86 MB for the famous paintings' styles."
+restyle = "style"
+segment = true
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "ghibli"
+options = [
+    { id = "hayao", label = "Hayao" },
+    { id = "hayao-warm", label = "Hayao, warmer" },
+    { id = "hayao-vivid", label = "Hayao, more vivid" },
+    { id = "shinkai", label = "Shinkai" },
+    { id = "shinkai-bold", label = "Shinkai, bolder" },
+    { id = "ghibli", label = "Ghibli" },
+    { id = "sketch", label = "Ink sketch" },
+    { id = "mosaic", label = "Painted: mosaic" },
+    { id = "candy", label = "Painted: candy" },
+    { id = "rain-princess", label = "Painted: rain princess" },
+    { id = "udnie", label = "Painted: Udnie" },
+    { id = "pointilism", label = "Painted: pointillism" },
+    { id = "art:morph", label = "Painted: drifting through famous paintings" },
+    { id = "lines", label = "Line drawing" },
+    { id = "lines-anime", label = "Line drawing, anime" },
+    { id = "tex-honeycomb", label = "Living texture: honeycomb" },
+    { id = "tex-chrome", label = "Living texture: liquid chrome" },
+    { id = "tex-scales", label = "Living texture: rainbow scales" },
+    { id = "tex-feathers", label = "Living texture: psychedelic feathers" },
+    { id = "tex-eyes", label = "Living texture: eyes" },
+]
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+detail = "How much of the drawing"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "edge"
+label = "Edge softness"
+type = "number"
+detail = "How gently the drawing fades into the real picture"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "outline"
+label = "Outline"
+type = "number"
+detail = "Ink around people, where the drawing meets the real picture"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

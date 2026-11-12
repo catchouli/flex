@@ -1,0 +1,93 @@
+name = "Reaction-Diffusion Skin"
+description = "Animal markings that grow by themselves, like zebra stripes or coral, spread over every surface: they wrap around shapes, line up along the depth of the room and stay on whatever moves."
+depth = true
+feedback = true
+audio = true
+flow = true
+cuts = true
+
+[[settings]]
+key = "size"
+label = "Pattern size"
+type = "number"
+min = 2
+max = 16
+step = 1
+unit = ""
+default = 7
+
+[[settings]]
+key = "follow"
+label = "Follow the film"
+type = "number"
+detail = "How much the picture steers the pattern"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "depth"
+label = "Follow the depth"
+type = "number"
+detail = "How much the stripes line up along the depth of the scene, like contour lines"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 80
+
+[[settings]]
+key = "bands"
+label = "Depth stripes"
+type = "number"
+detail = "How many stripes from the back of the scene to the front"
+min = 2
+max = 30
+step = 1
+unit = ""
+default = 12
+
+[[settings]]
+key = "relief"
+label = "Relief"
+type = "number"
+detail = "How raised the markings look"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "colours"
+label = "Colours"
+type = "choice"
+default = "film"
+options = [
+    { id = "film", label = "From the film" },
+    { id = "coral", label = "Coral" },
+    { id = "zebra", label = "Zebra" },
+]
+
+[[settings]]
+key = "scale"
+label = "Bigger up close"
+type = "number"
+detail = "The pattern is larger on things near the camera"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70

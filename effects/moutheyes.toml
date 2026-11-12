@@ -1,0 +1,6 @@
+name = "Mouth Eyes"
+description = "Everyone's eyes and mouth have swapped places."
+suits = ["close"]
+faces = true
+mesh = true
+

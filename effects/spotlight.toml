@@ -1,0 +1,48 @@
+name = "Spotlight"
+description = "Faces stay as they are while everything around them melts and dims."
+suits = ["close"]
+depth = true
+faces = true
+audio = true
+
+[[settings]]
+key = "melt"
+label = "Melt"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 50
+
+[[settings]]
+key = "dim"
+label = "Dim"
+type = "number"
+detail = "How dark the world around faces gets"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 55
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "distance"
+label = "More in the distance"
+type = "number"
+detail = "Far away melts and dims more than up close"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70

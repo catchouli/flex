@@ -1,0 +1,35 @@
+name = "Mind Bloom"
+description = "A kaleidoscope that grows more arms with the bass and blooms into its own feedback."
+depth = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "arms"
+label = "Arms"
+type = "number"
+min = 3
+max = 16
+step = 1
+default = 6
+
+[[settings]]
+key = "bloom"
+label = "Bloom"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 55
+
+[[settings]]
+key = "relief"
+label = "Depth relief"
+type = "number"
+detail = "Near things bulge out of the pattern"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 30

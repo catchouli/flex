@@ -1,0 +1,32 @@
+Flex's scene and body network (moge-segment.safetensors): a small head that runs on the
+features of MoGe-2 ViT-S (Ruicheng/moge-2-vits-normal, MIT, downloaded separately; not included
+here), and tells each pixel apart as other, person, wall, sky, ground, ceiling, water, plant,
+window, vehicle, animal, building or furniture; for a person's pixels, skin, hair or clothes,
+and head, torso, arm, hand, leg or foot; and which person each belongs to. Trained for Flex by
+crates/flex-depth/tools/moge/segment/run.py, with MoGe-2 frozen, on the pictures and labels of
+COCO panoptic and DensePose-COCO (cocodataset.org), ADE20K's Scene Parsing set
+(ade20k.csail.mit.edu), ATR (human parsing), CIHP (crowds of people, with their parts),
+Danbooru-Parsing (anime portraits) and skytnt's anime-segmentation, none of which are included.
+Released under Flex's license:
+
+MIT License
+
+Copyright (c) 2026 Caitlin Wilks
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

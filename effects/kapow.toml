@@ -1,0 +1,46 @@
+name = "Kapow"
+description = "Comic-book sound effects burst out of the picture as you hear them: BOOM, POW, HA HA, SPLASH, VROOM and more, with notes floating up from the music."
+suits = ["action"]
+audio = true
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 50
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "often"
+label = "How often"
+type = "number"
+detail = "How quickly new words pop up while a sound goes on"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "notes"
+label = "Music notes"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "look"
+label = "Comic look"
+type = "number"
+detail = "Punchier colours and inked edges in the picture itself"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

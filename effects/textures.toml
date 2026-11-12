@@ -1,0 +1,53 @@
+name = "Living Textures"
+description = "The film grown over with a living texture: honeycomb, cobwebs, chrome, scales, eyes and stranger things, grown cell by cell by neural cellular automata that crawl over the picture, carried along with what moves and fed its colours. From Self-Organising Textures (Niklasson, Mordvintsev, Randazzo and Levin, Distill; CC BY 4.0), downloaded the first time (0.4 MB for all of them)."
+restyle = "texture"
+
+[[settings]]
+key = "texture"
+label = "Texture"
+type = "choice"
+default = "tex-scales"
+options = [
+    { id = "tex-honeycomb", label = "Honeycomb" },
+    { id = "tex-cobwebs", label = "Cobwebs" },
+    { id = "tex-bubbles", label = "Bubbles" },
+    { id = "tex-swirls", label = "Swirls" },
+    { id = "tex-marble", label = "Marble veins" },
+    { id = "tex-cracked", label = "Cracked earth" },
+    { id = "tex-chrome", label = "Liquid chrome" },
+    { id = "tex-fingerprints", label = "Fingerprints" },
+    { id = "tex-candy", label = "Candy stripes" },
+    { id = "tex-zebra", label = "Zebra" },
+    { id = "tex-foam", label = "Foam" },
+    { id = "tex-mondrian", label = "Mondrian" },
+    { id = "tex-leopard", label = "Leopard" },
+    { id = "tex-feathers", label = "Psychedelic feathers" },
+    { id = "tex-scales", label = "Rainbow scales" },
+    { id = "tex-eyes", label = "Eyes" },
+    { id = "tex-staring", label = "Staring eyes" },
+    { id = "tex-maze", label = "Maze" },
+    { id = "tex-coils", label = "Coils" },
+    { id = "tex-cells", label = "Cells" },
+]
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+detail = "How much of the texture, over the film"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "shading"
+label = "Shading"
+type = "number"
+detail = "The film's light and shade on the texture, so what's in it still shows"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

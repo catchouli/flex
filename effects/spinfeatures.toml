@@ -1,0 +1,37 @@
+name = "Spinning Features"
+description = "Eyes and mouths turn round and round where they are."
+suits = ["close"]
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = -300
+max = 300
+step = 10
+unit = "%"
+default = 80
+
+[[settings]]
+key = "size"
+label = "Size"
+type = "number"
+min = 60
+max = 200
+step = 10
+unit = "%"
+default = 110
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,21 @@
+name = "Mood Ring"
+description = "The film's colours follow how its music feels: warm and rich when it's happy, cold and drained when it's sad, a soft pink glow when it's tender, loud when it's exciting, red when it's angry and green-grey when it's scary."
+suits = ["quiet"]
+audio = true
+
+[[settings]]
+key = "strength"
+label = "Strength"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "ring"
+label = "Show the ring"
+type = "bool"
+detail = "A mood ring in the corner, in the colour of the mood"
+default = true

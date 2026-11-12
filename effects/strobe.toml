@@ -1,0 +1,49 @@
+name = "Strobe Sculpture"
+description = "On every beat people leave a frozen, glowing statue of themselves that slowly fades."
+suits = ["action"]
+segment = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "fade"
+label = "Stays for"
+type = "number"
+min = 1
+max = 14
+step = 1
+unit = " s"
+default = 6
+
+[[settings]]
+key = "every"
+label = "Also every"
+type = "number"
+detail = "Statues even when there is no beat: this many every second, in percent"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "number"
+detail = "How rainbow they are"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "rise"
+label = "Rise"
+type = "number"
+detail = "How fast statues float upwards"
+min = 0
+max = 4
+step = 1
+unit = ""
+default = 1

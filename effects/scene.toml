@@ -1,0 +1,4 @@
+name = "Shot and Scene"
+description = "Shows what Flex makes of the shot and the scene. Handy when making an effect."
+shuffle = false
+scene = true

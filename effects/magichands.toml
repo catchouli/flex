@@ -1,0 +1,45 @@
+name = "Magic Hands"
+description = "Everyone holds a ball of crackling energy in each hand, with sparks spinning round it and lightning arcing between their hands, flaring on the beat."
+suits = ["action", "close"]
+segment = true
+audio = true
+
+[[settings]]
+key = "power"
+label = "Power"
+type = "number"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "colours"
+label = "Colours"
+type = "choice"
+default = "each"
+options = [
+    { id = "one", label = "One colour" },
+    { id = "each", label = "A colour each" },
+]
+
+[[settings]]
+key = "hue"
+label = "Colour"
+type = "number"
+min = 0
+max = 360
+step = 10
+unit = "°"
+default = 200
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

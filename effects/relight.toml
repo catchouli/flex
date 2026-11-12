@@ -1,0 +1,77 @@
+name = "Relight"
+description = "Puts new coloured lights in the film's world, using a surface worked out from how far away everything is"
+camera = true
+audio = true
+depth = true
+
+[[settings]]
+key = "style"
+label = "Style"
+type = "choice"
+default = "lights"
+options = [
+    { id = "lights", label = "Coloured lights" },
+    { id = "clay", label = "Clay" },
+    { id = "oil", label = "Oil slick" },
+    { id = "show", label = "Show the surface" },
+]
+
+[[settings]]
+key = "lights"
+label = "Lights"
+type = "number"
+min = 1
+max = 4
+step = 1
+default = 3
+
+[[settings]]
+key = "ambient"
+label = "Original lighting"
+type = "number"
+detail = "How much of the film's own light is left"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "bump"
+label = "Surface"
+type = "number"
+detail = "How strongly shapes catch the light"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "shadows"
+label = "Shadows"
+type = "bool"
+detail = "Things cast shadows from the lights"
+default = true
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 0
+max = 2
+step = 0.25
+unit = "×"
+default = 1
+
+[[settings]]
+key = "react"
+label = "Reacting to sound"
+type = "number"
+detail = "Beats flash the lights"
+min = 0
+max = 100
+step = 20
+unit = "%"
+default = 40

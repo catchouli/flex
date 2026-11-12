@@ -1,6 +1,6 @@
 [package]
 name = "flex-depth"
-description = "Depth Anything V2 Small as wgpu compute shaders, for Flex's video effects"
+description = "The networks behind Flex's video effects, hand-written as wgpu compute shaders (depth, geometry and segmentation, optical flow, point tracking, faces, restyling), plus sound classification on the CPU"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,12 @@ publish = false
 [dependencies]
 anyhow = "1.0.104"
 bytemuck = { version = "1.25", features = ["derive"] }
+# Magenta's weights come as a .tar.gz.
+flate2 = "1"
 pollster = "0.4"
 serde_json = "1.0.151"
+sha2 = "0.10"
 wgpu = "30.0.1"
+
+[build-dependencies]
+sha2 = "0.10"

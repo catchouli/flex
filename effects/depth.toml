@@ -36,6 +36,7 @@ default = 8
 
 [[settings]]
 key = "speed"
+drift = "off"
 label = "Speed"
 type = "number"
 min = 0
@@ -54,3 +55,45 @@ max = 100
 step = 20
 unit = "%"
 default = 40
+
+[[settings]]
+key = "fog_start"
+label = "Fog colour: starts"
+type = "choice"
+detail = "The colour where the fog begins, nearest the camera"
+default = "rainbow"
+options = [
+    { id = "rainbow", label = "Rainbow" },
+    { id = "white", label = "White" },
+    { id = "grey", label = "Grey" },
+    { id = "black", label = "Black" },
+    { id = "red", label = "Red" },
+    { id = "orange", label = "Orange" },
+    { id = "yellow", label = "Yellow" },
+    { id = "green", label = "Green" },
+    { id = "teal", label = "Teal" },
+    { id = "blue", label = "Blue" },
+    { id = "purple", label = "Purple" },
+    { id = "pink", label = "Pink" },
+]
+
+[[settings]]
+key = "fog_end"
+label = "Fog colour: ends"
+type = "choice"
+detail = "The colour where the fog is thickest"
+default = "rainbow"
+options = [
+    { id = "rainbow", label = "Rainbow" },
+    { id = "white", label = "White" },
+    { id = "grey", label = "Grey" },
+    { id = "black", label = "Black" },
+    { id = "red", label = "Red" },
+    { id = "orange", label = "Orange" },
+    { id = "yellow", label = "Yellow" },
+    { id = "green", label = "Green" },
+    { id = "teal", label = "Teal" },
+    { id = "blue", label = "Blue" },
+    { id = "purple", label = "Purple" },
+    { id = "pink", label = "Pink" },
+]

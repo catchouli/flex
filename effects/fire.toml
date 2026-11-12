@@ -1,0 +1,59 @@
+name = "Fire People"
+description = "People burn from the feet up, with flames that follow them around and flare up at the sound of fire, explosions or wild music."
+suits = ["action"]
+segment = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "climb"
+label = "Time to catch"
+type = "number"
+detail = "How long the flames take to get from the bottom to the top. 0 is all at once"
+min = 0
+max = 60
+step = 5
+unit = " s"
+default = 15
+
+[[settings]]
+key = "height"
+label = "Flames"
+type = "number"
+detail = "How high they lick"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "char"
+label = "Charring"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "light"
+label = "Firelight"
+type = "number"
+detail = "How much the flames light up things at the same distance"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

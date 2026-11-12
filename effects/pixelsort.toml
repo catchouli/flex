@@ -1,0 +1,59 @@
+name = "Pixel Sort Waterfall"
+description = "Bright pixels pour down the screen in streams and pool at the bottom."
+suits = ["action"]
+depth = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "level"
+label = "Brightness"
+type = "number"
+detail = "Anything brighter than this falls"
+min = 20
+max = 90
+step = 5
+unit = "%"
+default = 55
+
+[[settings]]
+key = "speed"
+label = "Speed"
+type = "number"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "stay"
+label = "Stickiness"
+type = "number"
+detail = "How long streams last"
+min = 50
+max = 100
+step = 1
+unit = "%"
+default = 97
+
+[[settings]]
+key = "pool"
+label = "Pool"
+type = "number"
+detail = "How deep the pool at the bottom is"
+min = 0
+max = 40
+step = 5
+unit = "%"
+default = 12
+
+[[settings]]
+key = "ledges"
+label = "Pool on surfaces"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70

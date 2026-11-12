@@ -1,0 +1,46 @@
+name = "Voxel World"
+description = "The scene rebuilt from coloured blocks, standing taller the closer they are."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "size"
+label = "Block size"
+type = "number"
+min = 6
+max = 50
+step = 2
+unit = ""
+default = 18
+
+[[settings]]
+key = "height"
+label = "Height"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 150
+
+[[settings]]
+key = "studs"
+label = "Studs"
+type = "number"
+detail = "Little round tops, like toy bricks"
+min = 0
+max = 100
+step = 50
+unit = "%"
+default = 50
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

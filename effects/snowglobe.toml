@@ -1,0 +1,48 @@
+name = "Snow Globe"
+description = "Snow falls through the scene behind whatever's near, drifts on the air and blows in any wind it hears, settles on things, and a beat or a bang knocks it off again."
+suits = ["wide"]
+camera = true
+depth = true
+audio = true
+feedback = true
+
+[[settings]]
+key = "snow"
+label = "Snow"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "settle"
+label = "Settling"
+type = "number"
+detail = "How much builds up on things"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 30
+
+[[settings]]
+key = "shake"
+label = "Knocked off on the beat"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "glass"
+label = "Glass"
+type = "choice"
+default = "on"
+options = [
+    { id = "on", label = "On" },
+    { id = "off", label = "Off" },
+]

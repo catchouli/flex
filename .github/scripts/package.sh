@@ -31,6 +31,8 @@ FFMPEG_SHA256=4d2060a8b34a940aa47d785142055bb92a63053781e55f2ace4546edd519a8f5
 MPV_BUILDS=shinchiro/mpv-winbuild-cmake
 
 fail() { echo "error: $*" >&2; exit 1; }
+# shellcheck source=notices.sh
+source "$ROOT/.github/scripts/notices.sh"
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
 # --- Checks ---------------------------------------------------------------------------
@@ -80,7 +82,7 @@ done
 # --- Flex -----------------------------------------------------------------------------
 
 cp "$ROOT/crates/flex-web/web/vendor/jassub/LICENSE.txt" "$DIR/licenses/jassub-LICENSE.txt"
-JASSUB_VERSION=$(sed -n 's/^JASSUB \([0-9.]*\).*/\1/p' "$ROOT/crates/flex-web/web/vendor/jassub/README.txt")
+copy_model_licenses "$ROOT" "$DIR/licenses"
 
 cp "$EXE" "$DIR/flex.exe"
 # Plugins: plugins/<id>/plugin.toml plus its program. They're off until switched on in
@@ -95,6 +97,9 @@ for MANIFEST in "$ROOT"/plugins/*/plugin.toml; do
 done
 # Video effects: shaders and their settings, offered in Settings → Picture.
 cp -R "$ROOT/effects" "$DIR/effects"
+# The networks video effects use (flex.exe checks they're the ones it was built with).
+mkdir -p "$DIR/models"
+cp "$ROOT"/models/*.bin "$ROOT"/models/*.safetensors "$DIR/models/"
 cp "$LICENSE_FILE" "$DIR/LICENSE.txt"
 (cd "$ROOT" && cargo about generate --fail about.hbs) >"$DIR/licenses/rust-crates.txt"
 
@@ -113,7 +118,8 @@ release's.
 The plugins folder has optional add-ons (such as lighting an LED strip behind the TV);
 they only run once switched on in Settings → Plugins.
 
-Everything in this folder besides flex.exe and the plugins is third-party software; see
+flex.exe, the plugins, the effects folder and models/moge-segment.safetensors are Flex's own
+(LICENSE.txt). Everything else in this folder is third-party software; see
 THIRD-PARTY-NOTICES.txt.
 EOF
 
@@ -137,14 +143,8 @@ libmpv (libmpv-2.dll), mpv commit $MPV_COMMIT
     (build scripts and the versions of its dependencies:
     https://github.com/$MPV_BUILDS)
 
-JASSUB $JASSUB_VERSION (built into flex.exe; draws subtitles in the web UI's player)
-  JASSUB itself: MIT (licenses/jassub-LICENSE.txt). Its WebAssembly contains libass
-  (ISC), FreeType (FTL or GPL 2), HarfBuzz (MIT), FriBidi (LGPL 2.1 or later) and their
-  dependencies; Liberation Sans (SIL Open Font License) is its default font.
-  Source, including those libraries: https://github.com/ThaUnknown/jassub/tree/v$JASSUB_VERSION
-
-Rust crates compiled into flex.exe and the plugins: licenses/rust-crates.txt
 EOF
+common_notices "$ROOT" "$TAG" flex.exe >>"$DIR/THIRD-PARTY-NOTICES.txt"
 
 cat >"$OUT/release-notes.md" <<EOF
 Run **$NAME-setup.exe** to install or update Flex: it installs for your account only (no admin prompt), and if Flex is running it's stopped first and started again afterwards. For unattended updates, run it with \`/SILENT\` or \`/VERYSILENT\`. Your libraries and history are kept in \`%APPDATA%\\Flex\`.

@@ -341,6 +341,13 @@ pub struct Shared {
     pub effects: flex_core::effects::Effects,
     /// Depth for effects that ask for it (runs only while one does).
     pub depth: crate::depth::Link,
+    pub faces: crate::faces::Link,
+    pub motion: crate::flow::Link,
+    pub camera: crate::camera::Link,
+    /// The picture redrawn in a style, for effects that ask for one.
+    pub restyle: crate::restyle::Link,
+    /// Growing living textures for effects that pick one as their style.
+    pub texture: crate::nca::Link,
     /// The effect's GL side, used in the player's paint callback.
     pub effect_renderer: std::sync::Arc<std::sync::Mutex<crate::effects::Renderer>>,
     /// The last playback state sent to plugins.
@@ -400,6 +407,11 @@ impl Shared {
             effects,
             effect_renderer: Default::default(),
             depth: Default::default(),
+            faces: Default::default(),
+            motion: Default::default(),
+            camera: Default::default(),
+            restyle: Default::default(),
+            texture: Default::default(),
             playback_sent: None,
             playback_last: None,
             awake: Default::default(),

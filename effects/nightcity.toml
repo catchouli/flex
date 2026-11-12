@@ -1,0 +1,47 @@
+name = "Night City"
+description = "The shot turns to night: a starry sky, buildings with their windows lit one by one, glowing windows, streetlight sliding over cars, and people lit by the moon."
+suits = ["wide", "quiet"]
+segment = true
+depth = true
+camera = true
+cuts = true
+
+[[settings]]
+key = "dark"
+label = "Night"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 90
+
+[[settings]]
+key = "lit"
+label = "Windows lit"
+type = "number"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 45
+
+[[settings]]
+key = "size"
+label = "Window size"
+type = "number"
+min = 30
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "stars"
+label = "Stars"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100

@@ -1,0 +1,47 @@
+name = "Comic Book People"
+description = "People are printed in halftone dots with thick outlines, in an ordinary world, and get speech bubbles while they talk, spiky ones when they shout."
+suits = ["dialogue"]
+segment = true
+mesh = true
+feedback = true
+audio = true
+
+[[settings]]
+key = "dots"
+label = "Dot size"
+type = "number"
+min = 4
+max = 24
+step = 1
+unit = ""
+default = 9
+
+[[settings]]
+key = "outline"
+label = "Outline"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "punch"
+label = "Colour punch"
+type = "number"
+min = 50
+max = 250
+step = 10
+unit = "%"
+default = 150
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

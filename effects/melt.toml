@@ -1,10 +1,13 @@
 name = "Melt"
 description = "A trippy video effect: a turning kaleidoscope with colour-shifting trails"
+suits = ["quiet"]
+depth = true
 feedback = true
 audio = true
 
 [[settings]]
 key = "speed"
+drift = "off"
 label = "Speed"
 type = "number"
 min = 0
@@ -36,6 +39,7 @@ default = 85
 
 [[settings]]
 key = "colours"
+drift = "off"
 label = "Colour shifting"
 type = "number"
 min = 0
@@ -60,3 +64,14 @@ key = "spill"
 label = "Fill the black bars"
 type = "bool"
 default = true
+
+[[settings]]
+key = "relief"
+label = "Depth relief"
+type = "number"
+detail = "Near things bulge out of the pattern"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 30

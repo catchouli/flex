@@ -1,0 +1,59 @@
+name = "Lidar Sweep"
+description = "A dark scene revealed by sweeps of laser light travelling away from the camera."
+suits = ["wide"]
+depth = true
+audio = true
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Speed"
+type = "number"
+min = 20
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "glow"
+label = "Afterglow"
+type = "number"
+detail = "How long what it touched stays lit"
+min = 10
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "film"
+label = "Film showing"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "colour"
+label = "Colour"
+type = "choice"
+default = "green"
+options = [
+    { id = "green", label = "Green" },
+    { id = "cyan", label = "Cyan" },
+    { id = "red", label = "Red" },
+    { id = "amber", label = "Amber" },
+]
+
+[[settings]]
+key = "react"
+label = "Reaction to sound"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50

@@ -1,0 +1,17 @@
+name = "Porcelain Dolls"
+description = "Everyone's face is glazed china with painted lips and glass eyes, and every beat cracks it a little more until the next cut."
+suits = ["close"]
+mesh = true
+audio = true
+cuts = true
+
+[[settings]]
+key = "cracks"
+label = "Cracking"
+type = "number"
+detail = "How fast the faces crack"
+default = 50
+min = 0
+max = 100
+step = 5
+unit = "%"

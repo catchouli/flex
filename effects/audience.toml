@@ -1,0 +1,36 @@
+name = "Studio Audience"
+description = "The sitcom treatment: lit LAUGH, APPLAUSE, ON AIR and QUIET signs along the top come on when Flex hears laughter, clapping, talking or silence, and laughs bring up the warm light of a studio set."
+suits = ["dialogue"]
+audio = true
+
+[[settings]]
+key = "size"
+label = "Sign size"
+type = "number"
+min = 50
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "opacity"
+label = "Signs"
+type = "number"
+detail = "How solid the signs are"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "studio"
+label = "Studio light"
+type = "number"
+detail = "The warm, bright look laughter brings"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

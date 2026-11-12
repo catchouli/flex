@@ -1,0 +1,17 @@
+name = "Face Mesh"
+description = "Shows what Flex can see of a face up close: 478 points on the skin, which way the head points, and how open the eyes and mouth are. Handy when making an effect."
+shuffle = false
+mesh = true
+scale = 0.75
+
+[[settings]]
+key = "view"
+label = "Show"
+type = "choice"
+default = "points"
+options = [
+    { id = "points", label = "Mesh points" },
+    { id = "parts", label = "Parts of the face" },
+    { id = "where", label = "Position on the face" },
+    { id = "atlas", label = "Unwrapped faces" },
+]

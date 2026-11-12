@@ -1,0 +1,47 @@
+name = "Night of the Living"
+description = "People turn grey-green with hollow eyes, under a flickering light that stutters harder with thunder, screams, alarms and scary music."
+segment = true
+faces = true
+mesh = true
+audio = true
+
+[[settings]]
+key = "rot"
+label = "Decay"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 70
+
+[[settings]]
+key = "flicker"
+label = "Flicker"
+type = "number"
+detail = "How much the light stutters"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 45
+
+[[settings]]
+key = "grain"
+label = "Grain"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40
+
+[[settings]]
+key = "gloom"
+label = "Darkness in the distance"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60

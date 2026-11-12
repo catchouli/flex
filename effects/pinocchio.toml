@@ -1,0 +1,29 @@
+name = "Pinocchio"
+description = "Noses grow for as long as a shot lasts, then snap back at the cut."
+suits = ["close"]
+faces = true
+mesh = true
+feedback = true
+
+[[settings]]
+key = "speed"
+drift = "off"
+label = "Growth"
+type = "number"
+detail = "How fast noses grow"
+min = 10
+max = 300
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "longest"
+label = "Longest"
+type = "number"
+detail = "How long a nose can get, against the face"
+min = 50
+max = 600
+step = 25
+unit = "%"
+default = 300

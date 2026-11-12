@@ -29,6 +29,8 @@ pub const RENDER_PARAM_API_TYPE: c_int = 1;
 pub const RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
 pub const RENDER_PARAM_OPENGL_FBO: c_int = 3;
 pub const RENDER_PARAM_FLIP_Y: c_int = 4;
+/// Only in Flex's patched libmpv (`packaging/mpv`).
+pub const RENDER_PARAM_OPENGL_SUBTITLE_FBO: c_int = 1000;
 
 #[repr(C)]
 pub struct Event {
@@ -76,12 +78,19 @@ pub struct OpenGlFbo {
 }
 
 pub type Callback = unsafe extern "C" fn(ctx: *mut c_void);
+pub type AudioTap = unsafe extern "C" fn(ctx: *mut c_void, samples: *const f32, channels: c_int, frames: c_int, rate: c_int, pts: c_double);
+/// Changes the audio going through the "flexsound" filter in place.
+pub type SoundChange = unsafe extern "C" fn(ctx: *mut c_void, samples: *mut f32, channels: c_int, frames: c_int, rate: c_int, pts: c_double);
 
 macro_rules! api {
     ($($name:ident : fn($($arg:ty),*) $(-> $ret:ty)?;)*) => {
         #[allow(non_snake_case)]
         pub struct Api {
             $(pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
+            /// Only in Flex's patched libmpv, which is how we know it's patched.
+            pub flex_set_audio_tap: Option<unsafe extern "C" fn(Option<AudioTap>, *mut c_void)>,
+            /// Only in a patched libmpv new enough to let Flex change the sound.
+            pub flex_set_sound: Option<unsafe extern "C" fn(Option<SoundChange>, Option<Callback>, *mut c_void)>,
             _lib: Library,
         }
 
@@ -90,6 +99,8 @@ macro_rules! api {
                 unsafe {
                     Ok(Self {
                         $($name: *lib.get(concat!(stringify!($name), "\0").as_bytes())?,)*
+                        flex_set_audio_tap: lib.get(b"mpv_flex_set_audio_tap\0").ok().map(|s: libloading::Symbol<unsafe extern "C" fn(Option<AudioTap>, *mut c_void)>| *s),
+                        flex_set_sound: lib.get(b"mpv_flex_set_sound\0").ok().map(|s: libloading::Symbol<unsafe extern "C" fn(Option<SoundChange>, Option<Callback>, *mut c_void)>| *s),
                         _lib: lib,
                     })
                 }

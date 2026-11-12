@@ -1,0 +1,205 @@
+From 2c9159683adc94bcf1a37291acfd172023b9e303 Mon Sep 17 00:00:00 2001
+From: flex-build <build@localhost>
+Date: Thu, 12 Nov 2026 12:40:08 +0000
+Subject: [PATCH] audio: a filter that lets a callback change the samples
+
+Flex's patch: af_flexsound hands the audio passing through to a callback as interleaved floats, which changes it in place, and tells a second callback when the filter is cleared on seeks. Set them with mpv_flex_set_sound.
+---
+ audio/filter/af_flexsound.c | 119 ++++++++++++++++++++++++++++++++++++
+ filters/user_filters.c      |   1 +
+ filters/user_filters.h      |   1 +
+ include/mpv/client.h        |  15 +++++
+ meson.build                 |   1 +
+ 5 files changed, 137 insertions(+)
+ create mode 100644 audio/filter/af_flexsound.c
+
+diff --git a/audio/filter/af_flexsound.c b/audio/filter/af_flexsound.c
+new file mode 100644
+index 0000000..537b7f4
+--- /dev/null
++++ b/audio/filter/af_flexsound.c
+@@ -0,0 +1,119 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++// Flex's patch: lets a callback change the audio passing through, as interleaved floats, in
++// place. A second callback is told when the filter is cleared (on seeks), so whatever the first
++// holds back can be dropped. Added like any other filter (af add flexsound).
++
++#include "audio/aframe.h"
++#include "audio/format.h"
++#include "common/common.h"
++#include "filters/f_autoconvert.h"
++#include "filters/filter_internal.h"
++#include "filters/user_filters.h"
++#include "mpv/client.h"
++#include "osdep/threads.h"
++
++static mp_static_mutex sound_lock = MP_STATIC_MUTEX_INITIALIZER;
++static mpv_flex_sound sound_fn;
++static mpv_flex_sound_reset reset_fn;
++static void *sound_ctx;
++
++void mpv_flex_set_sound(mpv_flex_sound fn, mpv_flex_sound_reset reset, void *ctx)
++{
++    mp_mutex_lock(&sound_lock);
++    sound_fn = fn;
++    reset_fn = reset;
++    sound_ctx = ctx;
++    mp_mutex_unlock(&sound_lock);
++}
++
++struct priv {
++    struct mp_pin *in;
++};
++
++static void af_flexsound_process(struct mp_filter *f)
++{
++    struct priv *p = f->priv;
++
++    if (!mp_pin_can_transfer_data(f->ppins[1], p->in))
++        return;
++
++    struct mp_frame frame = mp_pin_out_read(p->in);
++    if (frame.type == MP_FRAME_AUDIO) {
++        struct mp_aframe *a = frame.data;
++        if (mp_aframe_get_format(a) == AF_FORMAT_FLOAT) {
++            mp_mutex_lock(&sound_lock);
++            if (sound_fn) {
++                uint8_t **data = mp_aframe_get_data_rw(a);
++                if (data) {
++                    sound_fn(sound_ctx, (float *)data[0], mp_aframe_get_channels(a),
++                             mp_aframe_get_size(a), mp_aframe_get_rate(a),
++                             mp_aframe_get_pts(a));
++                }
++            }
++            mp_mutex_unlock(&sound_lock);
++        }
++    }
++    mp_pin_in_write(f->ppins[1], frame);
++}
++
++static void af_flexsound_reset(struct mp_filter *f)
++{
++    mp_mutex_lock(&sound_lock);
++    if (reset_fn)
++        reset_fn(sound_ctx);
++    mp_mutex_unlock(&sound_lock);
++}
++
++static const struct mp_filter_info af_flexsound_filter = {
++    .name = "flexsound",
++    .priv_size = sizeof(struct priv),
++    .process = af_flexsound_process,
++    .reset = af_flexsound_reset,
++};
++
++static struct mp_filter *af_flexsound_create(struct mp_filter *parent, void *options)
++{
++    struct mp_filter *f = mp_filter_create(parent, &af_flexsound_filter);
++    if (!f) {
++        talloc_free(options);
++        return NULL;
++    }
++
++    mp_filter_add_pin(f, MP_PIN_IN, "in");
++    mp_filter_add_pin(f, MP_PIN_OUT, "out");
++
++    struct priv *p = f->priv;
++    struct mp_autoconvert *conv = mp_autoconvert_create(f);
++    if (!conv)
++        abort();
++    mp_autoconvert_add_afmt(conv, AF_FORMAT_FLOAT);
++    mp_pin_connect(conv->f->pins[0], f->ppins[0]);
++    p->in = conv->f->pins[1];
++
++    talloc_free(options);
++    return f;
++}
++
++const struct mp_user_filter_entry af_flexsound = {
++    .desc = {
++        .name = "flexsound",
++        .description = "Let Flex change the audio",
++    },
++    .create = af_flexsound_create,
++};
+diff --git a/filters/user_filters.c b/filters/user_filters.c
+index 0365c17..70898fe 100644
+--- a/filters/user_filters.c
++++ b/filters/user_filters.c
+@@ -43,6 +43,7 @@ const struct mp_user_filter_entry *af_list[] = {
+     &af_lavcac3enc,
+     &af_drop,
+     &af_flextap,
++    &af_flexsound,
+ };
+ 
+ static bool get_af_desc(struct m_obj_desc *dst, int index)
+diff --git a/filters/user_filters.h b/filters/user_filters.h
+index 7b00581..d6ee52a 100644
+--- a/filters/user_filters.h
++++ b/filters/user_filters.h
+@@ -28,6 +28,7 @@ extern const struct mp_user_filter_entry af_rubberband;
+ extern const struct mp_user_filter_entry af_lavcac3enc;
+ extern const struct mp_user_filter_entry af_drop;
+ extern const struct mp_user_filter_entry af_flextap;
++extern const struct mp_user_filter_entry af_flexsound;
+ 
+ extern const struct mp_user_filter_entry vf_lavfi;
+ extern const struct mp_user_filter_entry vf_lavfi_bridge;
+diff --git a/include/mpv/client.h b/include/mpv/client.h
+index 44d9272..7a97733 100644
+--- a/include/mpv/client.h
++++ b/include/mpv/client.h
+@@ -2037,6 +2037,21 @@ typedef void (*mpv_flex_audio_tap)(void *ctx, const float *samples, int channels
+ /** Sets the function the "flextap" filter calls, for the whole process, or NULL for none. */
+ MPV_EXPORT void mpv_flex_set_audio_tap(mpv_flex_audio_tap fn, void *ctx);
+ 
++/**
++ * Flex's patch: called with the audio going through the "flexsound" filter, as interleaved
++ * floats, to change in place. frames is how many frames of channels samples there are, pts
++ * their time (or negative if unknown). It's called on an audio thread, and has to return
++ * quickly.
++ */
++typedef void (*mpv_flex_sound)(void *ctx, float *samples, int channels, int frames, int rate,
++                               double pts);
++
++/** Called when the "flexsound" filter is cleared (on seeks): what came before is over. */
++typedef void (*mpv_flex_sound_reset)(void *ctx);
++
++/** Sets the functions the "flexsound" filter calls, for the whole process, or NULL for none. */
++MPV_EXPORT void mpv_flex_set_sound(mpv_flex_sound fn, mpv_flex_sound_reset reset, void *ctx);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/meson.build b/meson.build
+index 1c17fd4..d42705e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -67,6 +67,7 @@ sources = files(
+     'audio/filter/af_format.c',
+     'audio/filter/af_lavcac3enc.c',
+     'audio/filter/af_lavfi_tempo.c',
++    'audio/filter/af_flexsound.c',
+     'audio/filter/af_flextap.c',
+     'audio/filter/af_scaletempo.c',
+     'audio/filter/af_scaletempo2.c',
+-- 
+2.47.3
+

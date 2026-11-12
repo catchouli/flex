@@ -1,0 +1,36 @@
+name = "Melting Clocks"
+description = "Anything with an edge droops over it and drips down what's behind, like a Dali painting, under a golden sky."
+suits = ["quiet"]
+depth = true
+segment = true
+
+[[settings]]
+key = "length"
+label = "Drips"
+type = "number"
+detail = "How far things hang down"
+min = 10
+max = 100
+step = 5
+unit = "%"
+default = 55
+
+[[settings]]
+key = "sky"
+label = "Golden sky"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "sway"
+label = "Sway"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 40

@@ -1,0 +1,33 @@
+name = "Instrument"
+description = "Plays everyone's voice on an instrument while they talk: its pitch and loudness, played by Magenta's DDSP-VST networks (Apache-2.0), each trained on one instrument. Voices are moved by whole octaves into the instrument's range. Downloaded the first time (77 MB for all of them)."
+
+[[settings]]
+key = "instrument"
+label = "Instrument"
+type = "choice"
+default = "flute"
+options = [
+    { id = "flute", label = "Flute" },
+    { id = "violin", label = "Violin" },
+    { id = "trumpet", label = "Trumpet" },
+    { id = "saxophone", label = "Saxophone" },
+    { id = "clarinet", label = "Clarinet" },
+    { id = "trombone", label = "Trombone" },
+    { id = "tuba", label = "Tuba" },
+    { id = "bassoon", label = "Bassoon" },
+    { id = "melodica", label = "Melodica" },
+    { id = "sitar", label = "Sitar" },
+    { id = "vowels", label = "Vowels" },
+]
+
+[[settings]]
+key = "amount"
+label = "Amount"
+type = "number"
+detail = "How much of the instrument, against the voice as it was"
+min = 0
+max = 100
+step = 5
+unit = "%"
+default = 100
+drift = "off"

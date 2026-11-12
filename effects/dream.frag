@@ -5,7 +5,8 @@
 //   - sharpens it, so small details get amplified frame after frame (detail)
 //   - turns its colours along the swirls (colours)
 // and blends a little of the real video back in, so the dream keeps following it.
-// It keeps dreaming while paused. See melt.frag or EFFECTS.md for the uniforms.
+// It keeps dreaming while paused. See melt.frag or EFFECTS.md for the uniforms. Fading in, more
+// and more of the dream is kept each frame, so it builds up out of the plain picture.
 
 float lum(vec3 c) {
     return dot(c, vec3(0.299, 0.587, 0.114));
@@ -55,6 +56,7 @@ vec4 effect(vec2 uv) {
     p = hue_shift(p, swirl * s_colours / 100.0 * 0.15);
     p = mix(vec3(lum(p)), p, 1.0 + 0.03 * s_colours / 100.0);
 
-    float keep = clamp(s_dream / 100.0, 0.0, 0.97);
+    float keep = clamp(s_dream / 100.0, 0.0, 0.97) * u_amount;
+    keep *= 1.0 - s_near / 100.0 * smoothstep(0.45, 0.85, depth_at(uv));
     return vec4(clamp(mix(video, p, keep), 0.0, 1.0), 1.0);
 }

@@ -1,0 +1,26 @@
+name = "Cyborg"
+description = "Half of every face is torn away to show the machine underneath: steel plates, running circuits and a red eye."
+suits = ["close"]
+mesh = true
+audio = true
+
+[[settings]]
+key = "side"
+label = "Metal side"
+type = "choice"
+default = "right"
+options = [
+    { id = "right", label = "Screen right" },
+    { id = "left", label = "Screen left" },
+]
+
+[[settings]]
+key = "cover"
+label = "How much"
+type = "number"
+detail = "How far across the face the metal reaches"
+default = 50
+min = 10
+max = 100
+step = 5
+unit = "%"

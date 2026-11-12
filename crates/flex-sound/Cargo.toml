@@ -1,0 +1,17 @@
+[package]
+name = "flex-sound"
+description = "Flex's sound effects: the engine that splits the sound mpv plays into voice and background, runs the chosen effects on it and fades between them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flate2 = "1.1.11"
+realfft = "3.5.1"
+serde_json = "1.0.151"
+tar = "0.4.46"
+tract-onnx = "0.23.10"
+tract-pulse = "0.23.10"
+tract-tflite = "0.23.10"
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }

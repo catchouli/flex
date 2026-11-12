@@ -1,0 +1,47 @@
+name = "Ink Drawing People"
+description = "People become a living pen sketch on paper, while the world stays in full colour."
+segment = true
+mesh = true
+
+[[settings]]
+key = "lines"
+label = "Lines"
+type = "number"
+min = 20
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "hatch"
+label = "Shading"
+type = "number"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 60
+
+[[settings]]
+key = "boil"
+label = "Wobble"
+type = "number"
+detail = "How much the lines redraw themselves"
+min = 0
+max = 100
+step = 10
+unit = "%"
+default = 50
+
+[[settings]]
+key = "paper"
+label = "Paper"
+type = "choice"
+default = "cream"
+options = [
+    { id = "cream", label = "Cream" },
+    { id = "white", label = "White" },
+    { id = "blue", label = "Blueprint" },
+    { id = "black", label = "Blackboard" },
+]

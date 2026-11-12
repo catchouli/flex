@@ -1,0 +1,37 @@
+name = "Fog Layer"
+description = "A sheet of low mist lies across the room at one height, drifting slowly and churning when wind is heard, with people standing up out of it."
+suits = ["wide", "quiet"]
+camera = true
+audio = true
+
+[[settings]]
+key = "height"
+label = "Height"
+type = "number"
+detail = "How high it comes up"
+min = 5
+max = 100
+step = 5
+unit = "%"
+default = 25
+
+[[settings]]
+key = "thick"
+label = "Thickness"
+type = "number"
+min = 10
+max = 200
+step = 10
+unit = "%"
+default = 100
+
+[[settings]]
+key = "drift"
+label = "Drift"
+type = "number"
+min = 0
+max = 200
+step = 10
+unit = "%"
+default = 100
+drift = "off"

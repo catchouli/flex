@@ -1,0 +1,15 @@
+name = "Face Swap Roulette"
+description = "Everyone's faces swap places, and swap again every few seconds."
+suits = ["close", "dialogue"]
+faces = true
+mesh = true
+
+[[settings]]
+key = "every"
+label = "Swaps every"
+type = "number"
+min = 1
+max = 20
+step = 1
+unit = " s"
+default = 4
