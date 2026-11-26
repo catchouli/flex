@@ -14,6 +14,7 @@ mod mpv;
 mod music_player;
 mod picture;
 mod player;
+mod probe;
 mod scenery;
 mod screens;
 mod shared;

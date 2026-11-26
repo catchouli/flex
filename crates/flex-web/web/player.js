@@ -101,8 +101,10 @@ const Player = (() => {
   }
 
   function trackLabel(a, i) {
-    const lang = a.language ? a.language.toUpperCase() : null;
-    const parts = [a.title, lang, a.codec.toUpperCase(), a.channels > 2 ? `${a.channels}ch` : null].filter(Boolean);
+    const lang = a.language_name || (a.language ? a.language.toUpperCase() : null);
+    // The title, unless it only repeats the language or format.
+    const title = a.title && ![lang, a.format].some((x) => x && x.toLowerCase() === a.title.trim().toLowerCase()) ? a.title : null;
+    const parts = [lang, a.format || a.codec.toUpperCase(), title].filter(Boolean);
     return parts.length ? parts.join(" · ") : `Track ${i + 1}`;
   }
 

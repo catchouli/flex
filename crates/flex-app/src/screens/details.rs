@@ -93,6 +93,20 @@ fn play_buttons(sh: &Shared, library_id: i64, file_id: i64) -> Vec<Button> {
     }
 }
 
+/// The page's audio line: "Audio:  English · Dolby TrueHD 7.1   ·   Japanese · AAC stereo",
+/// with `which` ("S1E5") saying which episode it's from. `None` until known.
+fn audio_line(sh: &mut Shared, library_id: i64, file_id: i64, which: Option<&str>) -> Option<String> {
+    let tracks = sh.audio_tracks(library_id, file_id)?;
+    if tracks.is_empty() {
+        return None;
+    }
+    let label = match which {
+        Some(w) if !w.is_empty() => format!("Audio ({w})"),
+        _ => "Audio".to_owned(),
+    };
+    Some(format!("{label}:  {}", flex_core::audio::summary(&tracks, 4)))
+}
+
 /// A horizontal row that scrolls to keep the selected item in view, with arrows on the
 /// ends where items are hidden. Returns true if an arrow was clicked: that selects the
 /// first hidden item that way and scrolls a page.
@@ -526,8 +540,28 @@ impl Screen for TitlePage {
             facts.push("not matched online".into());
         }
         clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::panel_dim());
+        // A film's audio; for a series, the episode the main button plays (a show's
+        // episodes are usually all alike).
+        let audio = if entry.is_series() {
+            let next = sh.lib(self.library_id).and_then(|l| next_up(&entry, &l.tree));
+            let id = match next {
+                Some(NextUp::Resume(id) | NextUp::Next(id) | NextUp::Start(id)) => Some(id),
+                None => entry.episodes.first().map(|e| e.file_id),
+            };
+            id.and_then(|id| {
+                let code = short_code(sh, self.library_id, id);
+                audio_line(sh, self.library_id, id, Some(&code))
+            })
+        } else {
+            entry.episodes.first().and_then(|e| audio_line(sh, self.library_id, e.file_id, None))
+        };
+        let mut overview_top = 124.0;
+        if let Some(audio) = audio {
+            clip.text(text_rect.left_top() + vec2(0.0, 108.0), Align2::LEFT_TOP, audio, TextStyle::Small.resolve(&style), theme::panel_dim());
+            overview_top = 160.0;
+        }
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
-            let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, 124.0), text_rect.max);
+            let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, overview_top), text_rect.max);
             let r = r.with_max_x(r.left() + r.width().min(1100.0));
             widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::panel_text());
         }
@@ -700,8 +734,13 @@ impl Screen for EpisodePage {
             }
         }
         clip.text(text.left_top() + vec2(0.0, 120.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
+        let mut overview_top = 170.0;
+        if let Some(audio) = audio_line(sh, self.library_id, self.file_id, None) {
+            clip.text(text.left_top() + vec2(0.0, 156.0), Align2::LEFT_TOP, audio, TextStyle::Small.resolve(&style), theme::dim());
+            overview_top = 206.0;
+        }
         if let Some(overview) = meta.as_ref().map(|m| m.overview.clone()).filter(|o| !o.is_empty()) {
-            let r = Rect::from_min_max(text.left_top() + vec2(0.0, 170.0), text.max);
+            let r = Rect::from_min_max(text.left_top() + vec2(0.0, overview_top), text.max);
             let r = r.with_max_x(r.left() + r.width().min(1000.0));
             widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::text());
         }

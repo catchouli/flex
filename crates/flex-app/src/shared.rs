@@ -302,6 +302,10 @@ pub struct Shared {
     pub search_query: String,
     pub images: crate::images::Images,
     pub shots: crate::shots::Shots,
+    audio_probe: crate::probe::AudioProbe,
+    /// Audio tracks by file id: (size, mtime, tracks), `None` tracks when they couldn't be
+    /// read. Files not in here haven't been looked up in the database yet.
+    audio: HashMap<i64, (u64, i64, Option<Vec<flex_core::audio::AudioTrack>>)>,
     /// Other titles (romaji etc.) by provider id, searched alongside the main title.
     alt_titles: HashMap<String, Vec<String>>,
     /// (key, library id, added at), most recent first.
@@ -373,6 +377,8 @@ impl Shared {
             watchlist_version: 0,
             images: crate::images::Images::new(ctx, flex_core::data_dir().join("images")),
             shots: crate::shots::Shots::new(ctx, flex_core::data_dir().join("shots")),
+            audio_probe: crate::probe::AudioProbe::new(ctx),
+            audio: HashMap::new(),
             display_fps: None,
             search: None,
             scan_tx,
@@ -2051,6 +2057,7 @@ impl Shared {
         self.poll_web();
         self.images.poll();
         self.shots.poll();
+        self.poll_audio();
         let mut reorganise = Vec::new();
         let mut rematch = Vec::new();
         let mut fetch = Vec::new();
@@ -2369,6 +2376,52 @@ impl Shared {
             None => file.abs_path(&state.lib.root),
         };
         self.shots.get(file_id, file.size, &path, index)
+    }
+
+    /// A file's audio tracks, looked up in the background the first time (`None` until
+    /// known, or if the file couldn't be read). Ask every frame while it's needed.
+    pub fn audio_tracks(&mut self, library_id: i64, file_id: i64) -> Option<Vec<flex_core::audio::AudioTrack>> {
+        let state = self.libs.iter().find(|l| l.lib.id == library_id)?;
+        let file = state.tree.file(file_id)?;
+        let (size, mtime) = (file.size, file.mtime);
+        if let Some((s, m, tracks)) = self.audio.get(&file_id)
+            && (*s, *m) == (size, mtime)
+        {
+            return tracks.clone();
+        }
+        match self.db.audio_tracks(file_id, size, mtime) {
+            Ok(Some(tracks)) => {
+                self.audio.insert(file_id, (size, mtime, Some(tracks.clone())));
+                return Some(tracks);
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("reading audio tracks: {e:#}"),
+        }
+        let path = match flex_core::parse::disc_folder(&file.rel_path) {
+            Some(disc) => flex_core::library::join_rel(&state.lib.root, disc),
+            None => file.abs_path(&state.lib.root),
+        };
+        self.audio_probe.request(file_id, path);
+        None
+    }
+
+    /// Picks up audio tracks found in the background.
+    fn poll_audio(&mut self) {
+        while let Ok((file_id, result)) = self.audio_probe.results.try_recv() {
+            let Some(file) = self.libs.iter().find_map(|l| l.tree.file(file_id)) else { continue };
+            let (size, mtime) = (file.size, file.mtime);
+            let tracks = match result {
+                Ok(tracks) => {
+                    if let Err(e) = self.db.set_audio_tracks(file_id, size, mtime, &tracks) {
+                        log::warn!("saving audio tracks: {e:#}");
+                    }
+                    Some(tracks)
+                }
+                // Not saved: tried again next time Flex starts (the share may be offline).
+                Err(_) => None,
+            };
+            self.audio.insert(file_id, (size, mtime, tracks));
+        }
     }
 
     /// The next episode after `req` in the same season, for episodic libraries.

@@ -46,6 +46,23 @@ const LANGUAGES: &[(&str, &[&str], &[&str])] = &[
     ("vi", &["vi", "vie"], &["vietnamese", "tiếng việt"]),
 ];
 
+/// A language tag's English name ("jpn" → "Japanese"), the tag in capitals for languages
+/// not listed, `None` when there's no tag (or "und").
+pub fn name(tag: &str) -> Option<String> {
+    let tag = tag.trim().to_lowercase();
+    if tag.is_empty() || tag == "und" {
+        return None;
+    }
+    let found = LANGUAGES.iter().find(|(code, tags, _)| *code == tag || tags.contains(&tag.as_str()));
+    Some(match found.and_then(|(_, _, names)| names.first()) {
+        Some(english) => {
+            let mut chars = english.chars();
+            chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+        }
+        None => tag.to_uppercase(),
+    })
+}
+
 /// The audio track in `language` (ISO 639-1), if one can be told apart. Among several,
 /// the file's default wins, then the first; commentaries are left out.
 pub fn pick(tracks: &[Track], language: &str) -> Option<i64> {
@@ -79,6 +96,15 @@ pub fn pick(tracks: &[Track], language: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_languages() {
+        assert_eq!(name("jpn").as_deref(), Some("Japanese"));
+        assert_eq!(name("EN").as_deref(), Some("English"));
+        assert_eq!(name("hun").as_deref(), Some("HUN"));
+        assert_eq!(name("und"), None);
+        assert_eq!(name(""), None);
+    }
 
     fn track(id: i64, lang: &str, title: &str, default: bool) -> Track {
         Track { id, lang: lang.into(), title: title.into(), default }

@@ -186,6 +186,7 @@ struct ProbeStream {
     width: Option<u32>,
     height: Option<u32>,
     channels: Option<u32>,
+    channel_layout: Option<String>,
     #[serde(default)]
     tags: HashMap<String, String>,
     #[serde(default)]
@@ -211,6 +212,10 @@ pub struct AudioInfo {
     pub language: Option<String>,
     pub title: Option<String>,
     pub default: bool,
+    /// For people: "Dolby TrueHD Atmos 7.1".
+    pub format: String,
+    /// Its language's name ("Japanese"), when tagged.
+    pub language_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -284,6 +289,15 @@ impl From<Probe> for MediaInfo {
                 language: tag(s, "language"),
                 title: tag(s, "title"),
                 default: flag(s, "default"),
+                format: flex_core::audio::AudioTrack {
+                    codec: s.codec_name.clone().unwrap_or_default(),
+                    profile: s.profile.clone().unwrap_or_default(),
+                    channels: s.channels.unwrap_or(0),
+                    layout: s.channel_layout.clone().unwrap_or_default(),
+                    ..Default::default()
+                }
+                .format(),
+                language_name: tag(s, "language").and_then(|l| flex_core::language::name(&l)),
             })
             .collect();
         let subtitles = p

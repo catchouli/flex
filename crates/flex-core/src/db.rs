@@ -215,7 +215,15 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE shows ADD COLUMN original_language TEXT;",
     // 17: how long subscriptions' videos are (feeds don't say; looked up separately).
     // NULL: not looked up yet; 0: looked up, unknown.
-    "ALTER TABLE yt_videos ADD COLUMN duration REAL;"
+    "ALTER TABLE yt_videos ADD COLUMN duration REAL;",
+    // 18: a file's audio tracks (JSON list of `audio::AudioTrack`), looked up in the
+    // background for details pages; redone when the file's size or mtime changes.
+    "CREATE TABLE media_audio (
+        file_id INTEGER PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+        size    INTEGER NOT NULL,
+        mtime   INTEGER NOT NULL,
+        tracks  TEXT NOT NULL
+    );"
 ];
 
 /// Now, in SQL (Unix seconds).
@@ -364,6 +372,28 @@ impl Db {
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
             params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// A file's audio tracks, if looked up while it had this size and mtime.
+    pub fn audio_tracks(&self, file_id: i64, size: u64, mtime: i64) -> Result<Option<Vec<crate::audio::AudioTrack>>> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT tracks FROM media_audio WHERE file_id = ?1 AND size = ?2 AND mtime = ?3",
+                params![file_id, size as i64, mtime],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+    }
+
+    pub fn set_audio_tracks(&self, file_id: i64, size: u64, mtime: i64, tracks: &[crate::audio::AudioTrack]) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO media_audio (file_id, size, mtime, tracks) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(file_id) DO UPDATE SET size = ?2, mtime = ?3, tracks = ?4",
+            params![file_id, size as i64, mtime, serde_json::to_string(tracks)?],
         )?;
         Ok(())
     }

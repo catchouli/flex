@@ -468,6 +468,9 @@ impl Player {
         let Some(id) = self.mpv.get_i64(&format!("current-tracks/{kind}/id")) else {
             return format!("{name}: Off");
         };
+        if let Track::Audio = track {
+            return self.audio_label(id);
+        }
         let mut label = format!("{name}: #{id}");
         if let Some(lang) = prop("lang") {
             label += &format!(" [{lang}]");
@@ -477,6 +480,38 @@ impl Player {
         }
         if let Some(codec) = prop("codec") {
             label += &format!(" ({codec})");
+        }
+        label
+    }
+
+    /// "Audio 2/3: Japanese · Dolby TrueHD 7.1 · Title" for the current audio track `id`.
+    fn audio_label(&self, id: i64) -> String {
+        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/audio/{p}")).unwrap_or_default();
+        let current = flex_core::audio::AudioTrack {
+            lang: prop("lang"),
+            title: prop("title"),
+            codec: prop("codec"),
+            profile: prop("codec-profile"),
+            channels: self.mpv.get_i64("current-tracks/audio/demux-channel-count").and_then(|c| u32::try_from(c).ok()).unwrap_or(0),
+            layout: prop("demux-channels"),
+            default: false,
+        };
+        let ids: Vec<i64> = self.tracks("audio").iter().map(|t| t.id).collect();
+        let mut label = match ids.iter().position(|t| *t == id) {
+            Some(i) if ids.len() > 1 => format!("Audio {}/{}: ", i + 1, ids.len()),
+            _ => "Audio: ".to_owned(),
+        };
+        let lang = flex_core::language::name(&current.lang);
+        if let Some(lang) = &lang {
+            label += &format!("{lang} · ");
+        }
+        let format = current.format();
+        label += &format;
+        // The title, unless it only repeats the language or format.
+        let title = current.title.trim();
+        let repeats = [lang.as_deref(), Some(format.as_str())].into_iter().flatten().any(|x| x.eq_ignore_ascii_case(title));
+        if !title.is_empty() && !repeats {
+            label += &format!(" · {title}");
         }
         label
     }
