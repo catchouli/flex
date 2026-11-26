@@ -41,7 +41,10 @@ struct Tee;
 impl Write for Tee {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Some(file) = LOG_FILE.get() {
-            let _ = file.lock().unwrap_or_else(|e| e.into_inner()).write_all(buf);
+            let _ = file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .write_all(buf);
         }
         let _ = std::io::stderr().write_all(buf);
         Ok(buf.len())
@@ -75,7 +78,11 @@ pub fn init() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .target(env_logger::Target::Pipe(Box::new(Tee)))
         .init();
-    log::info!("Flex {} on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+    log::info!(
+        "Flex {} on {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
     install_panic_hook();
     #[cfg(windows)]
     windows::install_crash_handler();
@@ -83,7 +90,10 @@ pub fn init() {
 
 /// Writes a crash report folder and returns its path. `dump` writes the minidump into the
 /// path it's given (Windows only).
-fn write_crash_report(what: &str, dump: impl FnOnce(&std::path::Path) -> Result<(), String>) -> Option<PathBuf> {
+fn write_crash_report(
+    what: &str,
+    dump: impl FnOnce(&std::path::Path) -> Result<(), String>,
+) -> Option<PathBuf> {
     let name = format!("crash-{}", chrono::Local::now().format("%Y-%m-%d-%H%M%S"));
     // The chosen folder may be a share that's gone away: fall back to the logs folder.
     let dir = [crash_dir(), logs_dir()]
@@ -112,7 +122,10 @@ fn install_panic_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let backtrace = std::backtrace::Backtrace::force_capture();
-        let thread = std::thread::current().name().unwrap_or("unnamed").to_owned();
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned();
         let what = format!("Panic in thread '{thread}': {info}\n\nBacktrace:\n{backtrace}");
         log::error!("{what}");
         log::logger().flush();
@@ -134,18 +147,23 @@ mod windows {
     use windows_sys::Win32::Foundation::HMODULE;
     use windows_sys::Win32::System::Diagnostics::Debug::{
         EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MiniDumpWithFullMemoryInfo,
-        MiniDumpWithIndirectlyReferencedMemory, MiniDumpWithThreadInfo, MiniDumpWithUnloadedModules, MiniDumpWriteDump,
-        SetUnhandledExceptionFilter,
+        MiniDumpWithIndirectlyReferencedMemory, MiniDumpWithThreadInfo,
+        MiniDumpWithUnloadedModules, MiniDumpWriteDump, SetUnhandledExceptionFilter,
     };
     use windows_sys::Win32::System::LibraryLoader::{
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleFileNameW,
-        GetModuleHandleExW,
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        GetModuleFileNameW, GetModuleHandleExW,
     };
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId};
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
+    };
 
     /// Writes a minidump of this process to `path`. `info` is the crash's exception (null
     /// for a panic, where the dump just shows every thread's stack).
-    pub fn write_minidump(path: &std::path::Path, info: *const EXCEPTION_POINTERS) -> Result<(), String> {
+    pub fn write_minidump(
+        path: &std::path::Path,
+        info: *const EXCEPTION_POINTERS,
+    ) -> Result<(), String> {
         let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
         let exception = MINIDUMP_EXCEPTION_INFORMATION {
             ThreadId: unsafe { GetCurrentThreadId() },
@@ -165,24 +183,34 @@ mod windows {
                 GetCurrentProcessId(),
                 file.as_raw_handle(),
                 kind,
-                if info.is_null() { std::ptr::null() } else { &exception },
+                if info.is_null() {
+                    std::ptr::null()
+                } else {
+                    &exception
+                },
                 std::ptr::null(),
                 std::ptr::null(),
             )
         };
-        if ok == 0 { Err(std::io::Error::last_os_error().to_string()) } else { Ok(()) }
+        if ok == 0 {
+            Err(std::io::Error::last_os_error().to_string())
+        } else {
+            Ok(())
+        }
     }
 
     /// "libmpv-2.dll+0x1a2b3c" for a code address.
     fn locate(address: usize) -> String {
         let mut module: HMODULE = std::ptr::null_mut();
-        let flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+        let flags =
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
         // Safety: with FROM_ADDRESS the "name" argument is the address to look up.
         if unsafe { GetModuleHandleExW(flags, address as *const u16, &mut module) } == 0 {
             return format!("{address:#x} (unknown module)");
         }
         let mut name = [0u16; 512];
-        let len = unsafe { GetModuleFileNameW(module, name.as_mut_ptr(), name.len() as u32) } as usize;
+        let len =
+            unsafe { GetModuleFileNameW(module, name.as_mut_ptr(), name.len() as u32) } as usize;
         let path = String::from_utf16_lossy(&name[..len]);
         let file = path.rsplit('\\').next().unwrap_or(&path).to_owned();
         format!("{file}+{:#x}", address - module as usize)

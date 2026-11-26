@@ -16,7 +16,10 @@ const CLIENT_VERSION: &str = "2.20251001.00.00";
 
 /// Videos YouTube suggests after `video_id`.
 pub fn related(video_id: &str) -> Result<Vec<Listed>> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .into();
     let body = json!({
         "context": { "client": { "clientName": "WEB", "clientVersion": CLIENT_VERSION, "hl": "en" } },
         "videoId": video_id,
@@ -30,28 +33,42 @@ pub fn related(video_id: &str) -> Result<Vec<Listed>> {
         .limit(16 * 1024 * 1024)
         .read_json()
         .context("reading YouTube's related videos")?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
     Ok(parse(&json, video_id, now))
 }
 
 /// The videos in YouTube's response; `now` (Unix time) turns "2d ago" into a date.
 fn parse(json: &Value, video_id: &str, now: i64) -> Vec<Listed> {
-    let results = json.pointer("/contents/twoColumnWatchNextResults/secondaryResults/secondaryResults/results");
+    let results = json
+        .pointer("/contents/twoColumnWatchNextResults/secondaryResults/secondaryResults/results");
     let mut out: Vec<Listed> = Vec::new();
     for item in results.and_then(Value::as_array).into_iter().flatten() {
-        let Some(lockup) = item.get("lockupViewModel") else { continue };
+        let Some(lockup) = item.get("lockupViewModel") else {
+            continue;
+        };
         if lockup["contentType"] != "LOCKUP_CONTENT_TYPE_VIDEO" {
             continue; // playlists, courses, mixes
         }
-        let Some(id) = lockup["contentId"].as_str().filter(|id| super::video_id(id).is_some() && *id != video_id) else { continue };
+        let Some(id) = lockup["contentId"]
+            .as_str()
+            .filter(|id| super::video_id(id).is_some() && *id != video_id)
+        else {
+            continue;
+        };
         if out.iter().any(|l| l.id == id) {
             continue;
         }
         let meta = &lockup["metadata"]["lockupMetadataViewModel"];
-        let channel = meta.pointer("/metadata/contentMetadataViewModel/metadataRows/0/metadataParts/0/text/content");
+        let channel = meta.pointer(
+            "/metadata/contentMetadataViewModel/metadataRows/0/metadataParts/0/text/content",
+        );
         let channel_id = find_str(&meta["image"], "browseId").filter(|b| b.starts_with("UC"));
         let badge = find(&lockup["contentImage"], "thumbnailBadgeViewModel");
-        let duration = badge.and_then(|b| b["text"].as_str()).and_then(parse_duration);
+        let duration = badge
+            .and_then(|b| b["text"].as_str())
+            .and_then(parse_duration);
         // The second row: views, then how long ago ("131K", "13h ago").
         let second: Vec<&str> = meta
             .pointer("/metadata/contentMetadataViewModel/metadataRows/1/metadataParts")
@@ -61,11 +78,20 @@ fn parse(json: &Value, video_id: &str, now: i64) -> Vec<Listed> {
             .filter_map(|p| p.pointer("/text/content").and_then(Value::as_str))
             .collect();
         let views = second.iter().find_map(|t| parse_views(t));
-        let published = second.iter().find_map(|t| parse_ago(t)).map(|secs| now - secs);
+        let published = second
+            .iter()
+            .find_map(|t| parse_ago(t))
+            .map(|secs| now - secs);
         out.push(Listed {
             id: id.to_owned(),
-            title: meta["title"]["content"].as_str().unwrap_or_default().to_owned(),
-            channel: channel.and_then(Value::as_str).unwrap_or_default().to_owned(),
+            title: meta["title"]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            channel: channel
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             channel_id: channel_id.unwrap_or_default().to_owned(),
             duration,
             views,
@@ -78,7 +104,9 @@ fn parse(json: &Value, video_id: &str, now: i64) -> Vec<Listed> {
 /// The first value under `key` anywhere in `value`.
 fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     match value {
-        Value::Object(map) => map.get(key).or_else(|| map.values().find_map(|v| find(v, key))),
+        Value::Object(map) => map
+            .get(key)
+            .or_else(|| map.values().find_map(|v| find(v, key))),
         Value::Array(items) => items.iter().find_map(|v| find(v, key)),
         _ => None,
     }
@@ -90,7 +118,10 @@ fn find_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 
 /// "950", "131K", "1.1M views" as a number (not "13h ago").
 fn parse_views(s: &str) -> Option<u64> {
-    let s = s.trim().trim_end_matches(" views").trim_end_matches(" view");
+    let s = s
+        .trim()
+        .trim_end_matches(" views")
+        .trim_end_matches(" view");
     let (number, scale) = match s.char_indices().last()? {
         (i, 'K') => (&s[..i], 1e3),
         (i, 'M') => (&s[..i], 1e6),
@@ -106,7 +137,9 @@ fn parse_ago(s: &str) -> Option<i64> {
     let s = s.trim().strip_suffix(" ago")?;
     // The number and unit at the end: "13h", "3 years".
     let digits_end = s.rfind(|c: char| c.is_ascii_digit())? + 1;
-    let digits_start = s[..digits_end].rfind(|c: char| !c.is_ascii_digit()).map_or(0, |i| i + 1);
+    let digits_start = s[..digits_end]
+        .rfind(|c: char| !c.is_ascii_digit())
+        .map_or(0, |i| i + 1);
     let n: i64 = s[digits_start..digits_end].parse().ok()?;
     let unit = s[digits_end..].trim();
     let secs = match unit.trim_end_matches('s') {
@@ -135,7 +168,14 @@ fn parse_duration(s: &str) -> Option<f64> {
 mod tests {
     use super::*;
 
-    fn lockup(id: &str, kind: &str, title: &str, channel: &str, channel_id: &str, length: &str) -> Value {
+    fn lockup(
+        id: &str,
+        kind: &str,
+        title: &str,
+        channel: &str,
+        channel_id: &str,
+        length: &str,
+    ) -> Value {
         json!({ "lockupViewModel": {
             "contentId": id,
             "contentType": kind,
@@ -173,7 +213,10 @@ mod tests {
         assert_eq!(related[0].channel_id, "UC44unSnzdTRE8gpL5nOFflw");
         assert_eq!(related[0].duration, Some(36.0 * 60.0 + 31.0));
         assert_eq!(related[1].duration, Some(3723.0));
-        assert_eq!((related[0].views, related[0].published), (Some(31_000), Some(1_000_000 - 2 * 86_400)));
+        assert_eq!(
+            (related[0].views, related[0].published),
+            (Some(31_000), Some(1_000_000 - 2 * 86_400))
+        );
     }
 
     #[test]
@@ -201,6 +244,10 @@ mod tests {
         let related = related("aqz-KE-bpKQ").unwrap();
         eprintln!("{:#?}", related.iter().take(5).collect::<Vec<_>>());
         assert!(related.len() >= 5);
-        assert!(related.iter().all(|l| !l.title.is_empty() && !l.channel.is_empty()));
+        assert!(
+            related
+                .iter()
+                .all(|l| !l.title.is_empty() && !l.channel.is_empty())
+        );
     }
 }

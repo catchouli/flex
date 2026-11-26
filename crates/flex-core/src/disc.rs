@@ -22,7 +22,10 @@ const SNIFF_BYTES: u64 = 8 << 20;
 /// near the start of the image, as plain bytes or UTF-16. Unrecognised images are assumed
 /// to be Blu-rays.
 pub fn disc_image(path: &Path) -> Option<DiscImage> {
-    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("iso")) {
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("iso"))
+    {
         return None;
     }
     let Ok(file) = File::open(path) else {
@@ -31,7 +34,11 @@ pub fn disc_image(path: &Path) -> Option<DiscImage> {
     let utf16 = |s: &str| s.bytes().flat_map(|b| [0, b]).collect::<Vec<u8>>();
     let dvd = [b"VIDEO_TS".to_vec(), utf16("VIDEO_TS")];
     let bluray = [b"BDMV".to_vec(), utf16("BDMV")];
-    let found = |window: &[u8], names: &[Vec<u8>]| names.iter().any(|n| window.windows(n.len()).any(|w| w == n));
+    let found = |window: &[u8], names: &[Vec<u8>]| {
+        names
+            .iter()
+            .any(|n| window.windows(n.len()).any(|w| w == n))
+    };
     let mut reader = file.take(SNIFF_BYTES);
     let mut buf = vec![0; 1 << 16];
     // Carry the end of each chunk over, so a name split across chunks is still found.
@@ -73,16 +80,29 @@ pub fn dvd_main_title(path: &Path) -> Option<Range<u64>> {
     let mut sets: BTreeMap<u32, Vec<(u32, u64, u64)>> = BTreeMap::new();
     for e in dir_entries(&mut file, video_ts.extent, video_ts.len)? {
         let upper = e.name.to_ascii_uppercase();
-        let Some(rest) = upper.strip_prefix("VTS_").and_then(|r| r.strip_suffix(".VOB")) else { continue };
-        let Some((set, part)) = rest.split_once('_') else { continue };
-        let (Ok(set), Ok(part)) = (set.parse::<u32>(), part.parse::<u32>()) else { continue };
+        let Some(rest) = upper
+            .strip_prefix("VTS_")
+            .and_then(|r| r.strip_suffix(".VOB"))
+        else {
+            continue;
+        };
+        let Some((set, part)) = rest.split_once('_') else {
+            continue;
+        };
+        let (Ok(set), Ok(part)) = (set.parse::<u32>(), part.parse::<u32>()) else {
+            continue;
+        };
         // Part 0 is the title set's menu.
         if part == 0 {
             continue;
         }
-        sets.entry(set).or_default().push((part, e.extent * SECTOR, e.len));
+        sets.entry(set)
+            .or_default()
+            .push((part, e.extent * SECTOR, e.len));
     }
-    let mut vobs = sets.into_values().max_by_key(|vobs| vobs.iter().map(|v| v.2).sum::<u64>())?;
+    let mut vobs = sets
+        .into_values()
+        .max_by_key(|vobs| vobs.iter().map(|v| v.2).sum::<u64>())?;
     vobs.sort();
     let contiguous = vobs.windows(2).all(|w| w[0].1 + w[0].2 == w[1].1);
     let (first, last) = (vobs.first()?, vobs.last()?);
@@ -105,13 +125,21 @@ fn read_at(file: &mut File, offset: u64, len: u64) -> Option<Vec<u8>> {
 
 /// Parses one ISO 9660 directory record.
 fn record(r: &[u8]) -> Option<Entry> {
-    let u32_at = |i: usize| r.get(i..i + 4).map(|b| u64::from(u32::from_le_bytes(b.try_into().unwrap())));
+    let u32_at = |i: usize| {
+        r.get(i..i + 4)
+            .map(|b| u64::from(u32::from_le_bytes(b.try_into().unwrap())))
+    };
     let name_len = usize::from(*r.get(32)?);
     let name = r.get(33..33 + name_len)?;
     // "NAME.EXT;1": drop the version.
     let name = String::from_utf8_lossy(name);
     let name = name.split(';').next().unwrap_or_default().to_owned();
-    Some(Entry { name, extent: u32_at(2)?, len: u32_at(10)?, dir: r.get(25)? & 2 != 0 })
+    Some(Entry {
+        name,
+        extent: u32_at(2)?,
+        len: u32_at(10)?,
+        dir: r.get(25)? & 2 != 0,
+    })
 }
 
 /// The records of the directory at sector `extent`. Records never cross a sector boundary;
@@ -157,7 +185,10 @@ mod tests {
         assert_eq!(image("dvd.ISO", b"VIDEO_TS"), Some(DiscImage::Dvd));
         assert_eq!(image("bd.iso", b"BDMV"), Some(DiscImage::Bluray));
         assert_eq!(image("bd16.iso", b"\0B\0D\0M\0V"), Some(DiscImage::Bluray));
-        assert_eq!(image("dvd16.iso", b"\0V\0I\0D\0E\0O\0_\0T\0S"), Some(DiscImage::Dvd));
+        assert_eq!(
+            image("dvd16.iso", b"\0V\0I\0D\0E\0O\0_\0T\0S"),
+            Some(DiscImage::Dvd)
+        );
         assert_eq!(image("blank.iso", b""), Some(DiscImage::Bluray));
         assert_eq!(disc_image(Path::new("film.mkv")), None);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -214,7 +245,13 @@ mod tests {
         // Title set 2 is the largest.
         assert_eq!(main("a.iso", &files), Some(105 * s..108 * s));
         // A gap between its VOBs.
-        assert_eq!(main("b.iso", &[("VTS_01_1.VOB", 100, 2048), ("VTS_01_2.VOB", 102, 2048)]), None);
+        assert_eq!(
+            main(
+                "b.iso",
+                &[("VTS_01_1.VOB", 100, 2048), ("VTS_01_2.VOB", 102, 2048)]
+            ),
+            None
+        );
         assert_eq!(main("c.iso", &[("VIDEO_TS.VOB", 100, 2048)]), None);
         std::fs::write(dir.join("d.iso"), vec![0u8; 40 * s as usize]).unwrap();
         assert_eq!(dvd_main_title(&dir.join("d.iso")), None);

@@ -43,7 +43,10 @@ fn mode<T: Copy + Ord + std::hash::Hash>(values: impl IntoIterator<Item = T>) ->
     for v in values {
         *counts.entry(v).or_default() += 1;
     }
-    counts.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0))).map(|(v, _)| v)
+    counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        .map(|(v, _)| v)
 }
 
 fn title_from_dir(dir: &str) -> Option<(String, Option<i32>)> {
@@ -75,21 +78,39 @@ pub fn derive_groups(kind: LibraryKind, tree: &Tree, parsed: &HashMap<i64, Parse
     }
     let file_title = |id: &i64| parsed.get(id).and_then(|p| p.title.clone());
     let mut groups = Vec::new();
-    let mut push = |key: String, title: String, year: Option<i32>, season: Option<i32>, disc: bool, file_ids: Vec<i64>| {
+    let mut push = |key: String,
+                    title: String,
+                    year: Option<i32>,
+                    season: Option<i32>,
+                    disc: bool,
+                    file_ids: Vec<i64>| {
         // Films are told apart by year too (remakes share titles); seasons of a show aren't.
         let norm = match (season, year) {
             (None, Some(y)) if !kind.is_episodic() => format!("{} {y}", parse::normalize(&title)),
             _ => parse::normalize(&title),
         };
-        groups.push(Group { key, title, norm, year, season, disc, file_ids });
+        groups.push(Group {
+            key,
+            title,
+            norm,
+            year,
+            season,
+            disc,
+            file_ids,
+        });
     };
 
     for (disc, mut ids) in discs {
         // Largest chunk first: it's the one listed (and the disc plays from the folder).
         ids.sort_by_key(|id| std::cmp::Reverse(tree.file(*id).map_or(0, |f| f.size)));
         let movie_dir = parent_of(disc);
-        let named = if movie_dir.is_empty() { disc } else { movie_dir };
-        let (title, year) = title_from_dir(named).unwrap_or_else(|| (last_component(named).to_owned(), None));
+        let named = if movie_dir.is_empty() {
+            disc
+        } else {
+            movie_dir
+        };
+        let (title, year) =
+            title_from_dir(named).unwrap_or_else(|| (last_component(named).to_owned(), None));
         push(disc.to_owned(), title, year, None, true, ids);
     }
 
@@ -98,32 +119,50 @@ pub fn derive_groups(kind: LibraryKind, tree: &Tree, parsed: &HashMap<i64, Parse
         // an extras folder inside one belongs to that show as specials.
         let extras = parse::is_specials_dir(last_component(dir));
         if kind.is_episodic() || extras || parse::looks_episodic(&ids, parsed) {
-            let seasons = ids.iter().filter_map(|id| parsed.get(id).and_then(|p| p.season));
+            let seasons = ids
+                .iter()
+                .filter_map(|id| parsed.get(id).and_then(|p| p.season));
             // A group of only specials is season 0; otherwise ignore stray extras.
-            let season = if extras { Some(0) } else { mode(seasons.clone().filter(|s| *s != 0)).or_else(|| mode(seasons)) };
+            let season = if extras {
+                Some(0)
+            } else {
+                mode(seasons.clone().filter(|s| *s != 0)).or_else(|| mode(seasons))
+            };
             if dir.is_empty() {
                 // Loose episodes at the root: one group per title.
                 let mut by_title: HashMap<String, (String, Vec<i64>)> = HashMap::new();
                 for id in ids {
                     let title = file_title(&id).unwrap_or_else(|| "Unknown".into());
-                    by_title.entry(parse::normalize(&title)).or_insert_with(|| (title, Vec::new())).1.push(id);
+                    by_title
+                        .entry(parse::normalize(&title))
+                        .or_insert_with(|| (title, Vec::new()))
+                        .1
+                        .push(id);
                 }
                 for (norm, (title, ids)) in by_title {
                     push(format!("root:{norm}"), title, None, season, false, ids);
                 }
             } else {
                 let (title, year) = title_from_dir(dir)
-                    .or_else(|| mode(ids.iter().filter_map(file_title).collect::<Vec<_>>().iter()).map(|t| (t.clone(), None)))
+                    .or_else(|| {
+                        mode(ids.iter().filter_map(file_title).collect::<Vec<_>>().iter())
+                            .map(|t| (t.clone(), None))
+                    })
                     .unwrap_or_else(|| (last_component(dir).to_owned(), None));
                 push(dir.to_owned(), title, year, season, false, ids);
             }
         } else {
             // Movies: a folder with a few files of the same film is one movie, otherwise each
             // file stands alone (e.g. a collection folder).
-            let titles: HashSet<String> = ids.iter().filter_map(|id| file_title(id).map(|t| parse::normalize(&t))).collect();
+            let titles: HashSet<String> = ids
+                .iter()
+                .filter_map(|id| file_title(id).map(|t| parse::normalize(&t)))
+                .collect();
             let one_movie = !dir.is_empty() && ids.len() <= 3 && titles.len() <= 1;
             if one_movie {
-                let year = ids.iter().find_map(|id| parsed.get(id).and_then(|p| p.year));
+                let year = ids
+                    .iter()
+                    .find_map(|id| parsed.get(id).and_then(|p| p.year));
                 let (title, dir_year) = title_from_dir(last_component(dir))
                     .or_else(|| ids.first().and_then(file_title).map(|t| (t, None)))
                     .unwrap_or_else(|| (last_component(dir).to_owned(), None));
@@ -132,7 +171,9 @@ pub fn derive_groups(kind: LibraryKind, tree: &Tree, parsed: &HashMap<i64, Parse
                 for id in ids {
                     let Some(file) = tree.file(id) else { continue };
                     let p = parsed.get(&id).cloned().unwrap_or_default();
-                    let title = p.title.unwrap_or_else(|| crate::library::display_name(file.file_name(), true));
+                    let title = p
+                        .title
+                        .unwrap_or_else(|| crate::library::display_name(file.file_name(), true));
                     push(file.rel_path.clone(), title, p.year, None, false, vec![id]);
                 }
             }
@@ -153,7 +194,10 @@ pub struct Placement {
 /// folder order using the lowest numbers still free (so two un-numbered sagas become
 /// seasons 1 and 2 instead of being merged).
 pub fn assign_seasons(groups: &[(&Group, Option<i32>)]) -> Vec<i32> {
-    let mut taken: HashSet<i32> = groups.iter().filter_map(|(g, manual)| manual.or(g.season)).collect();
+    let mut taken: HashSet<i32> = groups
+        .iter()
+        .filter_map(|(g, manual)| manual.or(g.season))
+        .collect();
     let mut next = 1;
     groups
         .iter()
@@ -177,20 +221,44 @@ pub struct Episode {
 }
 
 /// Episodes of a set of groups, by season then episode number then name.
-pub fn episodes(tree: &Tree, parsed: &HashMap<i64, Parsed>, groups: &[(&Group, i32)]) -> Vec<Episode> {
+pub fn episodes(
+    tree: &Tree,
+    parsed: &HashMap<i64, Parsed>,
+    groups: &[(&Group, i32)],
+) -> Vec<Episode> {
     let mut out: Vec<(Episode, &str)> = Vec::new();
     for (group, season) in groups {
-        let ids = if group.disc { &group.file_ids[..1.min(group.file_ids.len())] } else { &group.file_ids[..] };
+        let ids = if group.disc {
+            &group.file_ids[..1.min(group.file_ids.len())]
+        } else {
+            &group.file_ids[..]
+        };
         for id in ids {
             let Some(file) = tree.file(*id) else { continue };
             let p = parsed.get(id);
             // Extras inside a regular season folder stay specials.
-            let season = if p.and_then(|p| p.season) == Some(0) { 0 } else { *season };
-            out.push((Episode { file_id: *id, season, number: p.and_then(|p| p.episode) }, file.file_name()));
+            let season = if p.and_then(|p| p.season) == Some(0) {
+                0
+            } else {
+                *season
+            };
+            out.push((
+                Episode {
+                    file_id: *id,
+                    season,
+                    number: p.and_then(|p| p.episode),
+                },
+                file.file_name(),
+            ));
         }
     }
     out.sort_by(|(a, an), (b, bn)| {
-        let key = |e: &Episode| (if e.season == 0 { i32::MAX } else { e.season }, e.number.unwrap_or(i32::MAX));
+        let key = |e: &Episode| {
+            (
+                if e.season == 0 { i32::MAX } else { e.season },
+                e.number.unwrap_or(i32::MAX),
+            )
+        };
         key(a).cmp(&key(b)).then_with(|| natural_cmp(an, bn))
     });
     out.into_iter().map(|(e, _)| e).collect()
@@ -249,7 +317,8 @@ impl Catalog {
         shows: Vec<crate::db::Show>,
         matches: &[crate::db::GroupMatch],
     ) -> Self {
-        let by_key: HashMap<&str, &crate::db::GroupMatch> = matches.iter().map(|m| (m.group_key.as_str(), m)).collect();
+        let by_key: HashMap<&str, &crate::db::GroupMatch> =
+            matches.iter().map(|m| (m.group_key.as_str(), m)).collect();
         let mut per_show: HashMap<i64, Vec<(&Group, &crate::db::GroupMatch)>> = HashMap::new();
         for g in groups {
             if let Some(m) = by_key.get(g.key.as_str()) {
@@ -258,9 +327,20 @@ impl Catalog {
         }
         let mut entries = Vec::new();
         for show in shows {
-            let Some(placed) = per_show.remove(&show.id) else { continue };
-            let seasons = assign_seasons(&placed.iter().map(|(g, m)| (*g, m.season)).collect::<Vec<_>>());
-            let with_seasons: Vec<(&Group, i32)> = placed.iter().map(|(g, _)| *g).zip(seasons.iter().copied()).collect();
+            let Some(placed) = per_show.remove(&show.id) else {
+                continue;
+            };
+            let seasons = assign_seasons(
+                &placed
+                    .iter()
+                    .map(|(g, m)| (*g, m.season))
+                    .collect::<Vec<_>>(),
+            );
+            let with_seasons: Vec<(&Group, i32)> = placed
+                .iter()
+                .map(|(g, _)| *g)
+                .zip(seasons.iter().copied())
+                .collect();
             let episodes = episodes(tree, parsed, &with_seasons);
             let groups = placed
                 .iter()
@@ -273,7 +353,11 @@ impl Catalog {
                     files: if g.disc { 1 } else { g.file_ids.len() },
                 })
                 .collect();
-            entries.push(ShowEntry { show, groups, episodes });
+            entries.push(ShowEntry {
+                show,
+                groups,
+                episodes,
+            });
         }
         entries.sort_by(|a, b| natural_cmp(&a.show.title, &b.show.title));
         let file_show = entries
@@ -281,7 +365,10 @@ impl Catalog {
             .enumerate()
             .flat_map(|(i, e)| e.episodes.iter().map(move |ep| (ep.file_id, i)))
             .collect();
-        Self { shows: entries, file_show }
+        Self {
+            shows: entries,
+            file_show,
+        }
     }
 
     pub fn show(&self, show_id: i64) -> Option<&ShowEntry> {
@@ -314,7 +401,11 @@ mod tests {
             paths
                 .iter()
                 .enumerate()
-                .map(|(i, p)| MediaFile { id: i as i64, rel_path: (*p).into(), ..Default::default() })
+                .map(|(i, p)| MediaFile {
+                    id: i as i64,
+                    rel_path: (*p).into(),
+                    ..Default::default()
+                })
                 .collect(),
         )
     }
@@ -337,8 +428,16 @@ mod tests {
 
     #[test]
     fn hyphenated_folder_titles_survive() {
-        assert_eq!(title_from_dir("Mai-HiME").map(|t| t.0).as_deref(), Some("Mai-HiME"));
-        assert_eq!(title_from_dir("Rasen.1998.1080p.Bluray-GROUP").map(|t| t.0).as_deref(), Some("Rasen"));
+        assert_eq!(
+            title_from_dir("Mai-HiME").map(|t| t.0).as_deref(),
+            Some("Mai-HiME")
+        );
+        assert_eq!(
+            title_from_dir("Rasen.1998.1080p.Bluray-GROUP")
+                .map(|t| t.0)
+                .as_deref(),
+            Some("Rasen")
+        );
     }
 
     #[test]
@@ -349,7 +448,10 @@ mod tests {
         ]);
         let parsed = parse::parse_episodes(t.files());
         let groups = derive_groups(LibraryKind::Anime, &t, &parsed);
-        assert_eq!(groups.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(), ["Grappler Baki", "Grappler Baki"]);
+        assert_eq!(
+            groups.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(),
+            ["Grappler Baki", "Grappler Baki"]
+        );
         let seasons = assign_seasons(&groups.iter().map(|g| (g, None)).collect::<Vec<_>>());
         assert_eq!(seasons, [1, 2]);
         // A manual season is respected and the others fill around it.

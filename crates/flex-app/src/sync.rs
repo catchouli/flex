@@ -44,7 +44,13 @@ pub enum Notice {
 }
 
 impl Sync {
-    pub fn start(db_path: PathBuf, dir: PathBuf, device: String, name: String, ctx: &egui::Context) -> Self {
+    pub fn start(
+        db_path: PathBuf,
+        dir: PathBuf,
+        device: String,
+        name: String,
+        ctx: &egui::Context,
+    ) -> Self {
         let (wake, woken) = channel();
         let (tx, rx) = channel();
         let ctx = ctx.clone();
@@ -52,7 +58,13 @@ impl Sync {
             .name("flex-sync".into())
             .spawn(move || run(&db_path, &dir, &device, &name, &woken, &tx, &ctx))
             .ok();
-        Self { wake, rx, peers: Vec::new(), last_written: None, error: None }
+        Self {
+            wake,
+            rx,
+            peers: Vec::new(),
+            last_written: None,
+            error: None,
+        }
     }
 
     /// Syncs soon (something changed here, or a video just finished).
@@ -88,10 +100,20 @@ impl Sync {
 }
 
 fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
-fn run(db_path: &std::path::Path, dir: &std::path::Path, device: &str, name: &str, woken: &Receiver<()>, tx: &Sender<Msg>, ctx: &egui::Context) {
+fn run(
+    db_path: &std::path::Path,
+    dir: &std::path::Path,
+    device: &str,
+    name: &str,
+    woken: &Receiver<()>,
+    tx: &Sender<Msg>,
+    ctx: &egui::Context,
+) {
     let send = |msg| {
         let _ = tx.send(msg);
         ctx.request_repaint();
@@ -106,7 +128,12 @@ fn run(db_path: &std::path::Path, dir: &std::path::Path, device: &str, name: &st
     let mut last_error: Option<String> = None;
     loop {
         let others = core::read_others(dir, device);
-        send(Msg::Peers(others.iter().map(|s| (s.name.clone(), s.written_at)).collect()));
+        send(Msg::Peers(
+            others
+                .iter()
+                .map(|s| (s.name.clone(), s.written_at))
+                .collect(),
+        ));
         match core::apply(&mut db, &others) {
             Ok(applied) if !applied.is_empty() => {
                 log::info!("sync: applied {applied:?}");
@@ -152,12 +179,22 @@ fn run(db_path: &std::path::Path, dir: &std::path::Path, device: &str, name: &st
 
 /// A name for this device to start with: its host name.
 pub fn default_name() -> String {
-    let from_env = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).ok();
+    let from_env = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok();
     let from_command = || {
         let out = std::process::Command::new("hostname").output().ok()?;
-        Some(String::from_utf8_lossy(&out.stdout).trim().trim_end_matches(".local").to_owned())
+        Some(
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .trim_end_matches(".local")
+                .to_owned(),
+        )
     };
-    from_env.or_else(from_command).filter(|n| !n.is_empty()).unwrap_or_else(|| "This device".to_owned())
+    from_env
+        .or_else(from_command)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "This device".to_owned())
 }
 
 #[cfg(test)]
@@ -174,14 +211,39 @@ mod tests {
     fn device(dir: &Path, name: &str) -> (std::path::PathBuf, i64) {
         let path = dir.join(format!("{name}.db"));
         let mut db = Db::open(&path).unwrap();
-        let lib = db.add_library("Anime", &dir.join(format!("{name}-media")), LibraryKind::Anime).unwrap();
-        let files = ["Show/01.mkv", "Show/02.mkv"].iter().map(|p| ScannedFile { rel_path: (*p).into(), size: 1, mtime: 1 }).collect();
-        db.apply_scan(lib, &ScanResult { files, ..ScanResult::default() }).unwrap();
+        let lib = db
+            .add_library(
+                "Anime",
+                &dir.join(format!("{name}-media")),
+                LibraryKind::Anime,
+            )
+            .unwrap();
+        let files = ["Show/01.mkv", "Show/02.mkv"]
+            .iter()
+            .map(|p| ScannedFile {
+                rel_path: (*p).into(),
+                size: 1,
+                mtime: 1,
+            })
+            .collect();
+        db.apply_scan(
+            lib,
+            &ScanResult {
+                files,
+                ..ScanResult::default()
+            },
+        )
+        .unwrap();
         (path, lib)
     }
 
     fn watched(db_path: &Path, lib: i64, rel: &str) -> bool {
-        Db::open(db_path).unwrap().files(lib).unwrap().into_iter().any(|f| f.rel_path == rel && f.progress.watched)
+        Db::open(db_path)
+            .unwrap()
+            .files(lib)
+            .unwrap()
+            .into_iter()
+            .any(|f| f.rel_path == rel && f.progress.watched)
     }
 
     /// Two devices with their own databases sync through a folder, both ways.
@@ -194,12 +256,30 @@ mod tests {
         let (mac_db, mac_lib) = device(&dir, "mac");
         // Watched on the TV before syncing starts.
         let mut tv = Db::open(&tv_db).unwrap();
-        let first = tv.files(tv_lib).unwrap().into_iter().find(|f| f.rel_path == "Show/01.mkv").unwrap().id;
+        let first = tv
+            .files(tv_lib)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.rel_path == "Show/01.mkv")
+            .unwrap()
+            .id;
         tv.set_watched(&[first], true).unwrap();
 
         let ctx = eframe::egui::Context::default();
-        let mut tv_sync = Sync::start(tv_db.clone(), shared.clone(), "tv0000000000".into(), "TV".into(), &ctx);
-        let mut mac_sync = Sync::start(mac_db.clone(), shared.clone(), "mac000000000".into(), "Mac".into(), &ctx);
+        let mut tv_sync = Sync::start(
+            tv_db.clone(),
+            shared.clone(),
+            "tv0000000000".into(),
+            "TV".into(),
+            &ctx,
+        );
+        let mut mac_sync = Sync::start(
+            mac_db.clone(),
+            shared.clone(),
+            "mac000000000".into(),
+            "Mac".into(),
+            &ctx,
+        );
         let wait = |what: &str, done: &mut dyn FnMut() -> bool| {
             let deadline = Instant::now() + Duration::from_secs(20);
             while !done() {
@@ -208,7 +288,9 @@ mod tests {
             }
         };
         // The TV writes its file at once; nudge the Mac to read it.
-        wait("the TV's snapshot", &mut || shared.join("tv0000000000.json").exists());
+        wait("the TV's snapshot", &mut || {
+            shared.join("tv0000000000.json").exists()
+        });
         mac_sync.nudge();
         let mut reloaded = false;
         wait("the Mac to apply it", &mut || {
@@ -219,12 +301,19 @@ mod tests {
         // And back: marked watched on the Mac (a second later, so it's newer).
         std::thread::sleep(Duration::from_millis(1100));
         let mut mac = Db::open(&mac_db).unwrap();
-        let second = mac.files(mac_lib).unwrap().into_iter().find(|f| f.rel_path == "Show/02.mkv").unwrap().id;
+        let second = mac
+            .files(mac_lib)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.rel_path == "Show/02.mkv")
+            .unwrap()
+            .id;
         mac.set_watched(&[second], true).unwrap();
         mac_sync.nudge();
         wait("the Mac's change to be written", &mut || {
             mac_sync.poll();
-            std::fs::read_to_string(shared.join("mac000000000.json")).is_ok_and(|s| s.contains("Show/02.mkv"))
+            std::fs::read_to_string(shared.join("mac000000000.json"))
+                .is_ok_and(|s| s.contains("Show/02.mkv"))
         });
         tv_sync.nudge();
         wait("the TV to apply it", &mut || {
@@ -234,7 +323,11 @@ mod tests {
         // The status (sent just before applying) may land after the last check above.
         std::thread::sleep(Duration::from_millis(200));
         tv_sync.poll();
-        assert!(tv_sync.peers.iter().any(|(name, _)| name == "Mac"), "{:?}", tv_sync.peers);
+        assert!(
+            tv_sync.peers.iter().any(|(name, _)| name == "Mac"),
+            "{:?}",
+            tv_sync.peers
+        );
         drop((tv_sync, mac_sync));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -243,13 +336,25 @@ mod tests {
     fn tells_once_when_failing_and_when_working_again() {
         let (wake, _woken) = channel();
         let (tx, rx) = channel();
-        let mut sync = super::Sync { wake, rx, peers: Vec::new(), last_written: None, error: None };
+        let mut sync = super::Sync {
+            wake,
+            rx,
+            peers: Vec::new(),
+            last_written: None,
+            error: None,
+        };
         let failed = || super::Msg::Failed("write protected".into());
         tx.send(failed()).unwrap();
         tx.send(failed()).unwrap();
-        assert_eq!(sync.poll().1, [super::Notice::Failing("write protected".into())]);
+        assert_eq!(
+            sync.poll().1,
+            [super::Notice::Failing("write protected".into())]
+        );
         tx.send(failed()).unwrap();
-        assert!(sync.poll().1.is_empty(), "the same failure again: nothing new");
+        assert!(
+            sync.poll().1.is_empty(),
+            "the same failure again: nothing new"
+        );
         tx.send(super::Msg::Wrote(5)).unwrap();
         tx.send(super::Msg::Wrote(6)).unwrap();
         assert_eq!(sync.poll().1, [super::Notice::Recovered]);

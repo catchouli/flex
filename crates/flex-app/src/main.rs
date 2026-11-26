@@ -3,9 +3,9 @@
 
 mod ambient;
 mod app;
-mod awake;
 #[cfg(windows)]
 mod autostart;
+mod awake;
 mod images;
 mod input;
 mod instance;
@@ -18,15 +18,15 @@ mod probe;
 mod scenery;
 mod screens;
 mod shared;
-mod sync;
 mod shots;
+mod sync;
 mod theme;
 mod topbar;
 mod tray;
 mod update;
 mod volume;
-mod youtube;
 mod widgets;
+mod youtube;
 
 use std::path::PathBuf;
 
@@ -42,16 +42,28 @@ use eframe::egui;
 /// be unloaded, whatever asks for that.
 #[cfg(windows)]
 fn keep_com_alive() {
-    use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx};
-    use windows_sys::Win32::System::LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, LoadLibraryW};
-    let hr = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
+    use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
+    };
+    use windows_sys::Win32::System::LibraryLoader::{
+        GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, LoadLibraryW,
+    };
+    let hr = unsafe {
+        CoInitializeEx(
+            std::ptr::null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        )
+    };
     if hr < 0 {
         log::warn!("couldn't initialise COM on the UI thread: {hr:#x}");
     }
     let name: Vec<u16> = "explorerframe.dll".encode_utf16().chain([0]).collect();
     let mut module = std::ptr::null_mut();
     // Safety: `name` is a NUL-terminated wide string that outlives both calls.
-    let pinned = unsafe { !LoadLibraryW(name.as_ptr()).is_null() && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, name.as_ptr(), &mut module) != 0 };
+    let pinned = unsafe {
+        !LoadLibraryW(name.as_ptr()).is_null()
+            && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, name.as_ptr(), &mut module) != 0
+    };
     if !pinned {
         log::warn!("couldn't keep explorerframe.dll loaded: leaving fullscreen may crash");
     }
@@ -150,7 +162,10 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             if already_running {
-                return Ok(Box::new(app::StartupError("Flex is already running.".into())) as Box<dyn eframe::App>);
+                return Ok(
+                    Box::new(app::StartupError("Flex is already running.".into()))
+                        as Box<dyn eframe::App>,
+                );
             }
             Ok(match app::FlexApp::new(cc, start, windowed, hidden) {
                 Ok(app) => Box::new(app) as Box<dyn eframe::App>,

@@ -49,13 +49,25 @@ pub struct Snapshot {
 /// already updated).
 #[derive(Clone, Debug)]
 pub enum Change {
-    Watched { library_id: i64, file_ids: Vec<i64>, watched: bool },
+    Watched {
+        library_id: i64,
+        file_ids: Vec<i64>,
+        watched: bool,
+    },
     /// Played in the browser.
-    Progress { library_id: i64, file_id: i64, progress: flex_core::progress::Progress },
+    Progress {
+        library_id: i64,
+        file_id: i64,
+        progress: flex_core::progress::Progress,
+    },
     /// From the phone remote.
     Remote(remote::Remote),
     /// The remote's search: the app answers through `reply`.
-    Search { query: String, scope: remote::Scope, reply: std::sync::mpsc::SyncSender<Vec<remote::Hit>> },
+    Search {
+        query: String,
+        scope: remote::Scope,
+        reply: std::sync::mpsc::SyncSender<Vec<remote::Hit>>,
+    },
 }
 
 pub struct Config {
@@ -86,15 +98,27 @@ pub(crate) struct State {
 
 impl State {
     pub(crate) fn snapshot(&self) -> Arc<Snapshot> {
-        self.snapshot.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.snapshot
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Changes files in the snapshot straight away (the app publishes its own copy once
     /// it has caught up).
-    pub(crate) fn patch_files(&self, library_id: i64, ids: &[i64], f: impl Fn(&mut flex_core::MediaFile)) {
+    pub(crate) fn patch_files(
+        &self,
+        library_id: i64,
+        ids: &[i64],
+        f: impl Fn(&mut flex_core::MediaFile),
+    ) {
         let mut current = self.snapshot.write().unwrap_or_else(|e| e.into_inner());
         let mut updated = (**current).clone();
-        if let Some(l) = updated.libraries.iter_mut().find(|l| l.lib.id == library_id) {
+        if let Some(l) = updated
+            .libraries
+            .iter_mut()
+            .find(|l| l.lib.id == library_id)
+        {
             let tree = Arc::make_mut(&mut l.tree);
             for id in ids {
                 if let Some(file) = tree.file_mut(*id) {
@@ -116,7 +140,11 @@ pub struct Server {
 
 impl Server {
     /// Starts serving on all interfaces (so other devices can reach it).
-    pub fn start(config: Config, snapshot: Snapshot, on_change: impl Fn(Change) + Send + Sync + 'static) -> Result<Self> {
+    pub fn start(
+        config: Config,
+        snapshot: Snapshot,
+        on_change: impl Fn(Change) + Send + Sync + 'static,
+    ) -> Result<Self> {
         // Bound here, not on the server thread, so a port that's taken is reported now.
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, config.port))
             .with_context(|| format!("listening on port {}", config.port))?;
@@ -124,7 +152,10 @@ impl Server {
         // The port actually bound (0 in the config picks any free one).
         let port = listener.local_addr()?.port();
         let db = flex_core::Db::open(&config.db_path)?;
-        let agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into();
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(30)))
+            .build()
+            .into();
         let state = Arc::new(State {
             snapshot: RwLock::new(Arc::new(snapshot)),
             db: Mutex::new(db),
@@ -143,27 +174,38 @@ impl Server {
             .enable_all()
             .build()?;
         let router = api::router(state.clone());
-        let thread = std::thread::Builder::new().name("flex-web".into()).spawn(move || {
-            runtime.block_on(async move {
-                let listener = match tokio::net::TcpListener::from_std(listener) {
-                    Ok(l) => l,
-                    Err(e) => return log::error!("web server: {e}"),
-                };
-                let serve = axum::serve(listener, router).with_graceful_shutdown(async {
-                    let _ = stopped.await;
+        let thread = std::thread::Builder::new()
+            .name("flex-web".into())
+            .spawn(move || {
+                runtime.block_on(async move {
+                    let listener = match tokio::net::TcpListener::from_std(listener) {
+                        Ok(l) => l,
+                        Err(e) => return log::error!("web server: {e}"),
+                    };
+                    let serve = axum::serve(listener, router).with_graceful_shutdown(async {
+                        let _ = stopped.await;
+                    });
+                    if let Err(e) = serve.await {
+                        log::error!("web server: {e}");
+                    }
                 });
-                if let Err(e) = serve.await {
-                    log::error!("web server: {e}");
-                }
-            });
-        })?;
+            })?;
         log::info!("web UI on port {port}");
-        Ok(Self { state, shutdown: Some(shutdown), thread: Some(thread), port })
+        Ok(Self {
+            state,
+            shutdown: Some(shutdown),
+            thread: Some(thread),
+            port,
+        })
     }
 
     /// Replaces what the web UI shows (call whenever the app's libraries change).
     pub fn publish(&self, snapshot: Snapshot) {
-        *self.state.snapshot.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(snapshot);
+        *self
+            .state
+            .snapshot
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Arc::new(snapshot);
     }
 
     /// Keeps the remote's status up to date (cheap to call every frame).

@@ -8,6 +8,11 @@ fn main() -> anyhow::Result<()> {
     for f in &files {
         episodes += usize::from(hunch::hunch(f.file_name()).episode().is_some());
     }
-    println!("{} files in {:?}; {} with an episode number", files.len(), start.elapsed(), episodes);
+    println!(
+        "{} files in {:?}; {} with an episode number",
+        files.len(),
+        start.elapsed(),
+        episodes
+    );
     Ok(())
 }

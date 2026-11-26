@@ -27,7 +27,11 @@ pub const CATEGORIES: [(&str, &str, bool); 8] = [
 
 /// The categories skipped unless the user changes them.
 pub fn default_categories() -> Vec<String> {
-    CATEGORIES.iter().filter(|c| c.2).map(|c| c.0.to_owned()).collect()
+    CATEGORIES
+        .iter()
+        .filter(|c| c.2)
+        .map(|c| c.0.to_owned())
+        .collect()
 }
 
 /// A category's colour on the seek bar (SponsorBlock's own defaults).
@@ -96,8 +100,15 @@ pub fn segments(video_id: &str, categories: &[String]) -> Result<Vec<Segment>> {
     if response.status() == 404 {
         return Ok(Vec::new());
     }
-    anyhow::ensure!(response.status().is_success(), "SponsorBlock answered {}", response.status());
-    let body = response.body_mut().read_to_string().context("reading SponsorBlock's answer")?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "SponsorBlock answered {}",
+        response.status()
+    );
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .context("reading SponsorBlock's answer")?;
     parse(&body, video_id)
 }
 
@@ -109,7 +120,11 @@ fn parse(json: &str, video_id: &str) -> Result<Vec<Segment>> {
         .flat_map(|v| v.segments)
         .filter(|s| s.action_type.is_empty() || s.action_type == "skip")
         .filter(|s| s.segment[1] > s.segment[0])
-        .map(|s| Segment { start: s.segment[0], end: s.segment[1], category: s.category })
+        .map(|s| Segment {
+            start: s.segment[0],
+            end: s.segment[1],
+            category: s.category,
+        })
         .collect();
     segments.sort_by(|a, b| a.start.total_cmp(&b.start));
     Ok(segments)
@@ -124,7 +139,9 @@ pub fn entered(segments: &[Segment], before: f64, now: f64) -> Option<&Segment> 
     if !(0.0..=PLAYING_STEP).contains(&(now - before)) {
         return None;
     }
-    segments.iter().find(|s| before <= s.start + 0.05 && now >= s.start && now < s.end - 0.5)
+    segments
+        .iter()
+        .find(|s| before <= s.start + 0.05 && now >= s.start && now < s.end - 0.5)
 }
 
 #[cfg(test)]
@@ -141,25 +158,43 @@ mod tests {
                 {"segment":[100,110],"category":"sponsor","actionType":"mute"}]}]"#;
         let segs = parse(json, "aqz-KE-bpKQ").unwrap();
         assert_eq!(segs.len(), 2);
-        assert_eq!((segs[0].start, segs[0].category.as_str()), (5.0, "selfpromo"), "sorted");
+        assert_eq!(
+            (segs[0].start, segs[0].category.as_str()),
+            (5.0, "selfpromo"),
+            "sorted"
+        );
     }
 
     #[test]
     fn skips_when_playback_runs_in_not_when_seeking_in() {
-        let segs = vec![Segment { start: 60.0, end: 90.0, category: "sponsor".into() }];
+        let segs = vec![Segment {
+            start: 60.0,
+            end: 90.0,
+            category: "sponsor".into(),
+        }];
         assert!(entered(&segs, 59.8, 60.1).is_some(), "played into it");
-        assert!(entered(&segs, 10.0, 70.0).is_none(), "seeked into the middle");
-        assert!(entered(&segs, 70.0, 70.2).is_none(), "already inside, watching on purpose");
+        assert!(
+            entered(&segs, 10.0, 70.0).is_none(),
+            "seeked into the middle"
+        );
+        assert!(
+            entered(&segs, 70.0, 70.2).is_none(),
+            "already inside, watching on purpose"
+        );
         assert!(entered(&segs, 89.7, 89.8).is_none(), "nearly over");
         assert!(entered(&segs, 50.0, 50.2).is_none());
     }
 
     #[test]
     fn default_categories_are_the_annoying_ones() {
-        assert_eq!(default_categories(), ["sponsor", "selfpromo", "interaction"]);
+        assert_eq!(
+            default_categories(),
+            ["sponsor", "selfpromo", "interaction"]
+        );
         assert_eq!(category_name("interaction"), "Like/subscribe reminders");
         // Every category has its own colour.
-        let colours: std::collections::HashSet<[u8; 3]> = CATEGORIES.iter().map(|c| category_colour(c.0)).collect();
+        let colours: std::collections::HashSet<[u8; 3]> =
+            CATEGORIES.iter().map(|c| category_colour(c.0)).collect();
         assert_eq!(colours.len(), CATEGORIES.len());
     }
 
@@ -172,6 +207,10 @@ mod tests {
         eprintln!("{segs:?}");
         assert!(segs.iter().any(|s| s.category == "sponsor"));
         // A video with nothing marked in these categories (others share its prefix).
-        assert!(segments("dQw4w9WgXcQ", &default_categories()).unwrap().is_empty());
+        assert!(
+            segments("dQw4w9WgXcQ", &default_categories())
+                .unwrap()
+                .is_empty()
+        );
     }
 }

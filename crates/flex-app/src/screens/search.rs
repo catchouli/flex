@@ -40,7 +40,12 @@ enum Tab {
 /// The scopes in order, with labels.
 fn scopes(sh: &Shared) -> Vec<(Tab, String)> {
     let mut out = vec![(Tab::Local(Scope::Titles), "Movies & shows".to_owned())];
-    out.extend(sh.libs.iter().filter(|l| !l.is_music()).map(|l| (Tab::Local(Scope::Library(l.lib.id)), l.lib.name.clone())));
+    out.extend(
+        sh.libs
+            .iter()
+            .filter(|l| !l.is_music())
+            .map(|l| (Tab::Local(Scope::Library(l.lib.id)), l.lib.name.clone())),
+    );
     out.push((Tab::Local(Scope::Episodes), "Episodes".to_owned()));
     if sh.libs.iter().any(|l| l.is_music()) {
         out.push((Tab::Local(Scope::Music), "Music".to_owned()));
@@ -66,7 +71,11 @@ impl SearchView {
             self.results = match key.1 {
                 Tab::Local(scope) => sh.search(&key.0, scope, MAX_RESULTS),
                 Tab::YouTube => {
-                    if self.youtube.as_ref().is_none_or(|yt| yt.key() != key.0.trim()) {
+                    if self
+                        .youtube
+                        .as_ref()
+                        .is_none_or(|yt| yt.key() != key.0.trim())
+                    {
                         self.youtube = Some(VideoResults::search(sh, &key.0));
                     }
                     Vec::new()
@@ -87,13 +96,31 @@ impl SearchView {
 
     fn open(&self, sh: &mut Shared, i: usize) -> Nav {
         match &self.results[i].target {
-            Target::Show { library_id, show_id, .. } => Nav::push(TitlePage::new(*library_id, *show_id)),
-            Target::Episode { library_id, file_id } => Nav::push(EpisodePage::new(*library_id, *file_id)),
+            Target::Show {
+                library_id,
+                show_id,
+                ..
+            } => Nav::push(TitlePage::new(*library_id, *show_id)),
+            Target::Episode {
+                library_id,
+                file_id,
+            } => Nav::push(EpisodePage::new(*library_id, *file_id)),
             Target::Folder { library_id, rel } => open_folder(sh, *library_id, rel),
-            Target::File { library_id, file_id } => open_file(sh, *library_id, *file_id),
-            Target::Album { library_id, key } => Nav::push(AlbumPage::new(*library_id, key.clone())),
-            Target::Artist { library_id, name } => Nav::push(ArtistPage::new(sh, *library_id, name.clone())),
-            Target::Track { library_id, album, index } => play_album(sh, *library_id, album, *index, false),
+            Target::File {
+                library_id,
+                file_id,
+            } => open_file(sh, *library_id, *file_id),
+            Target::Album { library_id, key } => {
+                Nav::push(AlbumPage::new(*library_id, key.clone()))
+            }
+            Target::Artist { library_id, name } => {
+                Nav::push(ArtistPage::new(sh, *library_id, name.clone()))
+            }
+            Target::Track {
+                library_id,
+                album,
+                index,
+            } => play_album(sh, *library_id, album, *index, false),
         }
     }
 }
@@ -127,15 +154,34 @@ impl Screen for SearchView {
             };
         }
         if press.is(Action::Menu) {
-            let Some(item) = self.results.get(self.list.selected) else { return Nav::None };
+            let Some(item) = self.results.get(self.list.selected) else {
+                return Nav::None;
+            };
             let target = match &item.target {
-                Target::Show { library_id, show_id, .. } => return Nav::push(super::shows::ShowOptions::new(*library_id, *show_id)),
-                Target::Folder { library_id, rel } => options::Target::Folder { library_id: *library_id, rel: rel.clone() },
-                Target::File { library_id, file_id } | Target::Episode { library_id, file_id } => {
-                    options::Target::File { library_id: *library_id, file_id: *file_id }
+                Target::Show {
+                    library_id,
+                    show_id,
+                    ..
+                } => return Nav::push(super::shows::ShowOptions::new(*library_id, *show_id)),
+                Target::Folder { library_id, rel } => options::Target::Folder {
+                    library_id: *library_id,
+                    rel: rel.clone(),
+                },
+                Target::File {
+                    library_id,
+                    file_id,
                 }
+                | Target::Episode {
+                    library_id,
+                    file_id,
+                } => options::Target::File {
+                    library_id: *library_id,
+                    file_id: *file_id,
+                },
                 // Music has no options menu.
-                Target::Album { .. } | Target::Artist { .. } | Target::Track { .. } => return Nav::None,
+                Target::Album { .. } | Target::Artist { .. } | Target::Track { .. } => {
+                    return Nav::None;
+                }
             };
             return Nav::push(OptionsMenu::new(target));
         }
@@ -167,16 +213,32 @@ impl Screen for SearchView {
         let font = TextStyle::Small.resolve(&style);
         let mut x = body.left();
         for (i, (_, label)) in scopes(sh).iter().enumerate() {
-            let w = painter.layout_no_wrap(label.clone(), font.clone(), crate::theme::text()).size().x + 44.0;
+            let w = painter
+                .layout_no_wrap(label.clone(), font.clone(), crate::theme::text())
+                .size()
+                .x
+                + 44.0;
             let r = Rect::from_min_size(pos2(x, body.top()), vec2(w, SCOPE_H));
             if widgets::hit(ui, r).any() {
                 (self.scope, self.on_scopes) = (i, true);
             }
-            let color = widgets::paint_focusable(&painter, r, focused && self.on_scopes && i == self.scope, i == self.scope);
-            painter.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
+            let color = widgets::paint_focusable(
+                &painter,
+                r,
+                focused && self.on_scopes && i == self.scope,
+                i == self.scope,
+            );
+            painter.text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                label,
+                font.clone(),
+                color,
+            );
             x += w + 14.0;
         }
-        let list_rect = Rect::from_min_max(pos2(body.left(), body.top() + SCOPE_H + 24.0), body.max);
+        let list_rect =
+            Rect::from_min_max(pos2(body.left(), body.top() + SCOPE_H + 24.0), body.max);
         let on_scopes = self.on_scopes;
         if let Some(youtube) = self.youtube_shown() {
             if youtube.ui(ui, sh, list_rect, &[], focused && !on_scopes) {
@@ -185,7 +247,12 @@ impl Screen for SearchView {
             return Nav::None;
         }
         if self.results.is_empty() {
-            widgets::message(ui.painter(), list_rect, "Nothing found here. Up, then Left/Right to search elsewhere", &style);
+            widgets::message(
+                ui.painter(),
+                list_rect,
+                "Nothing found here. Up, then Left/Right to search elsewhere",
+                &style,
+            );
             return Nav::None;
         }
         let rows: Vec<Row> = self
@@ -204,7 +271,15 @@ impl Screen for SearchView {
                 Row::new(icon, item.title.as_str()).detail(item.context.as_str())
             })
             .collect();
-        if widgets::list(ui, list_rect, &rows, &mut self.list, focused && !self.on_scopes).any() {
+        if widgets::list(
+            ui,
+            list_rect,
+            &rows,
+            &mut self.list,
+            focused && !self.on_scopes,
+        )
+        .any()
+        {
             self.on_scopes = false;
         }
         Nav::None
@@ -219,6 +294,10 @@ impl Screen for SearchView {
         if let Some(youtube) = self.youtube_shown() {
             return youtube.play_first();
         }
-        if self.results.is_empty() { Nav::None } else { self.open(sh, 0) }
+        if self.results.is_empty() {
+            Nav::None
+        } else {
+            self.open(sh, 0)
+        }
     }
 }

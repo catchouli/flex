@@ -137,7 +137,10 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
     }
     for (raw, action) in os::drain() {
         log.push(format!("{raw}  ->  {action:?}"));
-        presses.push(Press { action, repeat: false });
+        presses.push(Press {
+            action,
+            repeat: false,
+        });
     }
     if text_focused {
         log.ok_down = None;
@@ -160,12 +163,21 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
     }
     if open_menu {
         log.push("Key Enter (held)  ->  Menu".to_owned());
-        presses.push(Press { action: Action::Menu, repeat: false });
+        presses.push(Press {
+            action: Action::Menu,
+            repeat: false,
+        });
     }
     ctx.input(|i| {
         for event in &i.events {
             let (raw, action, repeat) = match event {
-                Event::Key { key: Key::Enter, pressed, repeat, modifiers, .. } if modifiers.is_none() => {
+                Event::Key {
+                    key: Key::Enter,
+                    pressed,
+                    repeat,
+                    modifiers,
+                    ..
+                } if modifiers.is_none() => {
                     match (*pressed, *repeat) {
                         (true, false) => {
                             log.ok_down = Some((now, false));
@@ -178,21 +190,39 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
                         (true, true) => continue,
                     }
                 }
-                Event::Key { key, physical_key, pressed: true, repeat, modifiers } => {
-                    let physical = physical_key.filter(|p| p != key).map(|p| format!(" (physical {p:?})"));
+                Event::Key {
+                    key,
+                    physical_key,
+                    pressed: true,
+                    repeat,
+                    modifiers,
+                } => {
+                    let physical = physical_key
+                        .filter(|p| p != key)
+                        .map(|p| format!(" (physical {p:?})"));
                     let mods = (!modifiers.is_none()).then(|| format!(" +{modifiers:?}"));
-                    let raw = format!("Key {key:?}{}{}", physical.unwrap_or_default(), mods.unwrap_or_default());
+                    let raw = format!(
+                        "Key {key:?}{}{}",
+                        physical.unwrap_or_default(),
+                        mods.unwrap_or_default()
+                    );
                     let action = match (modifiers.command, modifiers.alt) {
                         // Remotes send physical key codes, so check those too: on non-US
                         // layouts (e.g. Dvorak) the physical "=" key isn't "=".
-                        (true, false) => map_command_key(*key).or_else(|| physical_key.and_then(map_command_key)),
+                        (true, false) => {
+                            map_command_key(*key).or_else(|| physical_key.and_then(map_command_key))
+                        }
                         (false, false) => map_key(*key),
                         // Leave other shortcuts alone.
                         _ => None,
                     };
                     (raw, action, *repeat)
                 }
-                Event::PointerButton { button, pressed: true, .. } => {
+                Event::PointerButton {
+                    button,
+                    pressed: true,
+                    ..
+                } => {
                     let action = match button {
                         PointerButton::Extra1 => Some(Action::Back),
                         PointerButton::Secondary => Some(Action::Menu),
@@ -202,12 +232,21 @@ pub fn collect(ctx: &egui::Context, log: &mut InputLog, text_focused: bool) -> V
                 }
                 // Some air mice send Ctrl + scroll wheel for their zoom buttons. Only
                 // zooming in is used (fullscreen); zooming out would be too easy to trigger.
-                Event::MouseWheel { delta, modifiers, .. } if modifiers.command && delta.y > 0.0 => {
-                    if log.last_wheel_zoom.is_some_and(|t| now - t < WHEEL_ZOOM_DEBOUNCE_SECS) {
+                Event::MouseWheel {
+                    delta, modifiers, ..
+                } if modifiers.command && delta.y > 0.0 => {
+                    if log
+                        .last_wheel_zoom
+                        .is_some_and(|t| now - t < WHEEL_ZOOM_DEBOUNCE_SECS)
+                    {
                         continue;
                     }
                     log.last_wheel_zoom = Some(now);
-                    (format!("Ctrl+Wheel {:+.0}", delta.y), Some(Action::ZoomIn), false)
+                    (
+                        format!("Ctrl+Wheel {:+.0}", delta.y),
+                        Some(Action::ZoomIn),
+                        false,
+                    )
                 }
                 _ => continue,
             };
@@ -252,7 +291,11 @@ pub mod os {
         /// The buttons egui doesn't report. Arrows, Enter and Back arrive as ordinary keys.
         fn action(key: KeyCode) -> Option<Action> {
             Some(match key {
-                KeyCode::KEY_PLAYPAUSE | KeyCode::KEY_PLAY | KeyCode::KEY_PAUSE | KeyCode::KEY_PLAYCD | KeyCode::KEY_PAUSECD => Action::PlayPause,
+                KeyCode::KEY_PLAYPAUSE
+                | KeyCode::KEY_PLAY
+                | KeyCode::KEY_PAUSE
+                | KeyCode::KEY_PLAYCD
+                | KeyCode::KEY_PAUSECD => Action::PlayPause,
                 KeyCode::KEY_STOP | KeyCode::KEY_STOPCD => Action::Stop,
                 KeyCode::KEY_NEXTSONG => Action::Next,
                 KeyCode::KEY_PREVIOUSSONG => Action::Previous,
@@ -270,18 +313,25 @@ pub mod os {
             }
             let mut found = 0;
             for (path, device) in evdev::enumerate() {
-                let has_media = device.supported_keys().is_some_and(|keys| keys.iter().any(|k| action(k).is_some()));
+                let has_media = device
+                    .supported_keys()
+                    .is_some_and(|keys| keys.iter().any(|k| action(k).is_some()));
                 if !has_media {
                     continue;
                 }
                 found += 1;
                 let name = device.name().unwrap_or("?").to_owned();
                 log::info!("remote: reading {} ({name})", path.display());
-                std::thread::Builder::new().name("remote-input".into()).spawn(move || read(device, &name)).ok();
+                std::thread::Builder::new()
+                    .name("remote-input".into())
+                    .spawn(move || read(device, &name))
+                    .ok();
             }
             if found == 0 {
                 // Usually permissions: /dev/input needs the `input` group.
-                log::info!("remote: no readable input devices with media keys (is this user in the `input` group?)");
+                log::info!(
+                    "remote: no readable input devices with media keys (is this user in the `input` group?)"
+                );
             }
         }
 
@@ -295,15 +345,23 @@ pub mod os {
                     }
                 };
                 for event in events {
-                    let evdev::EventSummary::Key(_, key, value) = event.destructure() else { continue };
+                    let evdev::EventSummary::Key(_, key, value) = event.destructure() else {
+                        continue;
+                    };
                     if DIAGNOSTICS_ON.load(Ordering::Relaxed) {
-                        DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()).push(format!("evdev {key:?} value {value} ({name})"));
+                        DIAGNOSTICS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(format!("evdev {key:?} value {value} ({name})"));
                     }
                     // 1 = pressed (0 released, 2 auto-repeat).
                     if value == 1
                         && let Some(action) = action(key)
                     {
-                        QUEUE.lock().unwrap_or_else(|e| e.into_inner()).push((format!("{key:?}"), action));
+                        QUEUE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push((format!("{key:?}"), action));
                         if let Some(ctx) = CTX.get() {
                             ctx.request_repaint();
                         }
@@ -353,13 +411,16 @@ pub mod os {
 
         use eframe::egui;
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-            VK_BROWSER_SEARCH, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_ZOOM,
+            VK_BROWSER_SEARCH, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK,
+            VK_MEDIA_STOP, VK_ZOOM,
         };
         use windows_sys::Win32::UI::Input::{
             GetRawInputData, HRAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT, RIM_TYPEHID,
             RegisterRawInputDevices,
         };
-        use windows_sys::Win32::UI::WindowsAndMessaging::{MSG, WM_APPCOMMAND, WM_INPUT, WM_KEYDOWN, WM_SYSKEYDOWN};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            MSG, WM_APPCOMMAND, WM_INPUT, WM_KEYDOWN, WM_SYSKEYDOWN,
+        };
 
         use super::super::Action;
 
@@ -393,7 +454,8 @@ pub mod os {
                 dwFlags: 0,
                 hwndTarget: std::ptr::null_mut(), // follows keyboard focus
             };
-            let ok = unsafe { RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) };
+            let ok =
+                unsafe { RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) };
             if ok == 0 {
                 log::warn!("couldn't register for remote (consumer control) input");
             }
@@ -406,7 +468,10 @@ pub mod os {
 
         fn diagnose(line: impl FnOnce() -> String) {
             if DIAGNOSTICS_ON.load(Ordering::Relaxed) {
-                DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()).push(line());
+                DIAGNOSTICS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(line());
                 if let Some(ctx) = CTX.get() {
                     ctx.request_repaint();
                 }
@@ -414,7 +479,10 @@ pub mod os {
         }
 
         fn push(raw: String, action: Action) {
-            QUEUE.lock().unwrap_or_else(|e| e.into_inner()).push((raw, action));
+            QUEUE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((raw, action));
             if let Some(ctx) = CTX.get() {
                 ctx.request_repaint();
             }
@@ -426,7 +494,15 @@ pub mod os {
             let mut size = 0u32;
             unsafe { GetRawInputData(handle, RID_INPUT, std::ptr::null_mut(), &mut size, header) };
             let mut buf = vec![0u8; size as usize];
-            let read = unsafe { GetRawInputData(handle, RID_INPUT, buf.as_mut_ptr().cast(), &mut size, header) };
+            let read = unsafe {
+                GetRawInputData(
+                    handle,
+                    RID_INPUT,
+                    buf.as_mut_ptr().cast(),
+                    &mut size,
+                    header,
+                )
+            };
             if read == u32::MAX || (read as usize) < header as usize + 8 {
                 return None;
             }
@@ -464,7 +540,12 @@ pub mod os {
             match msg.message {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
                     let vk = msg.wParam as u16;
-                    diagnose(|| format!("Windows key VK 0x{vk:02X} scan 0x{:02X}", (msg.lParam >> 16) & 0xFF));
+                    diagnose(|| {
+                        format!(
+                            "Windows key VK 0x{vk:02X} scan 0x{:02X}",
+                            (msg.lParam >> 16) & 0xFF
+                        )
+                    });
                     let action = match vk {
                         VK_MEDIA_PLAY_PAUSE => Action::PlayPause,
                         VK_MEDIA_STOP => Action::Stop,
@@ -481,7 +562,9 @@ pub mod os {
                     let command = ((msg.lParam as u32) >> 16) & !0xF000;
                     diagnose(|| format!("Windows app command {command}"));
                     let action = match command {
-                        APPCOMMAND_MEDIA_PLAY_PAUSE | APPCOMMAND_MEDIA_PLAY | APPCOMMAND_MEDIA_PAUSE => Action::PlayPause,
+                        APPCOMMAND_MEDIA_PLAY_PAUSE
+                        | APPCOMMAND_MEDIA_PLAY
+                        | APPCOMMAND_MEDIA_PAUSE => Action::PlayPause,
                         APPCOMMAND_MEDIA_STOP => Action::Stop,
                         APPCOMMAND_MEDIA_NEXTTRACK => Action::Next,
                         APPCOMMAND_MEDIA_PREVIOUSTRACK => Action::Previous,

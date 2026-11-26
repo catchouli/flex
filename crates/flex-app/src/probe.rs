@@ -56,7 +56,13 @@ impl AudioProbe {
         let (lock, wake) = &*self.queue;
         let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
         if q.running != Some(file_id) {
-            q.jobs.insert(file_id, Job { path, asked: Instant::now() });
+            q.jobs.insert(
+                file_id,
+                Job {
+                    path,
+                    asked: Instant::now(),
+                },
+            );
             wake.notify_one();
         }
     }
@@ -76,13 +82,21 @@ fn work(queue: &(Mutex<Queue>, Condvar), tx: &Sender<Probed>, ctx: &egui::Contex
                     q.running = Some(id);
                     break (id, job);
                 }
-                q = wake.wait_timeout(q, Duration::from_secs(1)).unwrap_or_else(|e| e.into_inner()).0;
+                q = wake
+                    .wait_timeout(q, Duration::from_secs(1))
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0;
             }
         };
         let started = Instant::now();
         let result = probe(&mut mpv, &job);
         match &result {
-            Ok(tracks) => log::debug!("audio of {}: {} tracks in {:?}", job.path.display(), tracks.len(), started.elapsed()),
+            Ok(tracks) => log::debug!(
+                "audio of {}: {} tracks in {:?}",
+                job.path.display(),
+                tracks.len(),
+                started.elapsed()
+            ),
             Err(e) => {
                 log::warn!("audio tracks of {}: {e:#}", job.path.display());
                 mpv = None; // start afresh in case it's stuck
@@ -126,14 +140,22 @@ fn probe(mpv: &mut Option<Mpv>, job: &Job) -> Result<Vec<AudioTrack>> {
     // just after the file opens. Other files wait the whole time: they never will.
     let wait_until = Instant::now() + PROFILE_WAIT;
     let mut tracks = audio_tracks(mpv);
-    while tracks.iter().any(|t| matches!(t.codec.as_str(), "truehd" | "eac3") && t.profile.is_empty()) && Instant::now() < wait_until {
+    while tracks
+        .iter()
+        .any(|t| matches!(t.codec.as_str(), "truehd" | "eac3") && t.profile.is_empty())
+        && Instant::now() < wait_until
+    {
         std::thread::sleep(Duration::from_millis(50));
         tracks = audio_tracks(mpv);
     }
     let _ = mpv.command(&["stop"]);
     // Wait for the stop so the next file's events don't mix with this one's.
     let deadline = Instant::now() + Duration::from_secs(5);
-    while let Some(event) = mpv.wait_event(deadline.saturating_duration_since(Instant::now()).as_secs_f64()) {
+    while let Some(event) = mpv.wait_event(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .as_secs_f64(),
+    ) {
         if matches!(event, Event::EndFile { .. } | Event::Shutdown) {
             break;
         }
@@ -146,7 +168,10 @@ fn audio_tracks(mpv: &Mpv) -> Vec<AudioTrack> {
     let count = mpv.get_i64("track-list/count").unwrap_or(0);
     (0..count)
         .filter_map(|i| {
-            let prop = |p: &str| mpv.get_string(&format!("track-list/{i}/{p}")).unwrap_or_default();
+            let prop = |p: &str| {
+                mpv.get_string(&format!("track-list/{i}/{p}"))
+                    .unwrap_or_default()
+            };
             if prop("type") != "audio" {
                 return None;
             }
@@ -155,9 +180,14 @@ fn audio_tracks(mpv: &Mpv) -> Vec<AudioTrack> {
                 title: prop("title"),
                 codec: prop("codec"),
                 profile: prop("codec-profile"),
-                channels: mpv.get_i64(&format!("track-list/{i}/demux-channel-count")).and_then(|c| u32::try_from(c).ok()).unwrap_or(0),
+                channels: mpv
+                    .get_i64(&format!("track-list/{i}/demux-channel-count"))
+                    .and_then(|c| u32::try_from(c).ok())
+                    .unwrap_or(0),
                 layout: prop("demux-channels"),
-                default: mpv.get_flag(&format!("track-list/{i}/default")).unwrap_or(false),
+                default: mpv
+                    .get_flag(&format!("track-list/{i}/default"))
+                    .unwrap_or(false),
             })
         })
         .collect()
@@ -174,22 +204,53 @@ mod tests {
     fn reads_audio_tracks() {
         let video = std::env::temp_dir().join(format!("flex-audio-{}.mkv", std::process::id()));
         let made = std::process::Command::new("ffmpeg")
-            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=2:rate=10:size=160x90"])
-            .args(["-f", "lavfi", "-i", "sine=duration=2", "-f", "lavfi", "-i", "sine=duration=2"])
-            .args(["-map", "0", "-map", "1", "-map", "2", "-c:a:0", "ac3", "-ac:a:0", "6", "-c:a:1", "aac", "-ac:a:1", "2"])
-            .args(["-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=jpn"])
+            .args([
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=duration=2:rate=10:size=160x90",
+            ])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=2",
+            ])
+            .args([
+                "-map", "0", "-map", "1", "-map", "2", "-c:a:0", "ac3", "-ac:a:0", "6", "-c:a:1",
+                "aac", "-ac:a:1", "2",
+            ])
+            .args([
+                "-metadata:s:a:0",
+                "language=eng",
+                "-metadata:s:a:1",
+                "language=jpn",
+            ])
             .arg(&video)
             .status()
             .unwrap();
         assert!(made.success());
         let mut mpv = None;
-        let job = Job { path: video.clone(), asked: Instant::now() };
+        let job = Job {
+            path: video.clone(),
+            asked: Instant::now(),
+        };
         let tracks = probe(&mut mpv, &job).unwrap();
         // Twice with the same mpv, as the worker does.
         assert_eq!(probe(&mut mpv, &job).unwrap(), tracks);
         let _ = std::fs::remove_file(&video);
         let described: Vec<String> = tracks.iter().map(AudioTrack::describe).collect();
-        assert_eq!(described, ["English · Dolby Digital 5.1", "Japanese · AAC stereo"], "{tracks:?}");
+        assert_eq!(
+            described,
+            ["English · Dolby Digital 5.1", "Japanese · AAC stereo"],
+            "{tracks:?}"
+        );
     }
 }
-

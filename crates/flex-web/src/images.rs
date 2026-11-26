@@ -29,7 +29,9 @@ pub fn url(path: &str, size: &str) -> String {
 fn encode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -41,12 +43,21 @@ fn web_cache_file(dir: &Path, url: &str) -> PathBuf {
     use std::hash::{DefaultHasher, Hash, Hasher};
     let mut h = DefaultHasher::new();
     url.hash(&mut h);
-    let ext = url.rsplit('.').next().filter(|e| e.len() <= 4).unwrap_or("img");
+    let ext = url
+        .rsplit('.')
+        .next()
+        .filter(|e| e.len() <= 4)
+        .unwrap_or("img");
     dir.join("web").join(format!("{:016x}.{ext}", h.finish()))
 }
 
 fn content_type(file: &Path) -> &'static str {
-    match file.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    match file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("png") => "image/png",
         Some("webp") => "image/webp",
         _ => "image/jpeg",
@@ -62,9 +73,17 @@ async fn cached(state: Arc<State>, file: PathBuf, url: Option<String>) -> Respon
         }
         let url = url.ok_or_else(|| anyhow::anyhow!("not cached"))?;
         let mut response = state.agent.get(&url).call()?;
-        let image = response.headers().get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|t| t.starts_with("image/"));
+        let image = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|t| t.starts_with("image/"));
         anyhow::ensure!(image, "{url} isn't an image");
-        let bytes = response.body_mut().with_config().limit(20_000_000).read_to_vec()?;
+        let bytes = response
+            .body_mut()
+            .with_config()
+            .limit(20_000_000)
+            .read_to_vec()?;
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -76,9 +95,14 @@ async fn cached(state: Arc<State>, file: PathBuf, url: Option<String>) -> Respon
     })
     .await;
     match result {
-        Ok(Ok((bytes, kind))) => {
-            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "public, max-age=604800")], bytes).into_response()
-        }
+        Ok(Ok((bytes, kind))) => (
+            [
+                (header::CONTENT_TYPE, kind),
+                (header::CACHE_CONTROL, "public, max-age=604800"),
+            ],
+            bytes,
+        )
+            .into_response(),
         Ok(Err(e)) => {
             log::debug!("web image: {e:#}");
             StatusCode::NOT_FOUND.into_response()
@@ -88,8 +112,14 @@ async fn cached(state: Arc<State>, file: PathBuf, url: Option<String>) -> Respon
 }
 
 /// `/img/{size}/{name}`: a TMDB image.
-pub async fn tmdb(AxState(state): AxState<Arc<State>>, UrlPath((size, name)): UrlPath<(String, String)>) -> Response {
-    let safe = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+pub async fn tmdb(
+    AxState(state): AxState<Arc<State>>,
+    UrlPath((size, name)): UrlPath<(String, String)>,
+) -> Response {
+    let safe = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
     if !SIZES.contains(&size.as_str()) || !safe {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -119,26 +149,50 @@ pub async fn web(AxState(state): AxState<Arc<State>>, Query(q): Query<WebImage>)
 /// somewhere else. No query or fragment either (image URLs don't have them), so the cache
 /// can't be filled with endless variants of one URL.
 fn allowed_web_image(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-    let hostname = !host.is_empty() && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    let hostname = !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
     let plain_path = !path.contains(['?', '#', '\\']);
-    hostname && plain_path && ["anilist.co", "tmdb.org"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+    hostname
+        && plain_path
+        && ["anilist.co", "tmdb.org"]
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
 }
 
 /// `/shot/{library}/{file}`: a screenshot the app has already taken, if any.
-pub async fn shot(AxState(state): AxState<Arc<State>>, UrlPath((library_id, file_id)): UrlPath<(i64, i64)>) -> Response {
+pub async fn shot(
+    AxState(state): AxState<Arc<State>>,
+    UrlPath((library_id, file_id)): UrlPath<(i64, i64)>,
+) -> Response {
     let snapshot = state.snapshot();
-    let Some(file) = snapshot.libraries.iter().find(|l| l.lib.id == library_id).and_then(|l| l.tree.file(file_id)) else {
+    let Some(file) = snapshot
+        .libraries
+        .iter()
+        .find(|l| l.lib.id == library_id)
+        .and_then(|l| l.tree.file(file_id))
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let path = state.shots_dir.join(format!("{}-{}", file.id, file.size)).join(THUMB_SHOT);
+    let path = state
+        .shots_dir
+        .join(format!("{}-{}", file.id, file.size))
+        .join(THUMB_SHOT);
     cached(state.clone(), path, None).await
 }
 
 /// Whether the app has a screenshot for a file (so pages only link ones that exist).
 pub fn has_shot(state: &State, file: &flex_core::MediaFile) -> bool {
-    state.shots_dir.join(format!("{}-{}", file.id, file.size)).join(THUMB_SHOT).exists()
+    state
+        .shots_dir
+        .join(format!("{}-{}", file.id, file.size))
+        .join(THUMB_SHOT)
+        .exists()
 }
 
 #[cfg(test)]
@@ -147,7 +201,9 @@ mod tests {
 
     #[test]
     fn web_images_only_come_from_metadata_hosts() {
-        assert!(allowed_web_image("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1-abc.png"));
+        assert!(allowed_web_image(
+            "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1-abc.png"
+        ));
         assert!(allowed_web_image("https://image.tmdb.org/t/p/w500/abc.jpg"));
         for bad in [
             "https://evil.example?.tmdb.org",

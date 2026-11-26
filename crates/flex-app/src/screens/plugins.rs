@@ -13,7 +13,10 @@ use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 /// Whether a switched-on plugin wants screen colours (so Ambient light is worth showing).
 fn light_plugin_on(sh: &Shared) -> bool {
-    sh.plugins.plugins().iter().any(|p| p.enabled && p.subscribes("light"))
+    sh.plugins
+        .plugins()
+        .iter()
+        .any(|p| p.enabled && p.subscribes("light"))
 }
 
 fn status_line(p: &Plugin) -> String {
@@ -82,10 +85,17 @@ impl Screen for Plugins {
             .plugins
             .plugins()
             .iter()
-            .map(|p| Row::new(Icon::None, &p.installed.manifest.name).detail(status_line(p)).dim(!p.enabled))
+            .map(|p| {
+                Row::new(Icon::None, &p.installed.manifest.name)
+                    .detail(status_line(p))
+                    .dim(!p.enabled)
+            })
             .collect();
         if light_plugin_on(sh) {
-            rows.push(Row::new(Icon::None, "Ambient light…").detail("How screen colours are turned into light"));
+            rows.push(
+                Row::new(Icon::None, "Ambient light…")
+                    .detail("How screen colours are turned into light"),
+            );
         }
         rows.push(Row::new(Icon::Refresh, "Look for new plugins"));
         let dir = flex_core::plugins::user_plugin_dir();
@@ -103,7 +113,10 @@ pub struct PluginOptions {
 
 impl PluginOptions {
     fn new(index: usize) -> Self {
-        Self { index, list: ListState::default() }
+        Self {
+            index,
+            list: ListState::default(),
+        }
     }
 }
 
@@ -116,7 +129,9 @@ fn next_value(p: &Plugin, spec: &SettingSpec, current: Option<&Value>) -> Option
             if options.is_empty() {
                 return None;
             }
-            let at = current.and_then(Value::as_str).and_then(|c| options.iter().position(|o| o.id == c));
+            let at = current
+                .and_then(Value::as_str)
+                .and_then(|c| options.iter().position(|o| o.id == c));
             let next = at.map_or(0, |i| (i + 1) % options.len());
             Some(json!(options[next].id))
         }
@@ -124,8 +139,16 @@ fn next_value(p: &Plugin, spec: &SettingSpec, current: Option<&Value>) -> Option
             let (min, max) = (spec.min.unwrap_or(0.0), spec.max.unwrap_or(100.0));
             let step = spec.step.unwrap_or(((max - min) / 10.0).max(1.0));
             let value = current.and_then(Value::as_f64).unwrap_or(min) + step;
-            let value = if value > max + step * 1e-6 { min } else { value.min(max) };
-            Some(if value.fract() == 0.0 { json!(value as i64) } else { json!(value) })
+            let value = if value > max + step * 1e-6 {
+                min
+            } else {
+                value.min(max)
+            };
+            Some(if value.fract() == 0.0 {
+                json!(value as i64)
+            } else {
+                json!(value)
+            })
         }
         SettingKind::Text | SettingKind::Button => None,
     }
@@ -133,7 +156,12 @@ fn next_value(p: &Plugin, spec: &SettingSpec, current: Option<&Value>) -> Option
 
 fn describe(p: &Plugin, spec: &SettingSpec, value: Option<&Value>) -> String {
     let shown = match spec.kind {
-        SettingKind::Bool => (if value.and_then(Value::as_bool).unwrap_or(false) { "on" } else { "off" }).to_owned(),
+        SettingKind::Bool => (if value.and_then(Value::as_bool).unwrap_or(false) {
+            "on"
+        } else {
+            "off"
+        })
+        .to_owned(),
         SettingKind::Choice => {
             let id = value.and_then(Value::as_str).unwrap_or("");
             match p.options(spec).iter().find(|o| o.id == id) {
@@ -143,7 +171,9 @@ fn describe(p: &Plugin, spec: &SettingSpec, value: Option<&Value>) -> String {
             }
         }
         SettingKind::Number => {
-            let n = value.and_then(Value::as_f64).unwrap_or(spec.min.unwrap_or(0.0));
+            let n = value
+                .and_then(Value::as_f64)
+                .unwrap_or(spec.min.unwrap_or(0.0));
             format!("{n}{}", spec.unit)
         }
         SettingKind::Text => match value.and_then(Value::as_str).filter(|s| !s.is_empty()) {
@@ -161,7 +191,9 @@ impl Screen for PluginOptions {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        let Some(p) = sh.plugins.plugins().get(self.index) else { return Nav::Pop };
+        let Some(p) = sh.plugins.plugins().get(self.index) else {
+            return Nav::Pop;
+        };
         let specs = p.installed.manifest.settings.clone();
         let enabled = p.enabled;
         match self.list.handle(press, 1 + specs.len()) {
@@ -186,8 +218,22 @@ impl Screen for PluginOptions {
                     }
                     SettingKind::Text => {
                         // A secret starts empty rather than showing what's saved.
-                        let text = if spec.secret { String::new() } else { current.as_ref().and_then(Value::as_str).unwrap_or("").to_owned() };
-                        Nav::push(TextEntry::plugin_setting(self.index, &spec.key, &spec.label, text, spec.secret))
+                        let text = if spec.secret {
+                            String::new()
+                        } else {
+                            current
+                                .as_ref()
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_owned()
+                        };
+                        Nav::push(TextEntry::plugin_setting(
+                            self.index,
+                            &spec.key,
+                            &spec.label,
+                            text,
+                            spec.secret,
+                        ))
                     }
                     _ => {
                         match next_value(p, spec, current.as_ref()) {
@@ -206,7 +252,9 @@ impl Screen for PluginOptions {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some(p) = sh.plugins.plugins().get(self.index) else { return Nav::Pop };
+        let Some(p) = sh.plugins.plugins().get(self.index) else {
+            return Nav::Pop;
+        };
         let m = &p.installed.manifest;
         let subtitle = match (m.description.is_empty(), m.version.is_empty()) {
             (false, false) => format!("{} · version {}", m.description, m.version),
@@ -215,16 +263,34 @@ impl Screen for PluginOptions {
             (true, true) => String::new(),
         };
         let body = widgets::header(ui.painter(), rect, &m.name, &subtitle, ui.style());
-        let mut rows = vec![Row::new(Icon::None, if p.enabled { "Switched on" } else { "Switched off" }).detail(status_line(p))];
+        let mut rows = vec![
+            Row::new(
+                Icon::None,
+                if p.enabled {
+                    "Switched on"
+                } else {
+                    "Switched off"
+                },
+            )
+            .detail(status_line(p)),
+        ];
         for spec in &m.settings {
-            let icon = if spec.kind == SettingKind::Button { Icon::Refresh } else { Icon::None };
+            let icon = if spec.kind == SettingKind::Button {
+                Icon::Refresh
+            } else {
+                Icon::None
+            };
             let detail = match spec.kind {
                 _ if !spec.detail.is_empty() => spec.detail.clone(),
                 SettingKind::Text => "OK to type".to_owned(),
                 SettingKind::Button => String::new(),
                 _ => "OK to change".to_owned(),
             };
-            rows.push(Row::new(icon, describe(p, spec, p.settings.get(&spec.key))).detail(detail).dim(!p.enabled));
+            rows.push(
+                Row::new(icon, describe(p, spec, p.settings.get(&spec.key)))
+                    .detail(detail)
+                    .dim(!p.enabled),
+            );
         }
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
@@ -259,7 +325,9 @@ impl Screen for AmbientLight {
         let rows: Vec<Row> = CHOICES
             .iter()
             .zip(sh.ambient.values)
-            .map(|(c, v)| Row::new(Icon::None, format!("{}: {}", c.label, c.options[v])).detail(c.detail))
+            .map(|(c, v)| {
+                Row::new(Icon::None, format!("{}: {}", c.label, c.options[v])).detail(c.detail)
+            })
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None

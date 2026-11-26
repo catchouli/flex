@@ -84,14 +84,38 @@ impl Upscale {
 
 /// The shaders, from <https://github.com/bloc97/Anime4K> (MIT, see shaders/anime4k/LICENSE).
 const SHADERS: &[(&str, &str)] = &[
-    ("Anime4K_AutoDownscalePre_x2.glsl", include_str!("../shaders/anime4k/Anime4K_AutoDownscalePre_x2.glsl")),
-    ("Anime4K_AutoDownscalePre_x4.glsl", include_str!("../shaders/anime4k/Anime4K_AutoDownscalePre_x4.glsl")),
-    ("Anime4K_Clamp_Highlights.glsl", include_str!("../shaders/anime4k/Anime4K_Clamp_Highlights.glsl")),
-    ("Anime4K_Restore_CNN_M.glsl", include_str!("../shaders/anime4k/Anime4K_Restore_CNN_M.glsl")),
-    ("Anime4K_Restore_CNN_VL.glsl", include_str!("../shaders/anime4k/Anime4K_Restore_CNN_VL.glsl")),
-    ("Anime4K_Upscale_CNN_x2_M.glsl", include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_M.glsl")),
-    ("Anime4K_Upscale_CNN_x2_S.glsl", include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_S.glsl")),
-    ("Anime4K_Upscale_CNN_x2_VL.glsl", include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_VL.glsl")),
+    (
+        "Anime4K_AutoDownscalePre_x2.glsl",
+        include_str!("../shaders/anime4k/Anime4K_AutoDownscalePre_x2.glsl"),
+    ),
+    (
+        "Anime4K_AutoDownscalePre_x4.glsl",
+        include_str!("../shaders/anime4k/Anime4K_AutoDownscalePre_x4.glsl"),
+    ),
+    (
+        "Anime4K_Clamp_Highlights.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Clamp_Highlights.glsl"),
+    ),
+    (
+        "Anime4K_Restore_CNN_M.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Restore_CNN_M.glsl"),
+    ),
+    (
+        "Anime4K_Restore_CNN_VL.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Restore_CNN_VL.glsl"),
+    ),
+    (
+        "Anime4K_Upscale_CNN_x2_M.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_M.glsl"),
+    ),
+    (
+        "Anime4K_Upscale_CNN_x2_S.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_S.glsl"),
+    ),
+    (
+        "Anime4K_Upscale_CNN_x2_VL.glsl",
+        include_str!("../shaders/anime4k/Anime4K_Upscale_CNN_x2_VL.glsl"),
+    ),
 ];
 
 /// mpv takes shaders as files, so they're written to the data folder (again whenever
@@ -101,7 +125,10 @@ fn shader_files(upscale: Upscale) -> std::io::Result<Vec<PathBuf>> {
     std::fs::create_dir_all(&dir)?;
     let mut out = Vec::new();
     for name in upscale.shaders() {
-        let (_, text) = SHADERS.iter().find(|(n, _)| n == name).expect("bundled shader");
+        let (_, text) = SHADERS
+            .iter()
+            .find(|(n, _)| n == name)
+            .expect("bundled shader");
         let path = dir.join(name);
         if std::fs::read_to_string(&path).ok().as_deref() != Some(*text) {
             std::fs::write(&path, text)?;
@@ -177,7 +204,10 @@ pub mod svp {
     }
 
     fn places() -> Vec<PathBuf> {
-        let mut out: Vec<PathBuf> = std::env::var_os(DIR_ENV).map(PathBuf::from).into_iter().collect();
+        let mut out: Vec<PathBuf> = std::env::var_os(DIR_ENV)
+            .map(PathBuf::from)
+            .into_iter()
+            .collect();
         #[cfg(windows)]
         for var in ["ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"] {
             if let Some(dir) = std::env::var_os(var) {
@@ -201,7 +231,9 @@ pub mod svp {
         if cfg!(target_os = "macos") {
             dir.join("Contents").is_dir()
         } else {
-            ["SVPManager.exe", "SVPManager"].iter().any(|f| dir.join(f).is_file())
+            ["SVPManager.exe", "SVPManager"]
+                .iter()
+                .any(|f| dir.join(f).is_file())
         }
     }
 
@@ -209,7 +241,10 @@ pub mod svp {
     pub fn find() -> Option<Svp> {
         let dir = places().into_iter().find(|d| is_svp(d))?;
         let mpv = dir.join("mpv64");
-        let libmpv_dir = crate::mpv::ffi::NAMES.iter().any(|n| mpv.join(n).is_file()).then_some(mpv);
+        let libmpv_dir = crate::mpv::ffi::NAMES
+            .iter()
+            .any(|n| mpv.join(n).is_file())
+            .then_some(mpv);
         Some(Svp { dir, libmpv_dir })
     }
 
@@ -231,7 +266,10 @@ mod tests {
     fn presets_use_bundled_shaders() {
         for upscale in Upscale::ALL {
             for name in upscale.shaders() {
-                assert!(SHADERS.iter().any(|(n, _)| n == name), "{name} isn't bundled");
+                assert!(
+                    SHADERS.iter().any(|(n, _)| n == name),
+                    "{name} isn't bundled"
+                );
             }
             assert_eq!(Upscale::from_setting(Some(upscale.setting())), upscale);
         }

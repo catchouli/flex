@@ -56,17 +56,31 @@ impl Tree {
 
     /// Ids of every file below folder `dir` ("" = everything).
     pub fn ids_under(&self, dir: &str) -> Vec<i64> {
-        let prefix = if dir.is_empty() { String::new() } else { format!("{dir}/") };
-        self.files.iter().filter(|f| f.rel_path.starts_with(&prefix)).map(|f| f.id).collect()
+        let prefix = if dir.is_empty() {
+            String::new()
+        } else {
+            format!("{dir}/")
+        };
+        self.files
+            .iter()
+            .filter(|f| f.rel_path.starts_with(&prefix))
+            .map(|f| f.id)
+            .collect()
     }
 
     /// Immediate children of folder `dir` ("" for the root): folders first, then files.
     pub fn children(&self, dir: &str) -> Vec<Node> {
-        let prefix = if dir.is_empty() { String::new() } else { format!("{dir}/") };
+        let prefix = if dir.is_empty() {
+            String::new()
+        } else {
+            format!("{dir}/")
+        };
         let mut dirs: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
         let mut files = Vec::new();
         for f in &self.files {
-            let Some(rest) = f.rel_path.strip_prefix(&prefix) else { continue };
+            let Some(rest) = f.rel_path.strip_prefix(&prefix) else {
+                continue;
+            };
             match rest.split_once('/') {
                 Some((sub, _)) => {
                     let counts = dirs.entry(sub).or_default();
@@ -96,7 +110,10 @@ impl Tree {
     /// The only video below `dir`, if there is exactly one (e.g. a movie in its own folder).
     pub fn single_video_in(&self, dir: &str) -> Option<&MediaFile> {
         let prefix = format!("{dir}/");
-        let mut it = self.files.iter().filter(|f| f.rel_path.starts_with(&prefix));
+        let mut it = self
+            .files
+            .iter()
+            .filter(|f| f.rel_path.starts_with(&prefix));
         let first = it.next()?;
         it.next().is_none().then_some(first)
     }
@@ -107,21 +124,28 @@ impl Tree {
         let dir = parent_of(&self.files[pos].rel_path);
         // Files sort by full path, so the next file in the same folder is the next entry
         // with the same parent (subfolders of `dir` may sit in between).
-        self.files[pos + 1..].iter().find(|f| parent_of(&f.rel_path) == dir)
+        self.files[pos + 1..]
+            .iter()
+            .find(|f| parent_of(&f.rel_path) == dir)
     }
 
     /// The first unwatched file after `id` in the same folder.
     pub fn next_unwatched_in_folder(&self, id: i64) -> Option<&MediaFile> {
         let pos = self.files.iter().position(|f| f.id == id)?;
         let dir = parent_of(&self.files[pos].rel_path);
-        self.files[pos + 1..].iter().find(|f| parent_of(&f.rel_path) == dir && !f.progress.watched)
+        self.files[pos + 1..]
+            .iter()
+            .find(|f| parent_of(&f.rel_path) == dir && !f.progress.watched)
     }
 
     /// The file before `id` in the same folder, in natural order.
     pub fn prev_in_folder(&self, id: i64) -> Option<&MediaFile> {
         let pos = self.files.iter().position(|f| f.id == id)?;
         let dir = parent_of(&self.files[pos].rel_path);
-        self.files[..pos].iter().rev().find(|f| parent_of(&f.rel_path) == dir)
+        self.files[..pos]
+            .iter()
+            .rev()
+            .find(|f| parent_of(&f.rel_path) == dir)
     }
 
     /// Every distinct folder path, for search.
@@ -149,29 +173,53 @@ mod tests {
             paths
                 .iter()
                 .enumerate()
-                .map(|(i, p)| MediaFile { id: i as i64, library_id: 1, rel_path: (*p).into(), ..Default::default() })
+                .map(|(i, p)| MediaFile {
+                    id: i as i64,
+                    library_id: 1,
+                    rel_path: (*p).into(),
+                    ..Default::default()
+                })
                 .collect(),
         )
     }
 
     #[test]
     fn children_and_next() {
-        let t = tree(&["Show/S1/ep10.mkv", "Show/S1/ep2.mkv", "Show/S1/Extras/x.mkv", "Show/S2/ep1.mkv", "movie.mkv"]);
+        let t = tree(&[
+            "Show/S1/ep10.mkv",
+            "Show/S1/ep2.mkv",
+            "Show/S1/Extras/x.mkv",
+            "Show/S2/ep1.mkv",
+            "movie.mkv",
+        ]);
         let root: Vec<_> = t
             .children("")
             .into_iter()
             .map(|n| match n {
-                Node::Dir { name, videos, unwatched, .. } => format!("{name}/{videos}/{unwatched}"),
+                Node::Dir {
+                    name,
+                    videos,
+                    unwatched,
+                    ..
+                } => format!("{name}/{videos}/{unwatched}"),
                 Node::File(f) => f.rel_path,
             })
             .collect();
         assert_eq!(root, ["Show/4/4", "movie.mkv"]);
         assert_eq!(t.ids_under("Show/S1").len(), 3);
 
-        let ep2 = t.files().iter().find(|f| f.rel_path.ends_with("ep2.mkv")).unwrap().id;
+        let ep2 = t
+            .files()
+            .iter()
+            .find(|f| f.rel_path.ends_with("ep2.mkv"))
+            .unwrap()
+            .id;
         assert_eq!(t.next_in_folder(ep2).unwrap().rel_path, "Show/S1/ep10.mkv");
         let ep10 = t.next_in_folder(ep2).unwrap().id;
-        assert!(t.next_in_folder(ep10).is_none(), "end of season must not roll into S2");
+        assert!(
+            t.next_in_folder(ep10).is_none(),
+            "end of season must not roll into S2"
+        );
         assert_eq!(t.prev_in_folder(ep10).unwrap().id, ep2);
         assert!(t.prev_in_folder(ep2).is_none());
 

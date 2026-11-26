@@ -37,12 +37,17 @@ impl Screen for Settings {
             ListInput::Activate(i) if i == libs => Nav::push(FolderPicker::new(sh)),
             ListInput::Activate(i) if i == libs + 1 => {
                 let current = sh.watched_threshold();
-                let i = WATCHED_THRESHOLDS.iter().position(|t| (t - current).abs() < 0.001).unwrap_or(2);
+                let i = WATCHED_THRESHOLDS
+                    .iter()
+                    .position(|t| (t - current).abs() < 0.001)
+                    .unwrap_or(2);
                 sh.set_watched_threshold(WATCHED_THRESHOLDS[(i + 1) % WATCHED_THRESHOLDS.len()]);
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 2 => Nav::push(TextEntry::tmdb_token()),
-            ListInput::Activate(i) if i == libs + 3 => Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase)),
+            ListInput::Activate(i) if i == libs + 3 => {
+                Nav::push(FolderPicker::with_purpose(sh, Purpose::PlexDatabase))
+            }
             ListInput::Activate(i) if i == libs + 4 => {
                 sh.scan_all(false);
                 sh.toast("Scanning all libraries for changes…");
@@ -57,7 +62,9 @@ impl Screen for Settings {
                 crate::logging::open_logs_folder();
                 Nav::None
             }
-            ListInput::Activate(i) if i == libs + 7 => Nav::push(FolderPicker::with_purpose(sh, Purpose::CrashFolder)),
+            ListInput::Activate(i) if i == libs + 7 => {
+                Nav::push(FolderPicker::with_purpose(sh, Purpose::CrashFolder))
+            }
             ListInput::Activate(i) if i == libs + 8 => {
                 let on = !sh.web_enabled();
                 sh.set_web_enabled(on);
@@ -67,14 +74,18 @@ impl Screen for Settings {
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 9 => Nav::push(Plugins::default()),
-            ListInput::Activate(i) if i == libs + 10 => Nav::push(super::youtube::YouTubeSettings::default()),
+            ListInput::Activate(i) if i == libs + 10 => {
+                Nav::push(super::youtube::YouTubeSettings::default())
+            }
             ListInput::Activate(i) if i == libs + 11 => {
                 let next = sh.skip_mode().next();
                 sh.set_skip_mode(next);
                 Nav::None
             }
             ListInput::Activate(i) if i == libs + 12 => Nav::push(PictureSettings::default()),
-            ListInput::Activate(i) if i == libs + 13 => Nav::push(super::sync::SyncSettings::default()),
+            ListInput::Activate(i) if i == libs + 13 => {
+                Nav::push(super::sync::SyncSettings::default())
+            }
             ListInput::Activate(i) if i == libs + 14 => Nav::push(super::themes::Themes::default()),
             ListInput::Activate(i) if TRAY && i == tray_row => {
                 sh.set_close_to_tray(!sh.close_to_tray);
@@ -102,57 +113,122 @@ impl Screen for Settings {
             .libs
             .iter()
             .map(|l| {
-                Row::new(Icon::Folder, &l.lib.name)
-                    .detail(format!("{} · {} · {}", l.lib.kind.label(), l.status(), l.lib.root.display()))
+                Row::new(Icon::Folder, &l.lib.name).detail(format!(
+                    "{} · {} · {}",
+                    l.lib.kind.label(),
+                    l.status(),
+                    l.lib.root.display()
+                ))
             })
             .collect();
         rows.push(Row::new(Icon::Add, "Add library…"));
         let threshold = (sh.watched_threshold() * 100.0).round();
-        rows.push(Row::new(Icon::None, format!("Mark as watched after {threshold}%")).detail("OK to change"));
-        let tmdb = if sh.tmdb_token().is_some() { "connected" } else { "not set up" };
-        rows.push(Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}")).detail("OK to enter a token"));
-        rows.push(Row::new(Icon::Add, "Import from Plex…").detail("Watched state, resume points and history"));
-        rows.push(Row::new(Icon::Refresh, "Scan all libraries for changes").detail("New, moved and deleted files"));
-        rows.push(Row::new(Icon::Refresh, "Rescan all libraries from scratch").detail("Slower: looks at every file again"));
-        rows.push(Row::new(Icon::Folder, "Open logs folder").detail(crate::logging::logs_dir().display().to_string()));
-        let crashes = sh.crash_dir().map_or("the logs folder".to_owned(), |d| d.display().to_string());
-        rows.push(Row::new(Icon::Folder, "Crash reports folder…").detail(format!("Log + minidump go in {crashes}")));
+        rows.push(
+            Row::new(Icon::None, format!("Mark as watched after {threshold}%"))
+                .detail("OK to change"),
+        );
+        let tmdb = if sh.tmdb_token().is_some() {
+            "connected"
+        } else {
+            "not set up"
+        };
+        rows.push(
+            Row::new(Icon::None, format!("TMDB (titles & posters): {tmdb}"))
+                .detail("OK to enter a token"),
+        );
+        rows.push(
+            Row::new(Icon::Add, "Import from Plex…")
+                .detail("Watched state, resume points and history"),
+        );
+        rows.push(
+            Row::new(Icon::Refresh, "Scan all libraries for changes")
+                .detail("New, moved and deleted files"),
+        );
+        rows.push(
+            Row::new(Icon::Refresh, "Rescan all libraries from scratch")
+                .detail("Slower: looks at every file again"),
+        );
+        rows.push(
+            Row::new(Icon::Folder, "Open logs folder")
+                .detail(crate::logging::logs_dir().display().to_string()),
+        );
+        let crashes = sh
+            .crash_dir()
+            .map_or("the logs folder".to_owned(), |d| d.display().to_string());
+        rows.push(
+            Row::new(Icon::Folder, "Crash reports folder…")
+                .detail(format!("Log + minidump go in {crashes}")),
+        );
         rows.push(match sh.web_url() {
-            Some(url) => Row::new(Icon::None, "Web access: on").detail(format!("Open {url} on phones and PCs at home")),
-            None => Row::new(Icon::None, "Web access: off").detail("Browse your libraries from other devices at home"),
+            Some(url) => Row::new(Icon::None, "Web access: on")
+                .detail(format!("Open {url} on phones and PCs at home")),
+            None => Row::new(Icon::None, "Web access: off")
+                .detail("Browse your libraries from other devices at home"),
         });
         let plugins = sh.plugins.plugins();
         let on = plugins.iter().filter(|p| p.enabled).count();
-        rows.push(Row::new(Icon::None, "Plugins…").detail(match plugins.len() {
-            0 => "None installed".to_owned(),
-            n => format!("{n} installed · {on} on"),
-        }));
-        let youtube = if sh.youtube_enabled() { "on" } else { "off" };
-        rows.push(Row::new(Icon::None, format!("YouTube: {youtube}…")).detail("No ads, SponsorBlock, subscriptions"));
         rows.push(
-            Row::new(Icon::None, format!("Skip openings and endings: {}", sh.skip_mode().label()))
-                .detail("For files with OP/ED chapters · OK to change"),
+            Row::new(Icon::None, "Plugins…").detail(match plugins.len() {
+                0 => "None installed".to_owned(),
+                n => format!("{n} installed · {on} on"),
+            }),
         );
-        rows.push(Row::new(Icon::None, format!("Picture: {}…", picture_summary(sh))).detail("Anime4K upscaling and 60fps (SVP)"));
+        let youtube = if sh.youtube_enabled() { "on" } else { "off" };
+        rows.push(
+            Row::new(Icon::None, format!("YouTube: {youtube}…"))
+                .detail("No ads, SponsorBlock, subscriptions"),
+        );
+        rows.push(
+            Row::new(
+                Icon::None,
+                format!("Skip openings and endings: {}", sh.skip_mode().label()),
+            )
+            .detail("For files with OP/ED chapters · OK to change"),
+        );
+        rows.push(
+            Row::new(Icon::None, format!("Picture: {}…", picture_summary(sh)))
+                .detail("Anime4K upscaling and 60fps (SVP)"),
+        );
         let sync = if sh.sync_dir().is_some() { "on" } else { "off" };
-        rows.push(Row::new(Icon::None, format!("Sync with other devices: {sync}…")).detail("Share what you've watched through a shared folder"));
-        rows.push(Row::new(Icon::None, format!("Theme: {}…", crate::theme::current().name)).detail("Dark, Final Fantasy VII, Old School RuneScape, Windows 95 and more"));
+        rows.push(
+            Row::new(Icon::None, format!("Sync with other devices: {sync}…"))
+                .detail("Share what you've watched through a shared folder"),
+        );
+        rows.push(
+            Row::new(
+                Icon::None,
+                format!("Theme: {}…", crate::theme::current().name),
+            )
+            .detail("Dark, Final Fantasy VII, Old School RuneScape, Windows 95 and more"),
+        );
         if TRAY {
             let on = if sh.close_to_tray { "on" } else { "off" };
-            rows.push(Row::new(Icon::None, format!("Close to system tray: {on}")).detail("Closing keeps Flex running in the tray, so it opens instantly"));
+            rows.push(
+                Row::new(Icon::None, format!("Close to system tray: {on}"))
+                    .detail("Closing keeps Flex running in the tray, so it opens instantly"),
+            );
         }
         #[cfg(windows)]
         {
-            let on = if crate::autostart::is_enabled() { "on" } else { "off" };
-            let detail = if sh.close_to_tray { "Starts hidden in the tray" } else { "Opens Flex when you sign in" };
+            let on = if crate::autostart::is_enabled() {
+                "on"
+            } else {
+                "off"
+            };
+            let detail = if sh.close_to_tray {
+                "Starts hidden in the tray"
+            } else {
+                "Opens Flex when you sign in"
+            };
             rows.push(Row::new(Icon::None, format!("Start with Windows: {on}")).detail(detail));
         }
         if crate::update::installed() {
             let on = if sh.auto_update() { "on" } else { "off" };
             let version = crate::update::current_version();
             rows.push(
-                Row::new(Icon::None, format!("Update automatically: {on}"))
-                    .detail(format!("Version {version} · new versions install while nothing is playing")),
+                Row::new(Icon::None, format!("Update automatically: {on}")).detail(format!(
+                    "Version {version} · new versions install while nothing is playing"
+                )),
             );
         }
         widgets::list(ui, body, &rows, &mut self.list, focused);
@@ -182,44 +258,77 @@ enum LibraryChoice {
 
 impl LibraryOptions {
     fn new(library_id: i64) -> Self {
-        Self { library_id, confirm_remove: false, list: ListState::default() }
+        Self {
+            library_id,
+            confirm_remove: false,
+            list: ListState::default(),
+        }
     }
 
     /// The rows, in order. The picture switches only show while they're on in Settings →
     /// Picture (and not for music).
     fn choices(&self, sh: &Shared) -> Vec<(Row, LibraryChoice)> {
-        let Some(state) = sh.lib(self.library_id) else { return Vec::new() };
+        let Some(state) = sh.lib(self.library_id) else {
+            return Vec::new();
+        };
         let on_off = |on: bool| if on { "on" } else { "off" };
         let mut out = vec![
-            (Row::new(Icon::Refresh, "Scan for changes").detail("New, moved and deleted files"), LibraryChoice::Scan),
-            (Row::new(Icon::Refresh, "Rescan from scratch").detail("Slower: looks at every file again"), LibraryChoice::Rescan),
-            (Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"), LibraryChoice::Rename),
-            (Row::new(Icon::None, format!("Type: {}", state.lib.kind.label())).detail("OK to change"), LibraryChoice::Kind),
             (
-                Row::new(Icon::None, match sh.library_view(self.library_id) {
-                    LibraryView::Shows => "Opens in: Shows",
-                    LibraryView::Folders => "Opens in: Folders",
-                })
+                Row::new(Icon::Refresh, "Scan for changes").detail("New, moved and deleted files"),
+                LibraryChoice::Scan,
+            ),
+            (
+                Row::new(Icon::Refresh, "Rescan from scratch")
+                    .detail("Slower: looks at every file again"),
+                LibraryChoice::Rescan,
+            ),
+            (
+                Row::new(Icon::None, format!("Name: {}", state.lib.name)).detail("OK to rename"),
+                LibraryChoice::Rename,
+            ),
+            (
+                Row::new(Icon::None, format!("Type: {}", state.lib.kind.label()))
+                    .detail("OK to change"),
+                LibraryChoice::Kind,
+            ),
+            (
+                Row::new(
+                    Icon::None,
+                    match sh.library_view(self.library_id) {
+                        LibraryView::Shows => "Opens in: Shows",
+                        LibraryView::Folders => "Opens in: Folders",
+                    },
+                )
                 .detail("OK to change"),
                 LibraryChoice::View,
             ),
-            (Row::new(Icon::Refresh, "Re-match online").detail("Redo automatic matches; keeps your fixes"), LibraryChoice::Rematch),
+            (
+                Row::new(Icon::Refresh, "Re-match online")
+                    .detail("Redo automatic matches; keeps your fixes"),
+                LibraryChoice::Rematch,
+            ),
         ];
         if !state.is_music() {
             let audio = match sh.library_audio(self.library_id) {
                 LibraryAudio::Original => "original language",
                 LibraryAudio::FileDefault => "file's default",
             };
-            let row = Row::new(Icon::None, format!("Audio: {audio}")).detail("Changing it while watching is remembered per show · OK to change");
+            let row = Row::new(Icon::None, format!("Audio: {audio}"))
+                .detail("Changing it while watching is remembered per show · OK to change");
             out.push((row, LibraryChoice::Audio));
             if sh.picture_upscale() != Upscale::Off {
                 let on = sh.library_upscale(self.library_id);
-                let row = Row::new(Icon::None, format!("Anime4K upscaling here: {}", on_off(on))).detail("OK to change");
+                let row = Row::new(
+                    Icon::None,
+                    format!("Anime4K upscaling here: {}", on_off(on)),
+                )
+                .detail("OK to change");
                 out.push((row, LibraryChoice::Upscale));
             }
             if sh.picture_smooth() {
                 let on = sh.library_smooth(self.library_id);
-                let row = Row::new(Icon::None, format!("60fps (SVP) here: {}", on_off(on))).detail("OK to change");
+                let row = Row::new(Icon::None, format!("60fps (SVP) here: {}", on_off(on)))
+                    .detail("OK to change");
                 out.push((row, LibraryChoice::Smooth));
             }
         }
@@ -238,7 +347,9 @@ impl Screen for LibraryOptions {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
+        let Some(state) = sh.lib(self.library_id) else {
+            return Nav::Pop;
+        };
         let kind = state.lib.kind;
         let choices: Vec<LibraryChoice> = self.choices(sh).into_iter().map(|c| c.1).collect();
         let input = self.list.handle(press, choices.len());
@@ -252,9 +363,18 @@ impl Screen for LibraryOptions {
         match choice {
             LibraryChoice::Scan => sh.start_scan(self.library_id, false),
             LibraryChoice::Rescan => sh.start_scan(self.library_id, true),
-            LibraryChoice::Rename => return Nav::push(TextEntry::rename_library(sh, self.library_id, "Rename library")),
+            LibraryChoice::Rename => {
+                return Nav::push(TextEntry::rename_library(
+                    sh,
+                    self.library_id,
+                    "Rename library",
+                ));
+            }
             LibraryChoice::Kind => {
-                let i = LibraryKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+                let i = LibraryKind::ALL
+                    .iter()
+                    .position(|k| *k == kind)
+                    .unwrap_or(0);
                 let next = LibraryKind::ALL[(i + 1) % LibraryKind::ALL.len()];
                 if let Err(e) = sh.set_kind(self.library_id, next) {
                     sh.toast(format!("{e:#}"));
@@ -300,7 +420,9 @@ impl Screen for LibraryOptions {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
+        let Some(state) = sh.lib(self.library_id) else {
+            return Nav::Pop;
+        };
         let subtitle = format!("{} · {}", state.lib.root.display(), state.status());
         let body = widgets::header(ui.painter(), rect, &state.lib.name, &subtitle, ui.style());
         let rows: Vec<Row> = self.choices(sh).into_iter().map(|c| c.0).collect();
@@ -348,7 +470,13 @@ impl Screen for PictureSettings {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let body = widgets::header(ui.painter(), rect, "Picture", "For every library; switch them off in a library's options", ui.style());
+        let body = widgets::header(
+            ui.painter(),
+            rect,
+            "Picture",
+            "For every library; switch them off in a library's options",
+            ui.style(),
+        );
         let upscale = sh.picture_upscale();
         let smooth = if sh.picture_smooth() { "on" } else { "off" };
         let svp = match svp::find() {
@@ -356,8 +484,11 @@ impl Screen for PictureSettings {
             None => "Needs SVP (svp-team.com), which isn't installed",
         };
         let rows = [
-            Row::new(Icon::None, format!("Anime4K upscaling: {}", upscale.label()))
-                .detail("Sharper lines on lower-resolution video, made for anime · OK to change"),
+            Row::new(
+                Icon::None,
+                format!("Anime4K upscaling: {}", upscale.label()),
+            )
+            .detail("Sharper lines on lower-resolution video, made for anime · OK to change"),
             Row::new(Icon::None, format!("60fps smoothing: {smooth}")).detail(svp),
         ];
         widgets::list(ui, body, &rows, &mut self.list, focused);

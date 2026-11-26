@@ -35,7 +35,9 @@ const SERIES: [&str; 3] = ["TV", "TV_SHORT", "ONA"];
 const MAX_WAIT_SECS: u64 = 65;
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 #[derive(Debug, PartialEq)]
@@ -67,7 +69,13 @@ impl Entry {
         let titles = ["romaji", "english", "native"]
             .iter()
             .filter_map(|k| v["title"][*k].as_str())
-            .chain(v["synonyms"].as_array().into_iter().flatten().filter_map(Value::as_str))
+            .chain(
+                v["synonyms"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str),
+            )
             .map(str::to_owned)
             .collect();
         let sequels = v["relations"]["edges"]
@@ -77,7 +85,11 @@ impl Entry {
             .filter(|e| e["relationType"] == "SEQUEL" && e["node"]["type"] == "ANIME")
             .filter_map(|e| {
                 let n = &e["node"];
-                Some((n["id"].as_i64()?, n["format"].as_str().unwrap_or_default().to_owned(), year(n)))
+                Some((
+                    n["id"].as_i64()?,
+                    n["format"].as_str().unwrap_or_default().to_owned(),
+                    year(n),
+                ))
             })
             .collect();
         Some(Self {
@@ -94,14 +106,24 @@ impl Entry {
     fn is_part(&self) -> bool {
         self.titles.iter().any(|t| {
             let t = t.to_lowercase();
-            let words: Vec<&str> = t.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-            words.contains(&"cour") || words.windows(2).any(|w| w[0] == "part" && !matches!(w[1], "1" | "i" | "one"))
+            let words: Vec<&str> = t
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .collect();
+            words.contains(&"cour")
+                || words
+                    .windows(2)
+                    .any(|w| w[0] == "part" && !matches!(w[1], "1" | "i" | "one"))
         })
     }
 
     /// The next entry along: the earliest sequel in a series format.
     fn next(&self) -> Option<i64> {
-        let mut sequels: Vec<_> = self.sequels.iter().filter(|(_, f, _)| SERIES.contains(&f.as_str())).collect();
+        let mut sequels: Vec<_> = self
+            .sequels
+            .iter()
+            .filter(|(_, f, _)| SERIES.contains(&f.as_str()))
+            .collect();
         sequels.sort_by_key(|(_, _, y)| y.unwrap_or(i32::MAX));
         sequels.first().map(|(id, _, _)| *id)
     }
@@ -113,7 +135,10 @@ fn year(v: &Value) -> Option<i32> {
 
 /// Lowercase letters and digits only, so "Journey's" and "Journey’s" compare equal.
 fn norm(s: &str) -> String {
-    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// When a token runs out (Unix time): the `exp` in its JWT payload.
@@ -200,7 +225,12 @@ impl AniList {
     }
 
     fn text(&self, key: &str) -> String {
-        self.settings.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_owned()
+        self.settings
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
     }
 
     fn token(&self) -> Option<String> {
@@ -208,26 +238,43 @@ impl AniList {
     }
 
     fn client_id(&self) -> String {
-        Some(self.text("client_id")).filter(|c| !c.is_empty()).unwrap_or_else(|| CLIENT_ID.to_owned())
+        Some(self.text("client_id"))
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| CLIENT_ID.to_owned())
     }
 
     /// A GraphQL request. Waits once for AniList's rate limit if it's hit.
     fn query(&self, query: &str, variables: Value, token: Option<&str>) -> Result<Value, Error> {
         let body = json!({ "query": query, "variables": variables });
         for attempt in 0..2 {
-            let mut req = self.agent.post(&self.api).header("User-Agent", USER_AGENT).header("Accept", "application/json");
+            let mut req = self
+                .agent
+                .post(&self.api)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json");
             if let Some(token) = token {
                 req = req.header("Authorization", format!("Bearer {token}"));
             }
-            let mut res = req.send_json(&body).map_err(|e| Error::Other(format!("AniList: {e}")))?;
+            let mut res = req
+                .send_json(&body)
+                .map_err(|e| Error::Other(format!("AniList: {e}")))?;
             let status = res.status().as_u16();
             if status == 429 && attempt == 0 {
-                let wait = res.headers().get("Retry-After").and_then(|v| v.to_str().ok()?.parse().ok()).unwrap_or(60);
+                let wait = res
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|v| v.to_str().ok()?.parse().ok())
+                    .unwrap_or(60);
                 std::thread::sleep(Duration::from_secs(u64::min(wait, MAX_WAIT_SECS)));
                 continue;
             }
             let v: Value = res.body_mut().read_json().unwrap_or(Value::Null);
-            let refused = status == 401 || v["errors"].as_array().into_iter().flatten().any(|e| e["status"] == 401);
+            let refused = status == 401
+                || v["errors"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|e| e["status"] == 401);
             if refused && token.is_some() {
                 return Err(Error::SignedOut);
             }
@@ -244,8 +291,13 @@ impl AniList {
         if let Some(e) = self.entries.get(&id) {
             return Ok(e.clone());
         }
-        let data = self.query(&format!("query($id: Int) {{ Media(id: $id, type: ANIME) {{ ...entry }} }} {ENTRY}"), json!({ "id": id }), None)?;
-        let entry = Entry::from_json(&data["Media"]).ok_or_else(|| Error::Other(format!("AniList has no entry {id}")))?;
+        let data = self.query(
+            &format!("query($id: Int) {{ Media(id: $id, type: ANIME) {{ ...entry }} }} {ENTRY}"),
+            json!({ "id": id }),
+            None,
+        )?;
+        let entry = Entry::from_json(&data["Media"])
+            .ok_or_else(|| Error::Other(format!("AniList has no entry {id}")))?;
         self.entries.insert(id, entry.clone());
         Ok(entry)
     }
@@ -253,22 +305,36 @@ impl AniList {
     /// The film, or a series' first season, on AniList: a search by title, kept when the
     /// year agrees (within one), preferring an exact title.
     fn first_entry(&mut self, media: &Media) -> Result<Option<i64>, Error> {
-        let key = media.tmdb.map_or_else(|| format!("{}|{:?}", media.title, media.year), |id| format!("{}:{id}", media.kind));
+        let key = media.tmdb.map_or_else(
+            || format!("{}|{:?}", media.title, media.year),
+            |id| format!("{}:{id}", media.kind),
+        );
         if let Some(found) = self.shows.get(&key) {
             return Ok(*found);
         }
-        let formats: &[&str] = if media.kind == "movie" { &["MOVIE"] } else { &SERIES };
+        let formats: &[&str] = if media.kind == "movie" {
+            &["MOVIE"]
+        } else {
+            &SERIES
+        };
         let query = format!(
             "query($q: String, $f: [MediaFormat]) {{ Page(perPage: 8) {{ media(search: $q, type: ANIME, format_in: $f, sort: SEARCH_MATCH) {{ ...entry }} }} }} {ENTRY}"
         );
         let data = self.query(&query, json!({ "q": media.title, "f": formats }), None)?;
-        let found: Vec<Entry> = data["Page"]["media"].as_array().into_iter().flatten().filter_map(Entry::from_json).collect();
+        let found: Vec<Entry> = data["Page"]["media"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Entry::from_json)
+            .collect();
         let year_ok = |e: &Entry| match (media.year, e.year) {
             (Some(a), Some(b)) => (a - b).abs() <= 1,
             _ => true,
         };
         let title = norm(&media.title);
-        let exact = found.iter().find(|e| year_ok(e) && e.titles.iter().any(|t| norm(t) == title));
+        let exact = found
+            .iter()
+            .find(|e| year_ok(e) && e.titles.iter().any(|t| norm(t) == title));
         // Otherwise only AniList's best match, and only if the year agrees.
         let pick = exact.or(found.first().filter(|e| year_ok(e)));
         for e in &found {
@@ -282,12 +348,16 @@ impl AniList {
     /// The AniList entry and its episode number for what was watched, and the entry's
     /// length. None when it isn't on AniList (or is a special).
     fn locate(&mut self, media: &Media) -> Result<Option<(i64, i64, Option<i64>)>, Error> {
-        let Some(first) = self.first_entry(media)? else { return Ok(None) };
+        let Some(first) = self.first_entry(media)? else {
+            return Ok(None);
+        };
         if media.kind == "movie" {
             let entry = self.entry(first)?;
             return Ok(Some((entry.id, 1, entry.episodes.or(Some(1)))));
         }
-        let (Some(season), Some(episode)) = (media.season, media.episode) else { return Ok(None) };
+        let (Some(season), Some(episode)) = (media.season, media.episode) else {
+            return Ok(None);
+        };
         if season < 1 || episode < 1 {
             return Ok(None);
         }
@@ -295,7 +365,9 @@ impl AniList {
         for _ in 1..season {
             // The next season, past any further parts of this one.
             loop {
-                let Some(next) = entry.next() else { return Ok(None) };
+                let Some(next) = entry.next() else {
+                    return Ok(None);
+                };
                 entry = self.entry(next)?;
                 if !entry.is_part() {
                     break;
@@ -314,11 +386,16 @@ impl AniList {
     /// Sets the progress for a watched episode, unless the list is already past it.
     /// Returns what changed, if anything.
     fn update(&mut self, media: &Media, token: &str) -> Result<Option<String>, Error> {
-        let Some((id, episode, total)) = self.locate(media)? else { return Ok(None) };
+        let Some((id, episode, total)) = self.locate(media)? else {
+            return Ok(None);
+        };
         let query = "query($id: Int) { Media(id: $id) { title { romaji } mediaListEntry { status progress } } }";
         let data = self.query(query, json!({ "id": id }), Some(token))?;
         let list = &data["Media"]["mediaListEntry"];
-        let (status, progress) = (list["status"].as_str().unwrap_or_default(), list["progress"].as_i64().unwrap_or(0));
+        let (status, progress) = (
+            list["status"].as_str().unwrap_or_default(),
+            list["progress"].as_i64().unwrap_or(0),
+        );
         // Finished already, or further along: leave it (a rewatch, or watched elsewhere).
         if status == "COMPLETED" || progress >= episode {
             return Ok(None);
@@ -326,9 +403,20 @@ impl AniList {
         let done = total == Some(episode);
         let mutation = "mutation($id: Int, $p: Int, $s: MediaListStatus) { SaveMediaListEntry(mediaId: $id, progress: $p, status: $s) { progress status } }";
         let status = if done { "COMPLETED" } else { "CURRENT" };
-        self.query(mutation, json!({ "id": id, "p": episode, "s": status }), Some(token))?;
-        let name = data["Media"]["title"]["romaji"].as_str().unwrap_or(&media.title).to_owned();
-        Ok(Some(if done { format!("{name}: completed") } else { format!("{name}: episode {episode}") }))
+        self.query(
+            mutation,
+            json!({ "id": id, "p": episode, "s": status }),
+            Some(token),
+        )?;
+        let name = data["Media"]["title"]["romaji"]
+            .as_str()
+            .unwrap_or(&media.title)
+            .to_owned();
+        Ok(Some(if done {
+            format!("{name}: completed")
+        } else {
+            format!("{name}: episode {episode}")
+        }))
     }
 
     /// Checks the token (once per token) and says who's signed in and for how long.
@@ -341,7 +429,9 @@ impl AniList {
         if self.checked.as_ref().is_none_or(|(t, _)| *t != token) {
             let who = match self.query("query { Viewer { name } }", json!({}), Some(&token)) {
                 Ok(data) => Ok(data["Viewer"]["name"].as_str().unwrap_or("?").to_owned()),
-                Err(Error::SignedOut) => Err("That token doesn't work (expired?): sign in again".to_owned()),
+                Err(Error::SignedOut) => {
+                    Err("That token doesn't work (expired?): sign in again".to_owned())
+                }
                 Err(Error::Other(e)) => Err(e),
             };
             self.checked = Some((token.clone(), who));
@@ -351,7 +441,10 @@ impl AniList {
             Some((_, Ok(name))) => match left {
                 Some(0) => host.status(false, "Your AniList sign-in has run out: sign in again"),
                 Some(secs) if secs < WARN_BEFORE_SECS => {
-                    let text = format!("Signed in as {name} · runs out in {} days: sign in again soon", secs.div_ceil(86_400));
+                    let text = format!(
+                        "Signed in as {name} · runs out in {} days: sign in again soon",
+                        secs.div_ceil(86_400)
+                    );
                     if !std::mem::replace(&mut self.warned, true) {
                         host.toast(format!("AniList: {text}"));
                     }
@@ -365,12 +458,21 @@ impl AniList {
     }
 
     fn sign_in(&self, host: &Host) {
-        let url = format!("{AUTHORIZE}?client_id={}&response_type=token", self.client_id());
+        let url = format!(
+            "{AUTHORIZE}?client_id={}&response_type=token",
+            self.client_id()
+        );
         match open_browser(&url) {
-            Ok(()) => host.status(true, "Approve Flex on AniList, then paste the token it shows into Token"),
+            Ok(()) => host.status(
+                true,
+                "Approve Flex on AniList, then paste the token it shows into Token",
+            ),
             Err(e) => {
                 host.log(LogLevel::Warn, format!("opening the browser: {e}"));
-                host.status(false, format!("Open {url} in a browser, then paste the token into Token"));
+                host.status(
+                    false,
+                    format!("Open {url} in a browser, then paste the token into Token"),
+                );
             }
         }
     }
@@ -403,22 +505,35 @@ impl Plugin for AniList {
     }
 
     fn playback(&mut self, host: &Host, playback: &Playback) {
-        let enabled = self.settings.get("sync").and_then(Value::as_bool).unwrap_or(true);
+        let enabled = self
+            .settings
+            .get("sync")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let watched = match (playback.position, playback.duration) {
             (Some(pos), Some(dur)) if dur > 0.0 => pos / dur >= WATCHED,
             _ => false,
         };
-        if !enabled || playback.state != PlaybackState::Stopped || playback.kind != "video" || !watched {
+        if !enabled
+            || playback.state != PlaybackState::Stopped
+            || playback.kind != "video"
+            || !watched
+        {
             return;
         }
-        let Some(media) = playback.media.as_ref().filter(|m| m.anime) else { return };
+        let Some(media) = playback.media.as_ref().filter(|m| m.anime) else {
+            return;
+        };
         let Some(token) = self.token() else { return };
         match self.update(media, &token) {
             Ok(Some(change)) => {
                 host.log(LogLevel::Info, format!("updated {change}"));
                 host.status(true, format!("Updated {change}"));
             }
-            Ok(None) => host.log(LogLevel::Debug, format!("nothing to update for {:?}", media)),
+            Ok(None) => host.log(
+                LogLevel::Debug,
+                format!("nothing to update for {:?}", media),
+            ),
             Err(Error::SignedOut) => {
                 host.status(false, "Your AniList sign-in has run out: sign in again");
                 host.toast("AniList: your sign-in has run out. Sign in again in Settings → Plugins → AniList");
@@ -447,7 +562,10 @@ mod tests {
         let bytes = payload.as_bytes();
         let mut out = String::new();
         for chunk in bytes.chunks(3) {
-            let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |acc, (i, b)| acc | (u32::from(*b) << (16 - 8 * i)));
             for i in 0..=chunk.len() {
                 out.push(A[((n >> (18 - 6 * i)) & 63) as usize] as char);
             }
@@ -459,7 +577,10 @@ mod tests {
     #[test]
     #[ignore]
     fn anilist_online() {
-        let mut a = AniList { api: API.to_owned(), ..AniList::new() };
+        let mut a = AniList {
+            api: API.to_owned(),
+            ..AniList::new()
+        };
         let cases = [
             ("Frieren: Beyond Journey's End", 2023, 1, 5),
             ("Mob Psycho 100", 2016, 2, 3),
@@ -472,7 +593,13 @@ mod tests {
             let name = found.and_then(|(id, _, _)| a.entries.get(&id).map(|e| e.titles[0].clone()));
             eprintln!("{title} S{season}E{episode} -> {found:?} {name:?}");
         }
-        let movie = Media { kind: "movie".into(), title: "Your Name.".into(), year: Some(2016), anime: true, ..Media::default() };
+        let movie = Media {
+            kind: "movie".into(),
+            title: "Your Name.".into(),
+            year: Some(2016),
+            anime: true,
+            ..Media::default()
+        };
         eprintln!("Your Name. -> {:?}", a.locate(&movie).unwrap());
     }
 
@@ -480,8 +607,18 @@ mod tests {
     fn reads_token_expiry() {
         assert_eq!(expires_at(&token(1_800_000_000)), Some(1_800_000_000));
         assert_eq!(expires_at("not a token"), None);
-        assert_eq!(norm("Frieren: Beyond Journey’s End"), norm("frieren beyond journey's end"));
-        let titled = |t: &str| Entry { id: 1, episodes: None, format: "TV".into(), year: None, titles: vec![t.into()], sequels: vec![] };
+        assert_eq!(
+            norm("Frieren: Beyond Journey’s End"),
+            norm("frieren beyond journey's end")
+        );
+        let titled = |t: &str| Entry {
+            id: 1,
+            episodes: None,
+            format: "TV".into(),
+            year: None,
+            titles: vec![t.into()],
+            sequels: vec![],
+        };
         assert!(titled("Shingeki no Kyojin Season 3 Part 2").is_part());
         assert!(titled("Spy x Family Part 2").is_part());
         assert!(titled("Jujutsu Kaisen: 2nd Cour").is_part());
@@ -491,7 +628,16 @@ mod tests {
     }
 
     fn media(title: &str, year: i32, season: i32, episode: i32) -> Media {
-        Media { kind: "episode".into(), title: title.into(), year: Some(year), tmdb: None, season: Some(season), episode: Some(episode), anime: true, ..Media::default() }
+        Media {
+            kind: "episode".into(),
+            title: title.into(),
+            year: Some(year),
+            tmdb: None,
+            season: Some(season),
+            episode: Some(episode),
+            anime: true,
+            ..Media::default()
+        }
     }
 
     /// Requests the fake AniList got: (Authorization header, body).
@@ -511,9 +657,36 @@ mod tests {
             json!({ "id": id, "episodes": eps, "format": "TV", "startDate": { "year": year }, "title": { "romaji": title, "english": english, "native": null }, "synonyms": [], "relations": { "edges": sequels } })
         };
         let entries: HashMap<i64, Value> = [
-            (1, entry(1, 12, 2023, "Sousou no Frieren", vec![node(2, "TV", 2026), node(9, "MOVIE", 2025)])),
-            (2, entry(2, 12, 2026, "Sousou no Frieren 2", vec![node(3, "TV", 2026)])),
-            (3, entry(3, 11, 2026, "Sousou no Frieren 2 Part 2", vec![node(4, "TV", 2027)])),
+            (
+                1,
+                entry(
+                    1,
+                    12,
+                    2023,
+                    "Sousou no Frieren",
+                    vec![node(2, "TV", 2026), node(9, "MOVIE", 2025)],
+                ),
+            ),
+            (
+                2,
+                entry(
+                    2,
+                    12,
+                    2026,
+                    "Sousou no Frieren 2",
+                    vec![node(3, "TV", 2026)],
+                ),
+            ),
+            (
+                3,
+                entry(
+                    3,
+                    11,
+                    2026,
+                    "Sousou no Frieren 2 Part 2",
+                    vec![node(4, "TV", 2027)],
+                ),
+            ),
             (4, entry(4, 12, 2027, "Sousou no Frieren 3", vec![])),
             (8, entry(8, 24, 2010, "Wrong", vec![])),
         ]
@@ -545,35 +718,60 @@ mod tests {
                 let q = body["query"].as_str().unwrap_or_default();
                 let vars = &body["variables"];
                 let (status, answer) = if auth == "Bearer old" {
-                    (401, json!({ "errors": [{ "message": "Invalid token", "status": 401 }] }))
+                    (
+                        401,
+                        json!({ "errors": [{ "message": "Invalid token", "status": 401 }] }),
+                    )
                 } else if q.contains("Viewer") {
                     (200, json!({ "data": { "Viewer": { "name": "cat" } } }))
                 } else if q.contains("Page(") {
                     let found: Vec<Value> = match vars["q"].as_str() {
-                        Some("Frieren: Beyond Journey's End") => vec![entries[&8].clone(), entries[&1].clone()],
+                        Some("Frieren: Beyond Journey's End") => {
+                            vec![entries[&8].clone(), entries[&1].clone()]
+                        }
                         Some("Wrong") => vec![entries[&8].clone()],
                         _ => vec![],
                     };
                     (200, json!({ "data": { "Page": { "media": found } } }))
                 } else if q.contains("SaveMediaListEntry") {
-                    (200, json!({ "data": { "SaveMediaListEntry": { "progress": vars["p"], "status": vars["s"] } } }))
+                    (
+                        200,
+                        json!({ "data": { "SaveMediaListEntry": { "progress": vars["p"], "status": vars["s"] } } }),
+                    )
                 } else if q.contains("mediaListEntry") {
-                    let list = if vars["id"] == 1 { json!({ "status": "CURRENT", "progress": 4 }) } else { Value::Null };
-                    (200, json!({ "data": { "Media": { "title": { "romaji": "Sousou no Frieren" }, "mediaListEntry": list } } }))
+                    let list = if vars["id"] == 1 {
+                        json!({ "status": "CURRENT", "progress": 4 })
+                    } else {
+                        Value::Null
+                    };
+                    (
+                        200,
+                        json!({ "data": { "Media": { "title": { "romaji": "Sousou no Frieren" }, "mediaListEntry": list } } }),
+                    )
                 } else {
                     let id = vars["id"].as_i64().unwrap_or(0);
-                    (200, json!({ "data": { "Media": entries.get(&id).cloned().unwrap_or(Value::Null) } }))
+                    (
+                        200,
+                        json!({ "data": { "Media": entries.get(&id).cloned().unwrap_or(Value::Null) } }),
+                    )
                 };
                 let text = answer.to_string();
                 let mut out = conn;
-                let _ = write!(out, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}", text.len());
+                let _ = write!(
+                    out,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                );
             }
         });
         (base, log)
     }
 
     fn plugin(base: String) -> AniList {
-        AniList { api: base, ..AniList::new() }
+        AniList {
+            api: base,
+            ..AniList::new()
+        }
     }
 
     #[test]
@@ -582,16 +780,32 @@ mod tests {
         let mut a = plugin(base);
         let show = "Frieren: Beyond Journey's End";
         // "Wrong" comes first in the search but is from 2010; the exact title wins anyway.
-        assert_eq!(a.locate(&media(show, 2023, 1, 3)).unwrap(), Some((1, 3, Some(12))));
+        assert_eq!(
+            a.locate(&media(show, 2023, 1, 3)).unwrap(),
+            Some((1, 3, Some(12)))
+        );
         // Season 2 is the TV sequel (not the film), and episode 15 is part 2's third.
-        assert_eq!(a.locate(&media(show, 2023, 2, 5)).unwrap(), Some((2, 5, Some(12))));
-        assert_eq!(a.locate(&media(show, 2023, 2, 15)).unwrap(), Some((3, 3, Some(11))));
+        assert_eq!(
+            a.locate(&media(show, 2023, 2, 5)).unwrap(),
+            Some((2, 5, Some(12)))
+        );
+        assert_eq!(
+            a.locate(&media(show, 2023, 2, 15)).unwrap(),
+            Some((3, 3, Some(11)))
+        );
         // Season 3 comes after season 2's part 2.
-        assert_eq!(a.locate(&media(show, 2023, 3, 2)).unwrap(), Some((4, 2, Some(12))));
+        assert_eq!(
+            a.locate(&media(show, 2023, 3, 2)).unwrap(),
+            Some((4, 2, Some(12)))
+        );
         // Specials, missing seasons and shows AniList doesn't have.
         assert_eq!(a.locate(&media(show, 2023, 0, 1)).unwrap(), None);
         assert_eq!(a.locate(&media(show, 2023, 5, 1)).unwrap(), None);
-        assert_eq!(a.locate(&media("Wrong", 2023, 1, 1)).unwrap(), None, "the year doesn't agree");
+        assert_eq!(
+            a.locate(&media("Wrong", 2023, 1, 1)).unwrap(),
+            None,
+            "the year doesn't agree"
+        );
         assert_eq!(a.locate(&media("Nothing", 2023, 1, 1)).unwrap(), None);
     }
 
@@ -603,17 +817,51 @@ mod tests {
         let mut settings = Settings::new();
         settings.insert("token".into(), json!(token(now() + 300 * 86_400)));
         a.hello(&host, &settings);
-        let stopped = |m: Media, pos: f64| Playback { state: PlaybackState::Stopped, kind: "video".into(), position: Some(pos), duration: Some(1440.0), media: Some(m), ..Playback::default() };
+        let stopped = |m: Media, pos: f64| Playback {
+            state: PlaybackState::Stopped,
+            kind: "video".into(),
+            position: Some(pos),
+            duration: Some(1440.0),
+            media: Some(m),
+            ..Playback::default()
+        };
         let show = "Frieren: Beyond Journey's End";
 
         a.playback(&host, &stopped(media(show, 2023, 1, 3), 1400.0)); // the list is at 4 already
         a.playback(&host, &stopped(media(show, 2023, 1, 6), 600.0)); // not 80% through
-        a.playback(&host, &stopped(Media { anime: false, ..media(show, 2023, 1, 6) }, 1400.0)); // not an Anime library
+        a.playback(
+            &host,
+            &stopped(
+                Media {
+                    anime: false,
+                    ..media(show, 2023, 1, 6)
+                },
+                1400.0,
+            ),
+        ); // not an Anime library
         a.playback(&host, &stopped(media(show, 2023, 1, 6), 1400.0));
         a.playback(&host, &stopped(media(show, 2023, 2, 23), 1440.0)); // part 2's last episode
-        let saves: Vec<Value> = log.lock().unwrap().iter().filter(|(_, b)| b["query"].as_str().unwrap().contains("SaveMediaListEntry")).map(|(_, b)| b["variables"].clone()).collect();
-        assert_eq!(saves, [json!({ "id": 1, "p": 6, "s": "CURRENT" }), json!({ "id": 3, "p": 11, "s": "COMPLETED" })]);
-        assert!(log.lock().unwrap().iter().filter(|(_, b)| b["query"].as_str().unwrap().contains("mediaListEntry")).all(|(auth, _)| auth.starts_with("Bearer ")));
+        let saves: Vec<Value> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, b)| b["query"].as_str().unwrap().contains("SaveMediaListEntry"))
+            .map(|(_, b)| b["variables"].clone())
+            .collect();
+        assert_eq!(
+            saves,
+            [
+                json!({ "id": 1, "p": 6, "s": "CURRENT" }),
+                json!({ "id": 3, "p": 11, "s": "COMPLETED" })
+            ]
+        );
+        assert!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, b)| b["query"].as_str().unwrap().contains("mediaListEntry"))
+                .all(|(auth, _)| auth.starts_with("Bearer "))
+        );
     }
 
     #[test]
@@ -637,8 +885,14 @@ mod tests {
         settings.insert("token".into(), json!("old"));
         a.settings(&host, &settings);
         let text = String::from_utf8(out.lock().unwrap().clone()).unwrap();
-        assert!(text.contains("Signed in as cat · runs out in 5 days"), "{text}");
-        assert!(text.contains(r#""type":"toast""#), "warned on screen: {text}");
+        assert!(
+            text.contains("Signed in as cat · runs out in 5 days"),
+            "{text}"
+        );
+        assert!(
+            text.contains(r#""type":"toast""#),
+            "warned on screen: {text}"
+        );
         assert!(text.contains("doesn't work (expired?)"), "{text}");
     }
 }

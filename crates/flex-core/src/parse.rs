@@ -25,22 +25,31 @@ pub struct Parsed {
 
 static FILE_SEASON: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bS(\d{1,2})(?:E\d|\b)|\bseason[ ._-]*(\d{1,2})\b").unwrap());
-static DIR_SEASON: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(?:season|series)[ ._-]*(\d{1,2})\b|\bS(\d{1,2})\b").unwrap());
-static SEASON_RANGE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(?:S|season[ ._-]*)\d{1,2}\s*[-~&+]\s*(?:S|season[ ._-]*)?\d{1,2}\b").unwrap());
-static SPECIALS_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(?:extras?|specials?|bonus|featurettes?|nc(?:op|ed)s?|creditless|sps?|menus?)\b").unwrap()
+static DIR_SEASON: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:season|series)[ ._-]*(\d{1,2})\b|\bS(\d{1,2})\b").unwrap()
 });
-static EXTRA_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(?:NCOP|NCED|NC ?OP|NC ?ED)\d*\b").unwrap());
+static SEASON_RANGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:S|season[ ._-]*)\d{1,2}\s*[-~&+]\s*(?:S|season[ ._-]*)?\d{1,2}\b")
+        .unwrap()
+});
+static SPECIALS_DIR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(?:extras?|specials?|bonus|featurettes?|nc(?:op|ed)s?|creditless|sps?|menus?)\b",
+    )
+    .unwrap()
+});
+static EXTRA_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(?:NCOP|NCED|NC ?OP|NC ?ED)\d*\b").unwrap());
 /// Bits of release names whose digits aren't episode numbers.
 static NOISE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?ix)
+    Regex::new(
+        r"(?ix)
         \[[0-9a-f]{8}\] | \([0-9a-f]{8}\)        # CRC32
         | \b\d{3,4}[pi]\b | \b\d{3,4}x\d{3,4}\b  # resolutions
         | [xh]\.?26[45] | \b\d{1,2}[ -]?bits?\b  # codecs, bit depth
         | \b\d\.\d\b | \b(?:19|20)\d{2}\b         # audio channels, years
-    ")
+    ",
+    )
     .unwrap()
 });
 /// Encoding/language leftovers at the end of a title ("1080p;H265", "JP", "tvdb4"), and a
@@ -85,7 +94,9 @@ pub fn disc_folder(rel_path: &str) -> Option<&str> {
             return Some(&rel_path[..start + component.len()]);
         }
     }
-    DVD_FILE.is_match(file_name(rel_path)).then(|| parent_of(rel_path))
+    DVD_FILE
+        .is_match(file_name(rel_path))
+        .then(|| parent_of(rel_path))
 }
 
 /// Season from a folder name, or `None` (also for ranges such as "Season 1-2").
@@ -124,14 +135,18 @@ pub fn clean_title(raw: &str) -> String {
         }
         t = stripped;
     }
-    t.trim_matches(|c: char| c == '-' || c == '.' || c.is_whitespace()).to_owned()
+    t.trim_matches(|c: char| c == '-' || c == '.' || c.is_whitespace())
+        .to_owned()
 }
 
 /// The digit runs in a name, ignoring resolutions, codecs, CRCs and the like.
 fn numbers(name: &str) -> Vec<i32> {
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
     let cleaned = NOISE.replace_all(stem, " ");
-    NUMBER.find_iter(&cleaned).filter_map(|m| m.as_str().parse().ok()).collect()
+    NUMBER
+        .find_iter(&cleaned)
+        .filter_map(|m| m.as_str().parse().ok())
+        .collect()
 }
 
 /// For files in one folder: the position of the number that varies most between them,
@@ -141,13 +156,20 @@ fn varying_numbers(names: &[&str]) -> Vec<Option<i32>> {
     let max_len = nums.iter().map(Vec::len).max().unwrap_or(0);
     let best = (0..max_len)
         .map(|k| {
-            let values: HashSet<i32> = nums.iter().filter_map(|n| n.get(k).copied()).filter(|v| *v < 5000).collect();
+            let values: HashSet<i32> = nums
+                .iter()
+                .filter_map(|n| n.get(k).copied())
+                .filter(|v| *v < 5000)
+                .collect();
             (values.len(), k)
         })
         .filter(|(distinct, _)| *distinct > 1)
         .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
     match best {
-        Some((_, k)) => nums.iter().map(|n| n.get(k).copied().filter(|v| *v < 5000)).collect(),
+        Some((_, k)) => nums
+            .iter()
+            .map(|n| n.get(k).copied().filter(|v| *v < 5000))
+            .collect(),
         None => vec![None; names.len()],
     }
 }
@@ -174,7 +196,8 @@ pub fn parse_episodes(files: &[MediaFile]) -> HashMap<i64, Parsed> {
             .map(|(i, n)| {
                 let lo = i.saturating_sub(CONTEXT_SIBLINGS / 2);
                 let hi = (lo + CONTEXT_SIBLINGS + 1).min(names.len());
-                let siblings: Vec<&str> = names[lo..hi].iter().copied().filter(|s| s != n).collect();
+                let siblings: Vec<&str> =
+                    names[lo..hi].iter().copied().filter(|s| s != n).collect();
                 hunch::hunch_with_context(n, &siblings)
             })
             .collect();
@@ -193,16 +216,30 @@ pub fn parse_episodes(files: &[MediaFile]) -> HashMap<i64, Parsed> {
         let dir_season = season_from_dirs(&format!("{dir}/x"));
         for (i, (file, p)) in files.iter().zip(&parsed).enumerate() {
             let name = names[i];
-            let episode = if trusted { hunch_eps[i].or(fallback[i]) } else { fallback[i] };
-            let extra = EXTRA_FILE.is_match(name) || p.media_type() == Some(hunch::MediaType::Extra);
+            let episode = if trusted {
+                hunch_eps[i].or(fallback[i])
+            } else {
+                fallback[i]
+            };
+            let extra =
+                EXTRA_FILE.is_match(name) || p.media_type() == Some(hunch::MediaType::Extra);
             let file_season = FILE_SEASON
                 .captures(name)
                 .and_then(|c| c.get(1).or(c.get(2)))
                 .and_then(|m| m.as_str().parse().ok());
-            let season = if extra { Some(0) } else { file_season.or(dir_season) };
+            let season = if extra {
+                Some(0)
+            } else {
+                file_season.or(dir_season)
+            };
             out.insert(
                 file.id,
-                Parsed { title: p.title().map(clean_title), year: p.year(), season, episode },
+                Parsed {
+                    title: p.title().map(clean_title),
+                    year: p.year(),
+                    season,
+                    episode,
+                },
             );
         }
     }
@@ -222,9 +259,19 @@ pub fn parse_movies(files: &[MediaFile]) -> HashMap<i64, Parsed> {
             // Folder names often carry the year when the file doesn't.
             let year = p.year().or_else(|| {
                 let dir = parent_of(&f.rel_path);
-                (!dir.is_empty()).then(|| hunch::hunch(file_name(dir)).year()).flatten()
+                (!dir.is_empty())
+                    .then(|| hunch::hunch(file_name(dir)).year())
+                    .flatten()
             });
-            (f.id, Parsed { title, year, season: None, episode: None })
+            (
+                f.id,
+                Parsed {
+                    title,
+                    year,
+                    season: None,
+                    episode: None,
+                },
+            )
         })
         .collect()
 }
@@ -232,14 +279,20 @@ pub fn parse_movies(files: &[MediaFile]) -> HashMap<i64, Parsed> {
 /// Whether a folder's files look like episodes (most carry an episode number). Used to
 /// spot TV series that live inside a movies library.
 pub fn looks_episodic(ids: &[i64], parsed: &HashMap<i64, Parsed>) -> bool {
-    let numbered = ids.iter().filter(|id| parsed.get(id).is_some_and(|p| p.episode.is_some())).count();
+    let numbered = ids
+        .iter()
+        .filter(|id| parsed.get(id).is_some_and(|p| p.episode.is_some()))
+        .count();
     ids.len() >= 3 && numbered * 3 >= ids.len() * 2
 }
 
 /// Parses a whole library: episodes for TV/anime; for movies, films one by one plus any
 /// folders that turn out to hold a series.
 pub fn parse_library(kind: crate::LibraryKind, files: &[MediaFile]) -> HashMap<i64, Parsed> {
-    by_folder(files).into_values().flat_map(|files| parse_folder(kind, &files)).collect()
+    by_folder(files)
+        .into_values()
+        .flat_map(|files| parse_folder(kind, &files))
+        .collect()
 }
 
 /// Bump when parsing changes (including a hunch upgrade), so cached results are redone.
@@ -249,7 +302,10 @@ pub const PARSER_VERSION: u32 = 2;
 pub fn by_folder(files: &[MediaFile]) -> HashMap<&str, Vec<MediaFile>> {
     let mut by_dir: HashMap<&str, Vec<MediaFile>> = HashMap::new();
     for f in files {
-        by_dir.entry(parent_of(&f.rel_path)).or_default().push(f.clone());
+        by_dir
+            .entry(parent_of(&f.rel_path))
+            .or_default()
+            .push(f.clone());
     }
     by_dir
 }
@@ -265,9 +321,21 @@ pub fn parse_folder(kind: crate::LibraryKind, files: &[MediaFile]) -> HashMap<i6
     let ids: Vec<i64> = files.iter().map(|f| f.id).collect();
     let quick: HashMap<i64, Parsed> = files
         .iter()
-        .map(|f| (f.id, Parsed { episode: hunch::hunch(f.file_name()).episode(), ..Default::default() }))
+        .map(|f| {
+            (
+                f.id,
+                Parsed {
+                    episode: hunch::hunch(f.file_name()).episode(),
+                    ..Default::default()
+                },
+            )
+        })
         .collect();
-    if looks_episodic(&ids, &quick) { parse_episodes(files) } else { parsed }
+    if looks_episodic(&ids, &quick) {
+        parse_episodes(files)
+    } else {
+        parsed
+    }
 }
 
 /// Identifies what a folder's parse depends on: the parser, the library kind and the
@@ -287,7 +355,10 @@ static PARSING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Parses folders on half the cores at low priority, biggest first so one huge folder
 /// doesn't finish last.
-pub fn parse_folders(kind: crate::LibraryKind, folders: &[&[MediaFile]]) -> Vec<HashMap<i64, Parsed>> {
+pub fn parse_folders(
+    kind: crate::LibraryKind,
+    folders: &[&[MediaFile]],
+) -> Vec<HashMap<i64, Parsed>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     if folders.is_empty() {
         return Vec::new();
@@ -312,7 +383,10 @@ pub fn parse_folders(kind: crate::LibraryKind, folders: &[&[MediaFile]]) -> Vec<
                 })
             })
             .collect();
-        workers.into_iter().flat_map(|w| w.join().expect("parser thread panicked")).collect()
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("parser thread panicked"))
+            .collect()
     });
     for (i, parsed) in done {
         out[i] = parsed;
@@ -324,7 +398,9 @@ pub fn parse_folders(kind: crate::LibraryKind, folders: &[&[MediaFile]]) -> Vec<
 fn lower_thread_priority() {
     #[cfg(windows)]
     unsafe {
-        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+        };
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     }
 }
@@ -357,7 +433,11 @@ pub fn parse_library_cached(
     for ((dir, fingerprint, _), parsed) in stale.iter().zip(parse_folders(kind, &slices)) {
         let mut rows: Vec<(i64, Parsed)> = parsed.into_iter().collect();
         rows.sort_unstable_by_key(|(id, _)| *id);
-        fresh.push((dir.to_string(), fingerprint.clone(), serde_json::to_string(&rows)?));
+        fresh.push((
+            dir.to_string(),
+            fingerprint.clone(),
+            serde_json::to_string(&rows)?,
+        ));
         out.extend(rows);
     }
     // Whatever is left in `cache` is for folders that are gone.
@@ -365,7 +445,12 @@ pub fn parse_library_cached(
     if !fresh.is_empty() || !gone.is_empty() {
         db.save_parse_cache(library_id, &fresh, &gone)?;
     }
-    log::info!("library {library_id}: parsed {} of {} folders ({} cached)", fresh.len(), folders.len(), folders.len() - fresh.len());
+    log::info!(
+        "library {library_id}: parsed {} of {} folders ({} cached)",
+        fresh.len(),
+        folders.len(),
+        folders.len() - fresh.len()
+    );
     Ok(out)
 }
 
@@ -373,7 +458,13 @@ pub fn parse_library_cached(
 pub fn normalize(title: &str) -> String {
     let t: String = title
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_lowercase().next().unwrap_or(c) } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_lowercase().next().unwrap_or(c)
+            } else {
+                ' '
+            }
+        })
         .collect();
     let words: Vec<&str> = t.split_whitespace().collect();
     let words = match words.first() {
@@ -391,30 +482,51 @@ mod tests {
         paths
             .iter()
             .enumerate()
-            .map(|(i, p)| MediaFile { id: i as i64, rel_path: (*p).into(), ..Default::default() })
+            .map(|(i, p)| MediaFile {
+                id: i as i64,
+                rel_path: (*p).into(),
+                ..Default::default()
+            })
             .collect()
     }
 
     fn episodes(paths: &[&str]) -> Vec<(Option<i32>, Option<i32>)> {
         let fs = files(paths);
         let parsed = parse_episodes(&fs);
-        fs.iter().map(|f| (parsed[&f.id].season, parsed[&f.id].episode)).collect()
+        fs.iter()
+            .map(|f| (parsed[&f.id].season, parsed[&f.id].episode))
+            .collect()
     }
 
     #[test]
     fn cached_parse_matches_and_redoes_only_changed_folders() {
         use crate::LibraryKind::Anime;
         let mut db = crate::Db::open_in_memory().unwrap();
-        let lib = db.add_library("anime", std::path::Path::new("/anime"), Anime).unwrap();
-        let mut fs = files(&["A/Show A - 01.mkv", "A/Show A - 02.mkv", "B/Show B - 01.mkv", "C/Show C - 01.mkv"]);
+        let lib = db
+            .add_library("anime", std::path::Path::new("/anime"), Anime)
+            .unwrap();
+        let mut fs = files(&[
+            "A/Show A - 01.mkv",
+            "A/Show A - 02.mkv",
+            "B/Show B - 01.mkv",
+            "C/Show C - 01.mkv",
+        ]);
         let first = parse_library_cached(&mut db, lib, Anime, &fs).unwrap();
         assert_eq!(first, parse_library(Anime, &fs));
         assert_eq!(db.parse_cache(lib).unwrap().len(), 3);
 
         // Poison B's cached entry: it must be reused as is while B is unchanged.
-        let poisoned = serde_json::to_string(&[(2, Parsed { title: Some("cached".into()), ..Default::default() })]).unwrap();
+        let poisoned = serde_json::to_string(&[(
+            2,
+            Parsed {
+                title: Some("cached".into()),
+                ..Default::default()
+            },
+        )])
+        .unwrap();
         let fp = folder_fingerprint(Anime, &fs[2..3]);
-        db.save_parse_cache(lib, &[("B".into(), fp, poisoned)], &[]).unwrap();
+        db.save_parse_cache(lib, &[("B".into(), fp, poisoned)], &[])
+            .unwrap();
         // Rename a file in A and drop folder C: A is parsed again, C is forgotten.
         fs[1].rel_path = "A/Show A - 03.mkv".into();
         fs.pop();
@@ -456,7 +568,11 @@ mod tests {
             "Re Zero/Season 1/ReZERO - S01E02 - Reunion With The Witch.mkv",
             "(CBB) Dorohedoro (BD 1080p)/(CBB) Dorohedoro - 05 (BD 1080p)(Dual-Audio).mkv",
         ]);
-        assert_eq!(got[0].0, Some(2), "nearest folder wins over the top folder's range");
+        assert_eq!(
+            got[0].0,
+            Some(2),
+            "nearest folder wins over the top folder's range"
+        );
         assert_eq!(got[1], (Some(2), Some(3)));
         assert_eq!(got[2].0, Some(0), "extras are specials");
         assert_eq!(got[3], (Some(1), Some(2)));
@@ -467,25 +583,49 @@ mod tests {
     fn folder_seasons() {
         assert_eq!(dir_season("Season 03"), Some(3));
         assert_eq!(dir_season("Attack on Titan S2"), Some(2));
-        assert_eq!(dir_season("[Judas] Log Horizon (Season 1-2) [BD 1080p]"), None);
-        assert_eq!(dir_season("[Anime Time] Attack on Titan S1 - S3+OVA [BD]"), None);
+        assert_eq!(
+            dir_season("[Judas] Log Horizon (Season 1-2) [BD 1080p]"),
+            None
+        );
+        assert_eq!(
+            dir_season("[Anime Time] Attack on Titan S1 - S3+OVA [BD]"),
+            None
+        );
         assert_eq!(dir_season("Extras"), Some(0));
         assert_eq!(dir_season("Mobile Suit Gundam Wing"), None);
     }
 
     #[test]
     fn disc_folders() {
-        assert_eq!(disc_folder("Film (1978)/VIDEO_TS/VTS_01_1.VOB"), Some("Film (1978)/VIDEO_TS"));
-        assert_eq!(disc_folder("Film/DVD1/video_ts/VIDEO_TS.VOB"), Some("Film/DVD1/video_ts"));
-        assert_eq!(disc_folder("Film/BDMV/STREAM/00001.m2ts"), Some("Film/BDMV"));
-        assert_eq!(disc_folder("THE_DRAGON_FAMILY/VTS_01_2.VOB"), Some("THE_DRAGON_FAMILY"));
+        assert_eq!(
+            disc_folder("Film (1978)/VIDEO_TS/VTS_01_1.VOB"),
+            Some("Film (1978)/VIDEO_TS")
+        );
+        assert_eq!(
+            disc_folder("Film/DVD1/video_ts/VIDEO_TS.VOB"),
+            Some("Film/DVD1/video_ts")
+        );
+        assert_eq!(
+            disc_folder("Film/BDMV/STREAM/00001.m2ts"),
+            Some("Film/BDMV")
+        );
+        assert_eq!(
+            disc_folder("THE_DRAGON_FAMILY/VTS_01_2.VOB"),
+            Some("THE_DRAGON_FAMILY")
+        );
         assert_eq!(disc_folder("Film/Film.mkv"), None);
     }
 
     #[test]
     fn titles() {
-        assert_eq!(clean_title("Daisougen no Chiisana Tenshi Bush Baby 01-40"), "Daisougen no Chiisana Tenshi Bush Baby");
-        assert_eq!(clean_title("Heion Sedai no Idaten-tachi (01-11)"), "Heion Sedai no Idaten-tachi");
+        assert_eq!(
+            clean_title("Daisougen no Chiisana Tenshi Bush Baby 01-40"),
+            "Daisougen no Chiisana Tenshi Bush Baby"
+        );
+        assert_eq!(
+            clean_title("Heion Sedai no Idaten-tachi (01-11)"),
+            "Heion Sedai no Idaten-tachi"
+        );
         assert_eq!(clean_title("Code Geass Full Series"), "Code Geass");
         assert_eq!(clean_title("Dandadan 2nd"), "Dandadan");
         assert_eq!(clean_title("Dandadan 2nd Season"), "Dandadan");
@@ -495,11 +635,24 @@ mod tests {
         assert_eq!(clean_title("Sergeant Keroro 001"), "Sergeant Keroro");
         assert_eq!(clean_title("One Piece tvdb4"), "One Piece");
         assert_eq!(clean_title("One Piece tvdb4-81797"), "One Piece");
-        assert_eq!(clean_title("Ghost in the Shell 2.0"), "Ghost in the Shell 2.0");
+        assert_eq!(
+            clean_title("Ghost in the Shell 2.0"),
+            "Ghost in the Shell 2.0"
+        );
         assert_eq!(clean_title("86"), "86", "never strips a title to nothing");
-        assert_eq!(clean_title("Mobile Suit Gundam 0083"), "Mobile Suit Gundam 0083");
+        assert_eq!(
+            clean_title("Mobile Suit Gundam 0083"),
+            "Mobile Suit Gundam 0083"
+        );
         assert_eq!(clean_title("Show 01"), "Show");
-        for kept in ["Mob Psycho 100", "Steins;Gate 0", "Apollo 13", "Ocean's 11", "Kaiju No. 8", "Blade Runner 2049"] {
+        for kept in [
+            "Mob Psycho 100",
+            "Steins;Gate 0",
+            "Apollo 13",
+            "Ocean's 11",
+            "Kaiju No. 8",
+            "Blade Runner 2049",
+        ] {
             assert_eq!(clean_title(kept), kept);
         }
         assert_eq!(normalize("The Lost Universe!"), "lost universe");
@@ -514,7 +667,10 @@ mod tests {
             "Lettera Amorosa (1995) -- João César Monteiro/Lettera.Amorosa.mkv",
         ]);
         let p = parse_movies(&fs);
-        assert_eq!((p[&0].title.as_deref(), p[&0].year), (Some("Christmas Vacation"), Some(1989)));
+        assert_eq!(
+            (p[&0].title.as_deref(), p[&0].year),
+            (Some("Christmas Vacation"), Some(1989))
+        );
         assert_eq!(p[&1].title.as_deref(), Some("Back to the Future Part 3"));
         assert_eq!(p[&2].year, Some(1995), "year from the folder");
     }

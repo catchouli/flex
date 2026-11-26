@@ -73,7 +73,12 @@ impl Shots {
             let scratch = dir.join(format!("tmp-{worker}"));
             std::thread::spawn(move || work(&queue, &tx, &ctx, &scratch));
         }
-        Self { dir, queue, results, known: HashMap::new() }
+        Self {
+            dir,
+            queue,
+            results,
+            known: HashMap::new(),
+        }
     }
 
     /// Shot `index` of a video, starting it in the background if needed. `size` tells a
@@ -83,7 +88,10 @@ impl Shots {
         if let Some(shot @ (Shot::Ready(_) | Shot::Failed(_))) = self.known.get(&key) {
             return shot.clone();
         }
-        let out = self.dir.join(format!("{file_id}-{size}")).join(format!("{:02}.jpg", index + 1));
+        let out = self
+            .dir
+            .join(format!("{file_id}-{size}"))
+            .join(format!("{:02}.jpg", index + 1));
         if !self.known.contains_key(&key) && out.exists() {
             let shot = Shot::Ready(format!("file:{}", out.display()));
             self.known.insert(key, shot.clone());
@@ -93,7 +101,14 @@ impl Shots {
         let (lock, wake) = &*self.queue;
         let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
         if !q.running.contains(&key) {
-            q.jobs.insert(key, Job { video: video.to_owned(), out, asked: Instant::now() });
+            q.jobs.insert(
+                key,
+                Job {
+                    video: video.to_owned(),
+                    out,
+                    asked: Instant::now(),
+                },
+            );
             wake.notify_one();
         }
         Shot::Pending
@@ -115,12 +130,18 @@ impl Shots {
         // Pending shots that were dropped from the queue are asked for again next time.
         let (lock, _) = &*self.queue;
         let q = lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.known.retain(|k, s| *s != Shot::Pending || q.jobs.contains_key(k) || q.running.contains(k));
+        self.known
+            .retain(|k, s| *s != Shot::Pending || q.jobs.contains_key(k) || q.running.contains(k));
     }
 }
 
 /// Worker loop: takes the most recently requested shot, forever.
-fn work(queue: &(Mutex<Queue>, Condvar), tx: &Sender<(Key, Result<(), String>)>, ctx: &egui::Context, scratch: &Path) {
+fn work(
+    queue: &(Mutex<Queue>, Condvar),
+    tx: &Sender<(Key, Result<(), String>)>,
+    ctx: &egui::Context,
+    scratch: &Path,
+) {
     let mut mpv: Option<Mpv> = None;
     loop {
         let (key, job) = {
@@ -134,20 +155,36 @@ fn work(queue: &(Mutex<Queue>, Condvar), tx: &Sender<(Key, Result<(), String>)>,
                     q.running.push(key);
                     break (key, job);
                 }
-                q = wake.wait_timeout(q, Duration::from_secs(1)).unwrap_or_else(|e| e.into_inner()).0;
+                q = wake
+                    .wait_timeout(q, Duration::from_secs(1))
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0;
             }
         };
         let started = Instant::now();
         let result = take(&mut mpv, &job, key.1, scratch);
         match &result {
-            Ok(()) => log::debug!("shot {} of {} in {:?}", key.1 + 1, job.video.display(), started.elapsed()),
+            Ok(()) => log::debug!(
+                "shot {} of {} in {:?}",
+                key.1 + 1,
+                job.video.display(),
+                started.elapsed()
+            ),
             Err(e) => {
                 log::warn!("screenshot of {}: {e:#}", job.video.display());
                 mpv = None; // start afresh in case it's stuck
             }
         }
-        queue.0.lock().unwrap_or_else(|e| e.into_inner()).running.retain(|k| *k != key);
-        if tx.send((key, result.map_err(|e| format!("{e:#}")))).is_err() {
+        queue
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .running
+            .retain(|k| *k != key);
+        if tx
+            .send((key, result.map_err(|e| format!("{e:#}"))))
+            .is_err()
+        {
             return;
         }
         ctx.request_repaint();
@@ -182,7 +219,9 @@ fn take(mpv: &mut Option<Mpv>, job: &Job, index: usize, scratch: &Path) -> Resul
     mpv.load(&job.video)?;
     let deadline = Instant::now() + Duration::from_secs_f64(TIMEOUT);
     loop {
-        let left = deadline.saturating_duration_since(Instant::now()).as_secs_f64();
+        let left = deadline
+            .saturating_duration_since(Instant::now())
+            .as_secs_f64();
         match mpv.wait_event(left) {
             Some(Event::EndFile { error: Some(e), .. }) => bail!("{e}"),
             Some(Event::EndFile { .. }) => break,
@@ -218,7 +257,11 @@ mod tests {
         let mut mpv = None;
         for index in 0..COUNT {
             let started = Instant::now();
-            let job = Job { video: video.clone(), out: out.join(format!("{:02}.jpg", index + 1)), asked: Instant::now() };
+            let job = Job {
+                video: video.clone(),
+                out: out.join(format!("{:02}.jpg", index + 1)),
+                asked: Instant::now(),
+            };
             take(&mut mpv, &job, index, &out.join("tmp")).unwrap();
             eprintln!("shot {index}: {:?}", started.elapsed());
         }

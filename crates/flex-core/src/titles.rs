@@ -30,18 +30,33 @@ impl Titles {
 }
 
 /// Titles for a file in a library (`catalog` is None while it's being organised).
-pub fn titles(tree: &Tree, catalog: Option<&Catalog>, series: &HashMap<String, SeriesMeta>, file_id: i64) -> Option<Titles> {
+pub fn titles(
+    tree: &Tree,
+    catalog: Option<&Catalog>,
+    series: &HashMap<String, SeriesMeta>,
+    file_id: i64,
+) -> Option<Titles> {
     let file = tree.file(file_id)?;
     let file_name = crate::library::display_name(file.file_name(), true);
     let Some(entry) = catalog.and_then(|c| c.show_of_file(file_id)) else {
-        return Some(Titles { show: None, episode: None, name: file_name });
+        return Some(Titles {
+            show: None,
+            episode: None,
+            name: file_name,
+        });
     };
     let show = entry.show.title.clone();
     if !entry.is_series() {
-        return Some(Titles { name: show.clone(), show: Some(show), episode: None });
+        return Some(Titles {
+            name: show.clone(),
+            show: Some(show),
+            episode: None,
+        });
     }
     let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
-    let title = episode_meta(catalog?, series, file_id).map(|m| m.title.clone()).filter(|t| !t.is_empty());
+    let title = episode_meta(catalog?, series, file_id)
+        .map(|m| m.title.clone())
+        .filter(|t| !t.is_empty());
     let code = match (ep.season, ep.number) {
         (0, _) => None,
         (s, Some(n)) => Some(format!("S{s}E{n}")),
@@ -53,12 +68,20 @@ pub fn titles(tree: &Tree, catalog: Option<&Catalog>, series: &HashMap<String, S
         (None, Some(t)) => t.clone(),
         (None, None) => file_name.clone(),
     };
-    Some(Titles { show: Some(show), episode: Some(episode), name: title.unwrap_or(file_name) })
+    Some(Titles {
+        show: Some(show),
+        episode: Some(episode),
+        name: title.unwrap_or(file_name),
+    })
 }
 
 /// TMDB metadata (title, description, still) for an episode, if known. Specials' numbering
 /// rarely lines up with TMDB's, so they get none.
-pub fn episode_meta<'a>(catalog: &Catalog, series: &'a HashMap<String, SeriesMeta>, file_id: i64) -> Option<&'a EpisodeMeta> {
+pub fn episode_meta<'a>(
+    catalog: &Catalog,
+    series: &'a HashMap<String, SeriesMeta>,
+    file_id: i64,
+) -> Option<&'a EpisodeMeta> {
     let entry = catalog.show_of_file(file_id)?;
     let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
     let pid = entry.show.provider_id.as_ref()?;

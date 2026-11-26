@@ -27,26 +27,49 @@ pub struct MatchOnline {
 
 /// "Now: Title (2001)" plus the files: the file itself, or the folders and an example.
 fn describe(sh: &Shared, library_id: i64, show_id: i64) -> String {
-    let Some(state) = sh.lib(library_id) else { return String::new() };
-    let Some(entry) = state.catalog().and_then(|c| c.show(show_id)) else { return String::new() };
+    let Some(state) = sh.lib(library_id) else {
+        return String::new();
+    };
+    let Some(entry) = state.catalog().and_then(|c| c.show(show_id)) else {
+        return String::new();
+    };
     let mut lines = Vec::new();
     let title = match entry.show.year {
         Some(y) => format!("{} ({y})", entry.show.title),
         None => entry.show.title.clone(),
     };
-    let how = if entry.show.provider_id.is_some() { "matched" } else { "not matched" };
+    let how = if entry.show.provider_id.is_some() {
+        "matched"
+    } else {
+        "not matched"
+    };
     lines.push(format!("Now: {title} · {how}"));
-    let mut paths: Vec<&str> = entry.episodes.iter().filter_map(|e| state.tree.file(e.file_id)).map(|f| f.rel_path.as_str()).collect();
+    let mut paths: Vec<&str> = entry
+        .episodes
+        .iter()
+        .filter_map(|e| state.tree.file(e.file_id))
+        .map(|f| f.rel_path.as_str())
+        .collect();
     paths.sort_unstable();
     match paths.as_slice() {
         [] => {}
         [one] => lines.push(format!("File: {one}")),
         [first, ..] => {
-            let mut dirs: Vec<&str> = paths.iter().map(|p| p.rsplit_once('/').map_or("(library folder)", |(d, _)| d)).collect();
+            let mut dirs: Vec<&str> = paths
+                .iter()
+                .map(|p| p.rsplit_once('/').map_or("(library folder)", |(d, _)| d))
+                .collect();
             dirs.dedup();
-            let more = if dirs.len() > 2 { format!(" and {} more", dirs.len() - 2) } else { String::new() };
+            let more = if dirs.len() > 2 {
+                format!(" and {} more", dirs.len() - 2)
+            } else {
+                String::new()
+            };
             let label = if dirs.len() == 1 { "Folder" } else { "Folders" };
-            lines.push(format!("{label}: {}{more}", dirs.iter().take(2).copied().collect::<Vec<_>>().join(" · ")));
+            lines.push(format!(
+                "{label}: {}{more}",
+                dirs.iter().take(2).copied().collect::<Vec<_>>().join(" · ")
+            ));
             let name = first.rsplit('/').next().unwrap_or(first);
             lines.push(format!("{} files, e.g. {name}", paths.len()));
         }
@@ -58,7 +81,11 @@ impl MatchOnline {
     pub fn new(sh: &Shared, library_id: i64, show_id: i64) -> Self {
         let entry = sh.lib(library_id).and_then(|l| l.catalog()?.show(show_id));
         let query = entry.map_or_else(String::new, |e| e.show.title.clone());
-        let kind = if entry.is_some_and(|e| e.is_series()) { Kind::Tv } else { Kind::Movie };
+        let kind = if entry.is_some_and(|e| e.is_series()) {
+            Kind::Tv
+        } else {
+            Kind::Movie
+        };
         let mut screen = Self {
             library_id,
             show_id,
@@ -82,7 +109,9 @@ impl MatchOnline {
         let (tx, rx) = std::sync::mpsc::channel();
         let (query, kind, ctx) = (self.query.clone(), self.kind, sh.ctx.clone());
         std::thread::spawn(move || {
-            let result = Tmdb::new(&token).search(kind, &query, None).map_err(|e| format!("{e:#}"));
+            let result = Tmdb::new(&token)
+                .search(kind, &query, None)
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(result);
             ctx.request_repaint();
         });
@@ -94,7 +123,11 @@ impl MatchOnline {
         let Some(rx) = &self.pending else { return };
         match rx.try_recv() {
             Ok(Ok(results)) => {
-                self.status = if results.is_empty() { "Nothing found".into() } else { String::new() };
+                self.status = if results.is_empty() {
+                    "Nothing found".into()
+                } else {
+                    String::new()
+                };
                 self.results = results;
                 self.list.select(0);
             }
@@ -122,7 +155,11 @@ impl Screen for MatchOnline {
                 Nav::None
             }
             ListInput::Activate(0) => {
-                self.kind = if self.kind == Kind::Tv { Kind::Movie } else { Kind::Tv };
+                self.kind = if self.kind == Kind::Tv {
+                    Kind::Movie
+                } else {
+                    Kind::Tv
+                };
                 self.search(sh);
                 Nav::None
             }
@@ -139,7 +176,10 @@ impl Screen for MatchOnline {
         self.poll();
         let body = widgets::header(ui.painter(), rect, "Match online", &self.status, ui.style());
         let about_h = widgets::paragraph(ui.painter(), body, &self.about, 4, ui.style());
-        let field = Rect::from_min_size(body.min + vec2(0.0, about_h + 20.0), vec2(body.width().min(900.0), 56.0));
+        let field = Rect::from_min_size(
+            body.min + vec2(0.0, about_h + 20.0),
+            vec2(body.width().min(900.0), 56.0),
+        );
         let edit = egui::TextEdit::singleline(&mut self.query)
             .id(Self::query_id())
             .hint_text("Title to search for (keyboard)")
@@ -153,15 +193,24 @@ impl Screen for MatchOnline {
         if response.has_focus() && ui.input(|i| i.key_pressed(Key::ArrowDown)) {
             response.surrender_focus();
         }
-        let list_rect = Rect::from_min_max(egui::pos2(body.left(), field.bottom() + 16.0), body.max);
-        let kind = if self.kind == Kind::Tv { "Searching TV series" } else { "Searching films" };
+        let list_rect =
+            Rect::from_min_max(egui::pos2(body.left(), field.bottom() + 16.0), body.max);
+        let kind = if self.kind == Kind::Tv {
+            "Searching TV series"
+        } else {
+            "Searching films"
+        };
         let mut rows = vec![Row::new(Icon::Refresh, kind).detail("OK to switch")];
         rows.extend(self.results.iter().map(|c| {
             let title = match c.year {
                 Some(y) => format!("{} ({y})", c.title),
                 None => c.title.clone(),
             };
-            let detail = if c.original_title != c.title { c.original_title.clone() } else { String::new() };
+            let detail = if c.original_title != c.title {
+                c.original_title.clone()
+            } else {
+                String::new()
+            };
             Row::new(Icon::Video, title).detail(detail)
         }));
         widgets::list(ui, list_rect, &rows, &mut self.list, focused);

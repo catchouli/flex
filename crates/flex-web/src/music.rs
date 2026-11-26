@@ -18,18 +18,27 @@ pub struct AlbumKey {
 }
 
 fn library(state: &State, id: i64) -> Option<LibrarySnapshot> {
-    state.snapshot().libraries.iter().find(|l| l.lib.id == id).cloned()
+    state
+        .snapshot()
+        .libraries
+        .iter()
+        .find(|l| l.lib.id == id)
+        .cloned()
 }
 
 fn cover_url(l: &LibrarySnapshot, album: &Album) -> Option<String> {
-    l.covers.contains_key(&album.key).then(|| format!("/cover/{}?key={}", l.lib.id, urlencode(&album.key)))
+    l.covers
+        .contains_key(&album.key)
+        .then(|| format!("/cover/{}?key={}", l.lib.id, urlencode(&album.key)))
 }
 
 /// Percent-encodes everything but unreserved characters (for a query value).
 fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             b => format!("%{b:02X}"),
         })
         .collect()
@@ -58,7 +67,9 @@ pub struct Albums {
 /// `/api/music/{id}`: a music library's albums (loose tracks with no album tag aren't
 /// listed, as in the app).
 pub async fn albums(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>) -> Response {
-    let Some(l) = library(&state, id) else { return StatusCode::NOT_FOUND.into_response() };
+    let Some(l) = library(&state, id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     let albums = l
         .music
         .iter()
@@ -74,7 +85,13 @@ pub async fn albums(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>) ->
             cover: cover_url(&l, a),
         })
         .collect();
-    Json(Albums { id, name: l.lib.name.clone(), loading: l.music.is_none(), albums }).into_response()
+    Json(Albums {
+        id,
+        name: l.lib.name.clone(),
+        loading: l.music.is_none(),
+        albums,
+    })
+    .into_response()
 }
 
 #[derive(Serialize)]
@@ -101,9 +118,17 @@ pub struct AlbumDetails {
 }
 
 /// `/api/album/{id}?key=…`: an album's tracks, in play order.
-pub async fn album(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>, Query(q): Query<AlbumKey>) -> Response {
-    let Some(l) = library(&state, id) else { return StatusCode::NOT_FOUND.into_response() };
-    let Some((_, album)) = l.music.as_ref().and_then(|m| m.album(&q.key)) else { return StatusCode::NOT_FOUND.into_response() };
+pub async fn album(
+    AxState(state): AxState<Arc<State>>,
+    Path(id): Path<i64>,
+    Query(q): Query<AlbumKey>,
+) -> Response {
+    let Some(l) = library(&state, id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some((_, album)) = l.music.as_ref().and_then(|m| m.album(&q.key)) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     let tracks = album
         .tracks
         .iter()
@@ -134,12 +159,20 @@ pub async fn album(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>, Que
 
 /// `/cover/{id}?key=…`: art next to the tracks, or a redirect to its Cover Art Archive
 /// image.
-pub async fn cover(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>, Query(q): Query<AlbumKey>, req: Request) -> Response {
+pub async fn cover(
+    AxState(state): AxState<Arc<State>>,
+    Path(id): Path<i64>,
+    Query(q): Query<AlbumKey>,
+    req: Request,
+) -> Response {
     let Some(cover) = library(&state, id).and_then(|l| l.covers.get(&q.key).cloned()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     match cover.strip_prefix("file:") {
-        Some(path) => match tower_http::services::ServeFile::new(path).oneshot(req).await {
+        Some(path) => match tower_http::services::ServeFile::new(path)
+            .oneshot(req)
+            .await
+        {
             Ok(res) => res.into_response(),
             Err(e) => {
                 log::warn!("web: serving a cover: {e}");
@@ -168,13 +201,34 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("flex-web-music-{}", std::process::id()));
         let root = dir.join("music");
         std::fs::create_dir_all(root.join("Lantern Quarry/Harbour Lights")).unwrap();
-        std::fs::write(root.join("Lantern Quarry/Harbour Lights/01 Morning Tide.mp3"), b"ID3 not really audio").unwrap();
+        std::fs::write(
+            root.join("Lantern Quarry/Harbour Lights/01 Morning Tide.mp3"),
+            b"ID3 not really audio",
+        )
+        .unwrap();
         let art = root.join("Lantern Quarry/Harbour Lights/cover.jpg");
         std::fs::write(&art, b"\xff\xd8 not really a jpeg").unwrap();
 
-        let lib = Library { id: 3, name: "Music".into(), root: root.clone(), kind: LibraryKind::Music };
-        let file = MediaFile { id: 11, library_id: 3, rel_path: "Lantern Quarry/Harbour Lights/01 Morning Tide.mp3".into(), ..Default::default() };
-        let track = |file_id, title: &str| Track { file_id, title: title.into(), artists: Vec::new(), number: Some(1), disc: None, duration: 245.0 };
+        let lib = Library {
+            id: 3,
+            name: "Music".into(),
+            root: root.clone(),
+            kind: LibraryKind::Music,
+        };
+        let file = MediaFile {
+            id: 11,
+            library_id: 3,
+            rel_path: "Lantern Quarry/Harbour Lights/01 Morning Tide.mp3".into(),
+            ..Default::default()
+        };
+        let track = |file_id, title: &str| Track {
+            file_id,
+            title: title.into(),
+            artists: Vec::new(),
+            number: Some(1),
+            disc: None,
+            duration: 245.0,
+        };
         let album = |key: &str, title: &str, singles| Album {
             key: key.into(),
             title: title.into(),
@@ -187,13 +241,26 @@ mod tests {
             singles,
         };
         let music = MusicCatalog {
-            albums: vec![album("lq/Harbour Lights", "Harbour Lights", false), album("lq/loose", "Singles", true)],
-            artists: vec![Artist { name: "Lantern Quarry".into(), albums: vec![0], appears_on: Vec::new() }],
+            albums: vec![
+                album("lq/Harbour Lights", "Harbour Lights", false),
+                album("lq/loose", "Singles", true),
+            ],
+            artists: vec![Artist {
+                name: "Lantern Quarry".into(),
+                albums: vec![0],
+                appears_on: Vec::new(),
+            }],
             tracks: 2,
         };
         let covers: HashMap<String, String> = [
-            ("lq/Harbour Lights".to_owned(), format!("file:{}", art.display())),
-            ("lq/loose".to_owned(), "https://coverartarchive.org/release-group/x/front-500".to_owned()),
+            (
+                "lq/Harbour Lights".to_owned(),
+                format!("file:{}", art.display()),
+            ),
+            (
+                "lq/loose".to_owned(),
+                "https://coverartarchive.org/release-group/x/front-500".to_owned(),
+            ),
         ]
         .into();
         let snapshot = Snapshot {
@@ -215,8 +282,20 @@ mod tests {
         };
         let server = Server::start(config, snapshot, |_| {}).unwrap();
         let base = format!("http://127.0.0.1:{}", server.port());
-        let client: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
-        let json = |path: &str| -> serde_json::Value { client.get(&format!("{base}{path}")).call().unwrap().body_mut().read_json().unwrap() };
+        let client: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        let json = |path: &str| -> serde_json::Value {
+            client
+                .get(&format!("{base}{path}"))
+                .call()
+                .unwrap()
+                .body_mut()
+                .read_json()
+                .unwrap()
+        };
 
         let home = json("/api/home");
         assert_eq!(home["libraries"][0]["kind"], "music");
@@ -231,20 +310,49 @@ mod tests {
 
         let album = json("/api/album/3?key=lq%2FHarbour%20Lights");
         assert_eq!(album["tracks"][0]["file"], 11);
-        assert_eq!(album["tracks"][0]["artists"], serde_json::Value::Null, "same as the album's artist");
+        assert_eq!(
+            album["tracks"][0]["artists"],
+            serde_json::Value::Null,
+            "same as the album's artist"
+        );
 
         let mut local = client.get(&format!("{base}{cover}")).call().unwrap();
         assert_eq!(local.status().as_u16(), 200);
-        assert_eq!(local.body_mut().read_to_vec().unwrap(), std::fs::read(&art).unwrap());
-        let remote = client.get(&format!("{base}/cover/3?key=lq%2Floose")).call().unwrap();
+        assert_eq!(
+            local.body_mut().read_to_vec().unwrap(),
+            std::fs::read(&art).unwrap()
+        );
+        let remote = client
+            .get(&format!("{base}/cover/3?key=lq%2Floose"))
+            .call()
+            .unwrap();
         assert_eq!(remote.status().as_u16(), 307);
-        assert!(remote.headers()["location"].to_str().unwrap().starts_with("https://coverartarchive.org/"));
-        assert_eq!(client.get(&format!("{base}/api/album/3?key=nope")).call().unwrap().status().as_u16(), 404);
+        assert!(
+            remote.headers()["location"]
+                .to_str()
+                .unwrap()
+                .starts_with("https://coverartarchive.org/")
+        );
+        assert_eq!(
+            client
+                .get(&format!("{base}/api/album/3?key=nope"))
+                .call()
+                .unwrap()
+                .status()
+                .as_u16(),
+            404
+        );
 
         let mut audio = client.get(&format!("{base}/media/3/11")).call().unwrap();
         assert_eq!(audio.status().as_u16(), 200);
-        assert_eq!(audio.headers()["content-type"].to_str().unwrap(), "audio/mpeg");
-        assert_eq!(audio.body_mut().read_to_vec().unwrap(), b"ID3 not really audio");
+        assert_eq!(
+            audio.headers()["content-type"].to_str().unwrap(),
+            "audio/mpeg"
+        );
+        assert_eq!(
+            audio.body_mut().read_to_vec().unwrap(),
+            b"ID3 not really audio"
+        );
         let js = client.get(&format!("{base}/music.js")).call().unwrap();
         assert_eq!(js.status().as_u16(), 200);
 
@@ -254,7 +362,10 @@ mod tests {
 
     #[test]
     fn encodes_album_keys() {
-        assert_eq!(urlencode("Artist/Album (2019)\u{1f}Album"), "Artist%2FAlbum%20%282019%29%1FAlbum");
+        assert_eq!(
+            urlencode("Artist/Album (2019)\u{1f}Album"),
+            "Artist%2FAlbum%20%282019%29%1FAlbum"
+        );
         assert_eq!(urlencode("plain-key_1.0~"), "plain-key_1.0~");
     }
 }

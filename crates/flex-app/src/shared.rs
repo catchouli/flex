@@ -121,12 +121,20 @@ impl LibState {
         } else if let Some((done, total)) = self.fetching {
             format!("Fetching details… {done}/{total}")
         } else if let Some((done, total)) = self.reading_tags {
-            format!("Reading tags… {}/{} folders", thousands(done), thousands(total))
+            format!(
+                "Reading tags… {}/{} folders",
+                thousands(done),
+                thousands(total)
+            )
         } else if let Some(e) = &self.error {
             e.clone()
         } else if let Some(music) = &self.music {
             let albums = music.albums.iter().filter(|a| !a.singles).count();
-            format!("{} albums · {} tracks", thousands(albums), thousands(music.tracks))
+            format!(
+                "{} albums · {} tracks",
+                thousands(albums),
+                thousands(music.tracks)
+            )
         } else if self.is_music() {
             format!("{} tracks", thousands(self.tree.len()))
         } else {
@@ -182,7 +190,13 @@ const YOUTUBE_PREFIX: &str = "youtube:";
 
 impl PlayRequest {
     pub fn youtube(id: &str, title: &str, start: Option<f64>) -> Self {
-        Self { path: PathBuf::from(format!("{YOUTUBE_PREFIX}{id}")), title: title.to_owned(), library_id: YOUTUBE_LIBRARY, file_id: -1, start }
+        Self {
+            path: PathBuf::from(format!("{YOUTUBE_PREFIX}{id}")),
+            title: title.to_owned(),
+            library_id: YOUTUBE_LIBRARY,
+            file_id: -1,
+            start,
+        }
     }
 
     /// The video id, for a YouTube play.
@@ -227,7 +241,9 @@ impl SkipMode {
 pub const WATCHED_THRESHOLDS: [f64; 4] = [0.8, 0.85, 0.9, 0.95];
 
 pub fn now_unix() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 enum ScanMsg {
@@ -362,7 +378,10 @@ impl Shared {
         let (scan_tx, scan_rx) = channel();
         let (web_tx, web_rx) = channel();
         let waker = ctx.clone();
-        let plugins = flex_core::plugins::Host::new(&flex_core::plugins::plugin_dirs(), &db, move || waker.request_repaint());
+        let plugins =
+            flex_core::plugins::Host::new(&flex_core::plugins::plugin_dirs(), &db, move || {
+                waker.request_repaint()
+            });
         let ambient = crate::ambient::Ambient::new(|key| db.setting(key).ok().flatten());
         let mut shared = Self {
             ctx: ctx.clone(),
@@ -424,7 +443,9 @@ impl Shared {
             for lib in shared.db.libraries()? {
                 shared.db.reset_matching(lib.id)?;
             }
-            shared.db.set_setting(MATCHER_VERSION_SETTING, MATCHER_VERSION)?;
+            shared
+                .db
+                .set_setting(MATCHER_VERSION_SETTING, MATCHER_VERSION)?;
         }
         for lib in shared.db.libraries()? {
             let tree = Tree::new(shared.db.files(lib.id)?);
@@ -451,11 +472,18 @@ impl Shared {
     }
 
     pub fn setting_bool(&self, key: &str) -> bool {
-        self.db.setting(key).ok().flatten().is_some_and(|v| v == "true")
+        self.db
+            .setting(key)
+            .ok()
+            .flatten()
+            .is_some_and(|v| v == "true")
     }
 
     pub fn set_setting_bool(&mut self, key: &str, value: bool) {
-        if let Err(e) = self.db.set_setting(key, if value { "true" } else { "false" }) {
+        if let Err(e) = self
+            .db
+            .set_setting(key, if value { "true" } else { "false" })
+        {
             log::warn!("saving setting {key}: {e:#}");
         }
     }
@@ -474,7 +502,8 @@ impl Shared {
     /// The address other devices can open, while the web UI is on.
     pub fn web_url(&self) -> Option<String> {
         let port = self.web.as_ref()?.port();
-        let host = flex_web::lan_address().map_or_else(|| "localhost".to_owned(), |ip| ip.to_string());
+        let host =
+            flex_web::lan_address().map_or_else(|| "localhost".to_owned(), |ip| ip.to_string());
         Some(format!("http://{host}:{port}"))
     }
 
@@ -487,7 +516,10 @@ impl Shared {
         if self.web.is_some() {
             return;
         }
-        let port = self.setting(WEB_PORT_SETTING).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_WEB_PORT);
+        let port = self
+            .setting(WEB_PORT_SETTING)
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(DEFAULT_WEB_PORT);
         let config = flex_web::Config {
             port,
             db_path: self.db_path.clone(),
@@ -513,7 +545,10 @@ impl Shared {
     }
 
     fn web_key(&self) -> Vec<(i64, u64, String)> {
-        self.libs.iter().map(|l| (l.lib.id, l.version, l.lib.name.clone())).collect()
+        self.libs
+            .iter()
+            .map(|l| (l.lib.id, l.version, l.lib.name.clone()))
+            .collect()
     }
 
     fn web_snapshot(&self) -> flex_web::Snapshot {
@@ -543,11 +578,23 @@ impl Shared {
     fn poll_web(&mut self) {
         while let Ok(change) = self.web_rx.try_recv() {
             match change {
-                flex_web::Change::Watched { library_id, file_ids, watched } => {
-                    log::info!("web: marked {} file(s) {}", file_ids.len(), if watched { "watched" } else { "unwatched" });
+                flex_web::Change::Watched {
+                    library_id,
+                    file_ids,
+                    watched,
+                } => {
+                    log::info!(
+                        "web: marked {} file(s) {}",
+                        file_ids.len(),
+                        if watched { "watched" } else { "unwatched" }
+                    );
                     self.apply_watched(library_id, &file_ids, watched);
                 }
-                flex_web::Change::Progress { library_id, file_id, progress } => {
+                flex_web::Change::Progress {
+                    library_id,
+                    file_id,
+                    progress,
+                } => {
                     if let Some(state) = self.lib_mut(library_id)
                         && let Some(file) = Arc::make_mut(&mut state.tree).file_mut(file_id)
                     {
@@ -559,7 +606,11 @@ impl Shared {
                     log::info!("remote: {command:?}");
                     self.remote.push(command);
                 }
-                flex_web::Change::Search { query, scope, reply } => {
+                flex_web::Change::Search {
+                    query,
+                    scope,
+                    reply,
+                } => {
                     let _ = reply.try_send(self.remote_search(&query, scope));
                 }
             }
@@ -595,7 +646,10 @@ impl Shared {
     }
 
     pub fn set_watched_threshold(&mut self, threshold: f64) {
-        if let Err(e) = self.db.set_setting(progress::WATCHED_THRESHOLD_SETTING, &threshold.to_string()) {
+        if let Err(e) = self
+            .db
+            .set_setting(progress::WATCHED_THRESHOLD_SETTING, &threshold.to_string())
+        {
             log::warn!("saving watched threshold: {e:#}");
         }
     }
@@ -606,14 +660,27 @@ impl Shared {
 
     /// Records having played `req` up to `position` (seconds) of `duration`. Returns the
     /// new progress, or `None` if nothing was recorded (too short, or not a library file).
-    pub fn record_progress(&mut self, req: &PlayRequest, position: f64, duration: f64) -> Option<Progress> {
+    pub fn record_progress(
+        &mut self,
+        req: &PlayRequest,
+        position: f64,
+        duration: f64,
+    ) -> Option<Progress> {
         let threshold = self.watched_threshold();
         if let Some(id) = req.youtube_id() {
             let channel = match self.youtube.resolved(id) {
                 Some(Ok(video)) => video.channel.clone(),
                 _ => String::new(),
             };
-            if let Err(e) = self.db.record_yt_progress(id, &req.title, &channel, position, duration, threshold, now_unix()) {
+            if let Err(e) = self.db.record_yt_progress(
+                id,
+                &req.title,
+                &channel,
+                position,
+                duration,
+                threshold,
+                now_unix(),
+            ) {
                 log::warn!("saving YouTube progress: {e:#}");
             }
             self.youtube.version += 1;
@@ -639,13 +706,22 @@ impl Shared {
     }
 
     /// Adds a viewing session to the history.
-    pub fn add_history(&mut self, req: &PlayRequest, played_at: i64, position: Option<f64>, completed: bool) {
+    pub fn add_history(
+        &mut self,
+        req: &PlayRequest,
+        played_at: i64,
+        position: Option<f64>,
+        completed: bool,
+    ) {
         // A viewing session just ended: tell other devices soon.
         self.nudge_sync();
         if req.youtube_id().is_some() {
             return; // the history is per library
         }
-        if let Err(e) = self.db.add_history(req.file_id, played_at, position, completed) {
+        if let Err(e) = self
+            .db
+            .add_history(req.file_id, played_at, position, completed)
+        {
             log::warn!("saving history: {e:#}");
         }
     }
@@ -690,8 +766,12 @@ impl Shared {
     /// Updates watched state in memory (the database is already up to date).
     /// Notes that a file started playing now (music: for "Recently played").
     pub fn mark_played(&mut self, library_id: i64, file_id: i64) {
-        let Some(state) = self.lib_mut(library_id) else { return };
-        let Some(file) = Arc::make_mut(&mut state.tree).file_mut(file_id) else { return };
+        let Some(state) = self.lib_mut(library_id) else {
+            return;
+        };
+        let Some(file) = Arc::make_mut(&mut state.tree).file_mut(file_id) else {
+            return;
+        };
         file.progress.last_played = Some(now_unix());
         let progress = file.progress;
         state.version += 1;
@@ -716,11 +796,19 @@ impl Shared {
     /// Continue Watching: per show for organised libraries, per folder for the rest
     /// (while they're still being organised).
     pub fn continue_watching(&self, limit: usize) -> Vec<ContinueItem> {
-        let organised = self.libs.iter().filter_map(|l| l.catalog().map(|c| (&l.lib, &*l.tree, c)));
+        let organised = self
+            .libs
+            .iter()
+            .filter_map(|l| l.catalog().map(|c| (&l.lib, &*l.tree, c)));
         let mut items = progress::continue_watching_shows(organised, limit);
-        let pending = self.libs.iter().filter(|l| l.organised.is_none() && !l.is_music()).map(|l| (&l.lib, &*l.tree));
+        let pending = self
+            .libs
+            .iter()
+            .filter(|l| l.organised.is_none() && !l.is_music())
+            .map(|l| (&l.lib, &*l.tree));
         items.extend(progress::continue_watching(pending, limit));
-        let mut items = progress::without_hidden(items, &self.db.continue_hidden().unwrap_or_default());
+        let mut items =
+            progress::without_hidden(items, &self.db.continue_hidden().unwrap_or_default());
         items.truncate(limit);
         items
     }
@@ -738,27 +826,41 @@ impl Shared {
 
     /// Where sync files go, if syncing is on.
     pub fn sync_dir(&self) -> Option<PathBuf> {
-        self.setting(crate::sync::DIR_SETTING).filter(|d| !d.is_empty()).map(PathBuf::from)
+        self.setting(crate::sync::DIR_SETTING)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
     }
 
     /// The folder chosen for crash reports, if any (see [`crate::logging`]).
     pub fn crash_dir(&self) -> Option<PathBuf> {
-        self.setting(crate::logging::CRASH_DIR_SETTING).filter(|d| !d.is_empty()).map(PathBuf::from)
+        self.setting(crate::logging::CRASH_DIR_SETTING)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
     }
 
     pub fn set_crash_dir(&mut self, dir: Option<&Path>) {
-        self.set_setting(crate::logging::CRASH_DIR_SETTING, &dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        self.set_setting(
+            crate::logging::CRASH_DIR_SETTING,
+            &dir.map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
         crate::logging::set_crash_dir(dir.map(Path::to_path_buf));
     }
 
     /// This device's name for other devices (its host name until renamed).
     pub fn sync_name(&self) -> String {
-        self.setting(crate::sync::NAME_SETTING).filter(|n| !n.trim().is_empty()).unwrap_or_else(crate::sync::default_name)
+        self.setting(crate::sync::NAME_SETTING)
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(crate::sync::default_name)
     }
 
     /// Starts (or restarts, or with `None` stops) syncing through `dir`.
     pub fn set_sync_dir(&mut self, dir: Option<&Path>) {
-        self.set_setting(crate::sync::DIR_SETTING, &dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        self.set_setting(
+            crate::sync::DIR_SETTING,
+            &dir.map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
         self.start_sync();
     }
 
@@ -780,7 +882,13 @@ impl Shared {
             }
         };
         log::info!("sync: on, through {} as {device}", dir.display());
-        self.sync = Some(crate::sync::Sync::start(self.db_path.clone(), dir, device, self.sync_name(), &self.ctx));
+        self.sync = Some(crate::sync::Sync::start(
+            self.db_path.clone(),
+            dir,
+            device,
+            self.sync_name(),
+            &self.ctx,
+        ));
     }
 
     /// Syncs soon, if syncing is on (something here changed).
@@ -829,14 +937,24 @@ impl Shared {
     }
 
     pub fn library_view(&self, id: i64) -> LibraryView {
-        match self.db.setting(&format!("view:{id}")).ok().flatten().as_deref() {
+        match self
+            .db
+            .setting(&format!("view:{id}"))
+            .ok()
+            .flatten()
+            .as_deref()
+        {
             Some("folders") => LibraryView::Folders,
             _ => LibraryView::Shows,
         }
     }
 
     pub fn set_library_view(&mut self, id: i64, view: LibraryView) {
-        let value = if view == LibraryView::Folders { "folders" } else { "shows" };
+        let value = if view == LibraryView::Folders {
+            "folders"
+        } else {
+            "shows"
+        };
         if let Err(e) = self.db.set_setting(&format!("view:{id}"), value) {
             log::warn!("saving library view: {e:#}");
         }
@@ -849,7 +967,9 @@ impl Shared {
             self.organise_music(id);
             return;
         }
-        let Some(state) = self.lib_mut(id) else { return };
+        let Some(state) = self.lib_mut(id) else {
+            return;
+        };
         state.organising = true;
         let kind = state.lib.kind;
         let files = state.tree.files().to_vec();
@@ -859,18 +979,29 @@ impl Shared {
                 let started = std::time::Instant::now();
                 let tree = Tree::new(files);
                 let mut db = Db::open(&db_path)?;
-                let parsed = flex_core::parse::parse_library_cached(&mut db, id, kind, tree.files())?;
+                let parsed =
+                    flex_core::parse::parse_library_cached(&mut db, id, kind, tree.files())?;
                 let parse_time = started.elapsed();
                 let groups = catalog::derive_groups(kind, &tree, &parsed);
                 db.sync_groups(id, &groups)?;
-                let catalog = Catalog::build(&tree, &parsed, &groups, db.shows(id)?, &db.group_matches(id)?);
+                let catalog = Catalog::build(
+                    &tree,
+                    &parsed,
+                    &groups,
+                    db.shows(id)?,
+                    &db.group_matches(id)?,
+                );
                 log::info!(
                     "organised library {id}: {} groups into {} shows in {:?} (parsing {parse_time:?})",
                     groups.len(),
                     catalog.shows.len(),
                     started.elapsed()
                 );
-                Ok(Organised { parsed: Arc::new(parsed), groups: Arc::new(groups), catalog: Arc::new(catalog) })
+                Ok(Organised {
+                    parsed: Arc::new(parsed),
+                    groups: Arc::new(groups),
+                    catalog: Arc::new(catalog),
+                })
             })();
             let _ = tx.send(ScanMsg::Organised(id, result.map_err(|e| format!("{e:#}"))));
             ctx.request_repaint();
@@ -880,7 +1011,9 @@ impl Shared {
     /// Reads a music library's tags (new or changed folders only) and sorts its tracks
     /// into albums, on a background thread.
     fn organise_music(&mut self, id: i64) {
-        let Some(state) = self.lib_mut(id) else { return };
+        let Some(state) = self.lib_mut(id) else {
+            return;
+        };
         state.organising = true;
         let (root, files) = (state.lib.root.clone(), state.tree.files().to_vec());
         let (tx, ctx, db_path) = (self.scan_tx.clone(), self.ctx.clone(), self.db_path.clone());
@@ -889,12 +1022,24 @@ impl Shared {
             let result = (|| -> Result<MusicCatalog> {
                 let started = std::time::Instant::now();
                 let mut db = Db::open(&db_path)?;
-                let folders = flex_core::music::read_library_cached(&mut db, id, &root, &files, &covers, |done, total| {
-                    let _ = tx.send(ScanMsg::ReadingTags(id, done, total));
-                    ctx.request_repaint();
-                })?;
+                let folders = flex_core::music::read_library_cached(
+                    &mut db,
+                    id,
+                    &root,
+                    &files,
+                    &covers,
+                    |done, total| {
+                        let _ = tx.send(ScanMsg::ReadingTags(id, done, total));
+                        ctx.request_repaint();
+                    },
+                )?;
                 let music = flex_core::music::build(&files, &folders);
-                log::info!("organised music library {id}: {} albums, {} artists in {:?}", music.albums.len(), music.artists.len(), started.elapsed());
+                log::info!(
+                    "organised music library {id}: {} albums, {} artists in {:?}",
+                    music.albums.len(),
+                    music.artists.len(),
+                    started.elapsed()
+                );
                 Ok(music)
             })();
             let _ = tx.send(ScanMsg::Music(id, result.map_err(|e| format!("{e:#}"))));
@@ -906,7 +1051,9 @@ impl Shared {
     /// in the background, one a second.
     pub fn start_music_matching(&mut self, id: i64) {
         let Some(state) = self.lib(id) else { return };
-        let Some(music) = state.music.clone() else { return };
+        let Some(music) = state.music.clone() else {
+            return;
+        };
         if state.matching.is_some() {
             return;
         }
@@ -919,11 +1066,20 @@ impl Shared {
             .filter(|a| !a.singles)
             .filter(|a| match state.music_matches.get(&a.key) {
                 None => true,
-                Some(m) => !m.manual && m.release_group.is_none() && now - m.checked_at > MUSIC_RETRY_SECS,
+                Some(m) => {
+                    !m.manual && m.release_group.is_none() && now - m.checked_at > MUSIC_RETRY_SECS
+                }
             })
             .map(|a| {
-                let artist = (a.artist != "Various Artists" && a.artist != "Unknown artist").then(|| a.artist.clone());
-                (a.key.clone(), a.title.clone(), artist, a.tracks.len(), a.year)
+                let artist = (a.artist != "Various Artists" && a.artist != "Unknown artist")
+                    .then(|| a.artist.clone());
+                (
+                    a.key.clone(),
+                    a.title.clone(),
+                    artist,
+                    a.tracks.len(),
+                    a.year,
+                )
             })
             .collect();
         if todo.is_empty() {
@@ -943,7 +1099,11 @@ impl Shared {
                     match mb.find_album(title, artist.as_deref(), *tracks, *year) {
                         Ok(found) => {
                             failures = 0;
-                            if found.is_some() { matched += 1 } else { missed += 1 }
+                            if found.is_some() {
+                                matched += 1
+                            } else {
+                                missed += 1
+                            }
                             db.set_music_match(id, key, found.as_ref(), false)?;
                         }
                         Err(e) => {
@@ -959,9 +1119,14 @@ impl Shared {
                         ctx.request_repaint();
                     }
                 }
-                Ok(format!("{matched} albums found on MusicBrainz, {missed} not found"))
+                Ok(format!(
+                    "{matched} albums found on MusicBrainz, {missed} not found"
+                ))
             })();
-            let _ = tx.send(ScanMsg::MusicMatchDone(id, result.map_err(|e| format!("{e:#}"))));
+            let _ = tx.send(ScanMsg::MusicMatchDone(
+                id,
+                result.map_err(|e| format!("{e:#}")),
+            ));
             ctx.request_repaint();
         });
     }
@@ -973,8 +1138,16 @@ impl Shared {
         if state.fetching.is_some() {
             return;
         }
-        let fresh = self.db.music_artists(MUSIC_ARTIST_MAX_AGE_SECS).unwrap_or_default();
-        let mut todo: Vec<String> = state.music_artist_ids.values().filter(|a| !fresh.contains_key(*a)).cloned().collect();
+        let fresh = self
+            .db
+            .music_artists(MUSIC_ARTIST_MAX_AGE_SECS)
+            .unwrap_or_default();
+        let mut todo: Vec<String> = state
+            .music_artist_ids
+            .values()
+            .filter(|a| !fresh.contains_key(*a))
+            .cloned()
+            .collect();
         todo.sort();
         todo.dedup();
         if todo.is_empty() {
@@ -1012,14 +1185,25 @@ impl Shared {
                 }
                 Ok(done)
             })();
-            let _ = tx.send(ScanMsg::MusicArtistsDone(id, result.map_err(|e| format!("{e:#}"))));
+            let _ = tx.send(ScanMsg::MusicArtistsDone(
+                id,
+                result.map_err(|e| format!("{e:#}")),
+            ));
             ctx.request_repaint();
         });
     }
 
     /// Sets (or clears) an album's MusicBrainz match by hand.
-    pub fn set_album_match(&mut self, library_id: i64, album_key: &str, release_group: Option<&ReleaseGroup>) {
-        if let Err(e) = self.db.set_music_match(library_id, album_key, release_group, true) {
+    pub fn set_album_match(
+        &mut self,
+        library_id: i64,
+        album_key: &str,
+        release_group: Option<&ReleaseGroup>,
+    ) {
+        if let Err(e) = self
+            .db
+            .set_music_match(library_id, album_key, release_group, true)
+        {
             self.toast(format!("Couldn't save the match: {e:#}"));
             return;
         }
@@ -1028,8 +1212,13 @@ impl Shared {
             l.set_music_matches(matches);
         }
         // Its artists straight away, rather than after everyone else's.
-        let todo: Vec<String> = release_group.map(|rg| rg.artists.iter().map(|(_, id)| id.clone()).collect()).unwrap_or_default();
-        let todo: Vec<String> = todo.into_iter().filter(|a| !self.music_artists.contains_key(a)).collect();
+        let todo: Vec<String> = release_group
+            .map(|rg| rg.artists.iter().map(|(_, id)| id.clone()).collect())
+            .unwrap_or_default();
+        let todo: Vec<String> = todo
+            .into_iter()
+            .filter(|a| !self.music_artists.contains_key(a))
+            .collect();
         if todo.is_empty() {
             return;
         }
@@ -1038,7 +1227,10 @@ impl Shared {
             let mb = flex_core::musicbrainz::MusicBrainz::new();
             let Ok(db) = Db::open(&db_path) else { return };
             for artist in todo {
-                match mb.artist(&artist).and_then(|info| db.set_music_artist(&artist, &info)) {
+                match mb
+                    .artist(&artist)
+                    .and_then(|info| db.set_music_artist(&artist, &info))
+                {
                     Ok(()) => {
                         let _ = tx.send(ScanMsg::MusicArtistReady(library_id));
                         ctx.request_repaint();
@@ -1051,7 +1243,10 @@ impl Shared {
 
     /// What MusicBrainz knows about an artist (by name, as tagged), once fetched.
     pub fn artist_info(&self, library_id: i64, name: &str) -> Option<&ArtistInfo> {
-        let id = self.lib(library_id)?.music_artist_ids.get(&name.to_lowercase())?;
+        let id = self
+            .lib(library_id)?
+            .music_artist_ids
+            .get(&name.to_lowercase())?;
         self.music_artists.get(id)
     }
 
@@ -1060,7 +1255,10 @@ impl Shared {
     pub fn tmdb_token(&self) -> Option<String> {
         let from_db = self.db.setting(TMDB_TOKEN_SETTING).ok().flatten();
         let from_file = || std::fs::read_to_string(flex_core::data_dir().join("tmdb_token")).ok();
-        from_db.or_else(from_file).map(|t| t.trim().to_owned()).filter(|t| !t.is_empty())
+        from_db
+            .or_else(from_file)
+            .map(|t| t.trim().to_owned())
+            .filter(|t| !t.is_empty())
     }
 
     pub fn set_tmdb_token(&mut self, token: &str) {
@@ -1076,7 +1274,10 @@ impl Shared {
 
     /// Redoes a library's automatic grouping and online matching (manual choices stay).
     pub fn rematch(&mut self, id: i64) {
-        if self.lib(id).is_some_and(|l| l.matching.is_some() || l.organising) {
+        if self
+            .lib(id)
+            .is_some_and(|l| l.matching.is_some() || l.organising)
+        {
             self.toast("Still matching; try again when it's done");
             return;
         }
@@ -1093,12 +1294,16 @@ impl Shared {
 
     /// Looks up shows that haven't been matched online yet, in the background.
     pub fn start_matching(&mut self, id: i64) {
-        let Some(token) = self.tmdb_token() else { return };
+        let Some(token) = self.tmdb_token() else {
+            return;
+        };
         let Some(state) = self.lib(id) else { return };
         if state.matching.is_some() {
             return;
         }
-        let Some(catalog) = state.catalog() else { return };
+        let Some(catalog) = state.catalog() else {
+            return;
+        };
         let anime = state.lib.kind == LibraryKind::Anime;
         let todo: Vec<flex_core::metadata::Lookup> = catalog
             .shows
@@ -1108,7 +1313,11 @@ impl Shared {
                 show_id: s.show.id,
                 title: s.show.title.clone(),
                 year: s.show.year,
-                kind: if s.is_series() { flex_core::metadata::Kind::Tv } else { flex_core::metadata::Kind::Movie },
+                kind: if s.is_series() {
+                    flex_core::metadata::Kind::Tv
+                } else {
+                    flex_core::metadata::Kind::Movie
+                },
                 anime,
             })
             .collect();
@@ -1156,18 +1365,25 @@ impl Shared {
     /// every season's episode titles; then, for anime, Japanese voice actors from AniList
     /// (slower: AniList allows ~30 requests a minute).
     pub fn start_details(&mut self, id: i64) {
-        let Some(token) = self.tmdb_token() else { return };
+        let Some(token) = self.tmdb_token() else {
+            return;
+        };
         let Some(state) = self.lib(id) else { return };
         if state.fetching.is_some() {
             return;
         }
         let anime = state.lib.kind == LibraryKind::Anime;
-        let todo = self.db.shows_needing_details(id, DETAILS_MAX_AGE_SECS).unwrap_or_else(|e| {
-            log::warn!("listing shows needing details: {e:#}");
-            Vec::new()
-        });
+        let todo = self
+            .db
+            .shows_needing_details(id, DETAILS_MAX_AGE_SECS)
+            .unwrap_or_else(|e| {
+                log::warn!("listing shows needing details: {e:#}");
+                Vec::new()
+            });
         let voice_todo = if anime {
-            self.db.shows_needing_voice_cast(id, VOICE_MAX_AGE_SECS).unwrap_or_default()
+            self.db
+                .shows_needing_voice_cast(id, VOICE_MAX_AGE_SECS)
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -1245,21 +1461,38 @@ impl Shared {
     /// The watchlist key for a show: its TMDB entry, or its local id if unmatched.
     fn watchlist_key(&self, library_id: i64, show_id: i64) -> Option<String> {
         let entry = self.lib(library_id)?.catalog()?.show(show_id)?;
-        Some(entry.show.provider_id.clone().unwrap_or_else(|| format!("local:{show_id}")))
+        Some(
+            entry
+                .show
+                .provider_id
+                .clone()
+                .unwrap_or_else(|| format!("local:{show_id}")),
+        )
     }
 
     pub fn on_watchlist(&self, library_id: i64, show_id: i64) -> bool {
-        self.watchlist_key(library_id, show_id).is_some_and(|k| self.watchlist.iter().any(|(w, _, _)| *w == k))
+        self.watchlist_key(library_id, show_id)
+            .is_some_and(|k| self.watchlist.iter().any(|(w, _, _)| *w == k))
     }
 
     pub fn set_watchlist(&mut self, library_id: i64, show_id: i64, on: bool) {
-        let Some(key) = self.watchlist_key(library_id, show_id) else { return };
-        match self.db.set_watchlist(&key, library_id, on).and_then(|()| self.db.watchlist()) {
+        let Some(key) = self.watchlist_key(library_id, show_id) else {
+            return;
+        };
+        match self
+            .db
+            .set_watchlist(&key, library_id, on)
+            .and_then(|()| self.db.watchlist())
+        {
             Ok(list) => {
                 self.watchlist = list;
                 self.watchlist_version += 1;
                 self.nudge_sync();
-                self.toast(if on { "Added to watchlist" } else { "Removed from watchlist" });
+                self.toast(if on {
+                    "Added to watchlist"
+                } else {
+                    "Removed from watchlist"
+                });
             }
             Err(e) => self.toast(format!("Couldn't update the watchlist: {e:#}")),
         }
@@ -1273,7 +1506,10 @@ impl Shared {
                 let catalog = self.lib(*library_id)?.catalog()?;
                 let show = match key.strip_prefix("local:") {
                     Some(id) => catalog.show(id.parse().ok()?)?,
-                    None => catalog.shows.iter().find(|s| s.show.provider_id.as_deref() == Some(key))?,
+                    None => catalog
+                        .shows
+                        .iter()
+                        .find(|s| s.show.provider_id.as_deref() == Some(key))?,
                 };
                 Some((*library_id, show.show.id, *added))
             })
@@ -1288,7 +1524,11 @@ impl Shared {
     }
 
     /// TMDB metadata (description, still) for an episode, if known.
-    pub fn episode_meta(&self, library_id: i64, file_id: i64) -> Option<&flex_core::db::EpisodeMeta> {
+    pub fn episode_meta(
+        &self,
+        library_id: i64,
+        file_id: i64,
+    ) -> Option<&flex_core::db::EpisodeMeta> {
         flex_core::titles::episode_meta(self.lib(library_id)?.catalog()?, &self.series, file_id)
     }
 
@@ -1303,7 +1543,10 @@ impl Shared {
             log::warn!("reading credits for {name}: {e:#}");
             Vec::new()
         });
-        let roles: HashMap<&str, &str> = credits.iter().map(|(p, r)| (p.as_str(), r.as_str())).collect();
+        let roles: HashMap<&str, &str> = credits
+            .iter()
+            .map(|(p, r)| (p.as_str(), r.as_str()))
+            .collect();
         let mut out = Vec::new();
         for l in &self.libs {
             for entry in l.catalog().map_or(&[][..], |c| &c.shows) {
@@ -1317,25 +1560,40 @@ impl Shared {
 
     /// A person's online details if fetched recently.
     pub fn cached_person(&self, person: &str) -> Option<flex_core::metadata::Person> {
-        self.db.person(person, PERSON_MAX_AGE_SECS).unwrap_or_else(|e| {
-            log::warn!("reading {person}: {e:#}");
-            None
-        })
+        self.db
+            .person(person, PERSON_MAX_AGE_SECS)
+            .unwrap_or_else(|e| {
+                log::warn!("reading {person}: {e:#}");
+                None
+            })
     }
 
     /// Whether a TMDB entry ("movie:123") is in a library.
     pub fn in_library(&self, provider_id: &str) -> bool {
-        self.libs.iter().filter_map(|l| l.catalog()).any(|c| c.shows.iter().any(|s| s.show.provider_id.as_deref() == Some(provider_id)))
+        self.libs.iter().filter_map(|l| l.catalog()).any(|c| {
+            c.shows
+                .iter()
+                .any(|s| s.show.provider_id.as_deref() == Some(provider_id))
+        })
     }
 
     /// Every title (and other title) of the shows in anime libraries, normalised: anime from
     /// AniList are recognised by name.
     pub fn anime_titles(&self) -> std::collections::HashSet<String> {
         let mut out = std::collections::HashSet::new();
-        for l in self.libs.iter().filter(|l| l.lib.kind == LibraryKind::Anime) {
+        for l in self
+            .libs
+            .iter()
+            .filter(|l| l.lib.kind == LibraryKind::Anime)
+        {
             for entry in l.catalog().map_or(&[][..], |c| &c.shows) {
                 out.insert(flex_core::parse::normalize(&entry.show.title));
-                if let Some(alt) = entry.show.provider_id.as_ref().and_then(|p| self.alt_titles.get(p)) {
+                if let Some(alt) = entry
+                    .show
+                    .provider_id
+                    .as_ref()
+                    .and_then(|p| self.alt_titles.get(p))
+                {
                     out.extend(alt.iter().map(|t| flex_core::parse::normalize(t)));
                 }
             }
@@ -1353,14 +1611,29 @@ impl Shared {
                 return;
             }
         };
-        let Some(state) = self.lib_mut(id) else { return };
-        let Some(org) = &mut state.organised else { return };
-        org.catalog = Arc::new(Catalog::build(&state.tree, &org.parsed, &org.groups, shows, &matches));
+        let Some(state) = self.lib_mut(id) else {
+            return;
+        };
+        let Some(org) = &mut state.organised else {
+            return;
+        };
+        org.catalog = Arc::new(Catalog::build(
+            &state.tree,
+            &org.parsed,
+            &org.groups,
+            shows,
+            &matches,
+        ));
         state.version += 1;
     }
 
     /// Applies a TMDB entry chosen by hand to a show.
-    pub fn apply_match(&mut self, library_id: i64, show_id: i64, c: &flex_core::metadata::Candidate) {
+    pub fn apply_match(
+        &mut self,
+        library_id: i64,
+        show_id: i64,
+        c: &flex_core::metadata::Candidate,
+    ) {
         match self.db.set_show_metadata(show_id, c, "manual") {
             Ok(()) => {
                 self.rebuild_catalog(library_id);
@@ -1382,13 +1655,24 @@ impl Shared {
 
     /// Moves a folder (group) into a new show of its own.
     pub fn split_group(&mut self, library_id: i64, key: &str) {
-        let Some(group) = self.lib(library_id).and_then(|l| l.organised.as_ref()?.groups.iter().find(|g| g.key == key).cloned())
-        else {
+        let Some(group) = self.lib(library_id).and_then(|l| {
+            l.organised
+                .as_ref()?
+                .groups
+                .iter()
+                .find(|g| g.key == key)
+                .cloned()
+        }) else {
             return;
         };
         // The folders left behind stay put too, or Rematch would regroup them into the new
         // show (which has the same title).
-        let from = self.db.group_matches(library_id).ok().and_then(|m| m.into_iter().find(|m| m.group_key == key)).map(|m| m.show_id);
+        let from = self
+            .db
+            .group_matches(library_id)
+            .ok()
+            .and_then(|m| m.into_iter().find(|m| m.group_key == key))
+            .map(|m| m.show_id);
         if let Some(from) = from
             && let Err(e) = self.db.pin_show_groups(from)
         {
@@ -1407,7 +1691,10 @@ impl Shared {
 
     /// A toast that replaces the last one with the same key (e.g. the volume level).
     pub fn toast_keyed(&mut self, key: &str, msg: impl Into<String>) {
-        self.toasts.push(flex_core::plugins::Toast { key: Some(key.to_owned()), ..flex_core::plugins::Toast::new(msg) });
+        self.toasts.push(flex_core::plugins::Toast {
+            key: Some(key.to_owned()),
+            ..flex_core::plugins::Toast::new(msg)
+        });
     }
 
     pub fn take_toasts(&mut self) -> Vec<flex_core::plugins::Toast> {
@@ -1424,11 +1711,17 @@ impl Shared {
 
     /// Adds a library (named after its folder) and starts scanning it; returns its id.
     pub fn add_library(&mut self, root: &Path, kind: LibraryKind) -> Result<i64> {
-        let name = root
-            .file_name()
-            .map_or_else(|| root.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let name = root.file_name().map_or_else(
+            || root.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         let id = self.db.add_library(&name, root, kind)?;
-        let lib = Library { id, name, root: root.to_path_buf(), kind };
+        let lib = Library {
+            id,
+            name,
+            root: root.to_path_buf(),
+            kind,
+        };
         self.libs.push(LibState::new(lib, Tree::new(Vec::new())));
         self.libs.sort_by_key(|l| l.lib.name.to_lowercase());
         self.start_scan(id, true);
@@ -1485,7 +1778,9 @@ impl Shared {
 
     /// `quiet` scans (the automatic ones) only say something if files came or went.
     fn scan(&mut self, id: i64, full: bool, quiet: bool) {
-        let Some(state) = self.lib_mut(id) else { return };
+        let Some(state) = self.lib_mut(id) else {
+            return;
+        };
         if state.scanning.is_some() {
             return;
         }
@@ -1517,7 +1812,11 @@ impl Shared {
                     scan.dirs.len(),
                     started.elapsed()
                 );
-                let what = if kind == LibraryKind::Music { "tracks" } else { "videos" };
+                let what = if kind == LibraryKind::Music {
+                    "tracks"
+                } else {
+                    "videos"
+                };
                 let mut msg = format!(
                     "{} {what} ({} new, {} removed)",
                     thousands(summary.total),
@@ -1527,9 +1826,16 @@ impl Shared {
                 if !scan.errors.is_empty() {
                     msg += &format!(", {} unreadable", scan.errors.len());
                 }
-                Ok(ScanDone { msg, changed: summary.added + summary.removed > 0 })
+                Ok(ScanDone {
+                    msg,
+                    changed: summary.added + summary.removed > 0,
+                })
             })();
-            let _ = tx.send(ScanMsg::Done(id, quiet, result.map_err(|e| format!("{e:#}"))));
+            let _ = tx.send(ScanMsg::Done(
+                id,
+                quiet,
+                result.map_err(|e| format!("{e:#}")),
+            ));
             ctx.request_repaint();
         });
     }
@@ -1537,7 +1843,10 @@ impl Shared {
     /// Quietly scans every library for changes now and then, so new episodes turn up by
     /// themselves.
     fn auto_scan(&mut self) {
-        if self.last_auto_scan.is_some_and(|t| t.elapsed() < AUTO_SCAN_EVERY) {
+        if self
+            .last_auto_scan
+            .is_some_and(|t| t.elapsed() < AUTO_SCAN_EVERY)
+        {
             return;
         }
         self.last_auto_scan = Some(std::time::Instant::now());
@@ -1575,7 +1884,9 @@ impl Shared {
     }
 
     pub fn picture_upscale(&self) -> crate::picture::Upscale {
-        crate::picture::Upscale::from_setting(self.setting(crate::picture::UPSCALE_SETTING).as_deref())
+        crate::picture::Upscale::from_setting(
+            self.setting(crate::picture::UPSCALE_SETTING).as_deref(),
+        )
     }
 
     pub fn set_picture_upscale(&mut self, upscale: crate::picture::Upscale) {
@@ -1596,12 +1907,16 @@ impl Shared {
         }
         let Some(found) = svp::find() else {
             self.set_setting_bool(crate::picture::SMOOTH_SETTING, false);
-            self.toast("60fps needs SVP (svp-team.com), which isn't installed, so it's been left off");
+            self.toast(
+                "60fps needs SVP (svp-team.com), which isn't installed, so it's been left off",
+            );
             return;
         };
         self.set_setting_bool(crate::picture::SMOOTH_SETTING, true);
         if !svp::using_its_libmpv(&found) {
-            self.toast("60fps is on: restart Flex to play through SVP's copy of mpv. Keep SVP running");
+            self.toast(
+                "60fps is on: restart Flex to play through SVP's copy of mpv. Keep SVP running",
+            );
         } else {
             self.toast("60fps is on. Keep SVP running");
         }
@@ -1630,7 +1945,9 @@ impl Shared {
     /// Whether a library uses the picture enhancements that are on (yes unless switched
     /// off there).
     pub fn library_upscale(&self, library_id: i64) -> bool {
-        self.setting(&crate::picture::upscale_key(library_id)).as_deref() != Some("false")
+        self.setting(&crate::picture::upscale_key(library_id))
+            .as_deref()
+            != Some("false")
     }
 
     pub fn set_library_upscale(&mut self, library_id: i64, on: bool) {
@@ -1638,7 +1955,9 @@ impl Shared {
     }
 
     pub fn library_smooth(&self, library_id: i64) -> bool {
-        self.setting(&crate::picture::smooth_key(library_id)).as_deref() != Some("false")
+        self.setting(&crate::picture::smooth_key(library_id))
+            .as_deref()
+            != Some("false")
     }
 
     pub fn set_library_smooth(&mut self, library_id: i64, on: bool) {
@@ -1652,8 +1971,12 @@ impl Shared {
         if req.library_id < 0 {
             return Picture::default();
         }
-        let upscale = Some(self.picture_upscale()).filter(|u| *u != Upscale::Off && self.library_upscale(req.library_id));
-        Picture { upscale, smooth: self.picture_smooth() && self.library_smooth(req.library_id) }
+        let upscale = Some(self.picture_upscale())
+            .filter(|u| *u != Upscale::Off && self.library_upscale(req.library_id));
+        Picture {
+            upscale,
+            smooth: self.picture_smooth() && self.library_smooth(req.library_id),
+        }
     }
 
     pub fn youtube_enabled(&self) -> bool {
@@ -1669,7 +1992,9 @@ impl Shared {
 
     /// The tallest video to play, in pixels.
     pub fn youtube_quality(&self) -> u32 {
-        self.setting(crate::youtube::QUALITY_SETTING).and_then(|q| q.parse().ok()).unwrap_or(crate::youtube::DEFAULT_QUALITY)
+        self.setting(crate::youtube::QUALITY_SETTING)
+            .and_then(|q| q.parse().ok())
+            .unwrap_or(crate::youtube::DEFAULT_QUALITY)
     }
 
     pub fn set_youtube_quality(&mut self, height: u32) {
@@ -1699,7 +2024,11 @@ impl Shared {
     /// SponsorBlock categories to skip.
     pub fn sponsorblock_categories(&self) -> Vec<String> {
         match self.setting(crate::youtube::SPONSORBLOCK_SETTING) {
-            Some(list) => list.split(',').filter(|c| !c.is_empty()).map(str::to_owned).collect(),
+            Some(list) => list
+                .split(',')
+                .filter(|c| !c.is_empty())
+                .map(str::to_owned)
+                .collect(),
             None => flex_core::youtube::sponsorblock::default_categories(),
         }
     }
@@ -1715,7 +2044,11 @@ impl Shared {
 
     /// Starts finding a video's streams (and what to skip) ahead of playing it.
     pub fn prepare_youtube(&mut self, id: &str) {
-        let (quality, h264, categories) = (self.youtube_quality(), self.youtube_h264(), self.sponsorblock_categories());
+        let (quality, h264, categories) = (
+            self.youtube_quality(),
+            self.youtube_h264(),
+            self.sponsorblock_categories(),
+        );
         self.youtube.prepare(id, quality, h264, categories);
     }
 
@@ -1724,7 +2057,9 @@ impl Shared {
     }
 
     pub fn yt_latest(&self, limit: usize) -> Vec<flex_core::youtube::store::Video> {
-        self.db.yt_latest(limit, self.youtube_shorts(), self.youtube_focused_only()).unwrap_or_default()
+        self.db
+            .yt_latest(limit, self.youtube_shorts(), self.youtube_focused_only())
+            .unwrap_or_default()
     }
 
     /// Whether YouTube's page shows only focused channels' videos.
@@ -1757,9 +2092,14 @@ impl Shared {
         if seeds.is_empty() {
             return false;
         }
-        let watched = progress.into_iter().filter(|(_, p)| p.watched).map(|(id, _)| id).collect();
+        let watched = progress
+            .into_iter()
+            .filter(|(_, p)| p.watched)
+            .map(|(id, _)| id)
+            .collect();
         let subscribed = self.yt_channels().into_iter().map(|c| c.id).collect();
-        self.youtube.start_for_you(seeds, watched, subscribed, self.youtube_shorts());
+        self.youtube
+            .start_for_you(seeds, watched, subscribed, self.youtube_shorts());
         true
     }
 
@@ -1779,16 +2119,26 @@ impl Shared {
     }
 
     pub fn is_channel_focused(&self, channel_id: &str) -> bool {
-        self.yt_channels().iter().any(|c| c.id == channel_id && c.focused)
+        self.yt_channels()
+            .iter()
+            .any(|c| c.id == channel_id && c.focused)
     }
 
-    pub fn yt_channel_videos(&self, channel_id: &str, limit: usize) -> Vec<flex_core::youtube::store::Video> {
-        self.db.yt_channel_videos(channel_id, limit, self.youtube_shorts()).unwrap_or_default()
+    pub fn yt_channel_videos(
+        &self,
+        channel_id: &str,
+        limit: usize,
+    ) -> Vec<flex_core::youtube::store::Video> {
+        self.db
+            .yt_channel_videos(channel_id, limit, self.youtube_shorts())
+            .unwrap_or_default()
     }
 
     /// The channel a video is from, when only its name is known (see `Db::yt_channel_id_for`).
     pub fn yt_channel_id_for(&self, video_id: &str, channel: &str) -> Option<String> {
-        self.db.yt_channel_id_for(video_id, channel).unwrap_or_default()
+        self.db
+            .yt_channel_id_for(video_id, channel)
+            .unwrap_or_default()
     }
 
     /// Remembers how long subscriptions' videos are, from a list that says.
@@ -1800,13 +2150,20 @@ impl Shared {
 
     /// Part-watched YouTube videos, minus any removed from Continue Watching (until played
     /// again).
-    pub fn yt_continue(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
-        self.db.yt_continue(limit.min(self.youtube_continue_limit())).unwrap_or_default()
+    pub fn yt_continue(
+        &self,
+        limit: usize,
+    ) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
+        self.db
+            .yt_continue(limit.min(self.youtube_continue_limit()))
+            .unwrap_or_default()
     }
 
     /// How many part-watched YouTube videos Continue Watching keeps (older ones drop off).
     pub fn youtube_continue_limit(&self) -> usize {
-        self.setting(crate::youtube::CONTINUE_SETTING).and_then(|v| v.parse().ok()).unwrap_or(crate::youtube::DEFAULT_CONTINUE)
+        self.setting(crate::youtube::CONTINUE_SETTING)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(crate::youtube::DEFAULT_CONTINUE)
     }
 
     pub fn set_youtube_continue_limit(&mut self, keep: usize) {
@@ -1816,7 +2173,10 @@ impl Shared {
 
     /// Drops the oldest YouTube videos from Continue Watching beyond the limit.
     fn trim_yt_continue(&mut self) {
-        match self.db.trim_yt_continue(self.youtube_continue_limit(), now_unix()) {
+        match self
+            .db
+            .trim_yt_continue(self.youtube_continue_limit(), now_unix())
+        {
             Ok(0) => {}
             Ok(n) => {
                 log::info!("youtube: {n} older videos dropped from Continue Watching");
@@ -1831,7 +2191,10 @@ impl Shared {
         self.db.yt_progress(id).ok().flatten()
     }
 
-    pub fn yt_history(&self, limit: usize) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
+    pub fn yt_history(
+        &self,
+        limit: usize,
+    ) -> Vec<(String, flex_core::youtube::store::WatchProgress)> {
         self.db.yt_history(limit).unwrap_or_default()
     }
 
@@ -1840,7 +2203,10 @@ impl Shared {
     }
 
     pub fn set_yt_watched(&mut self, id: &str, title: &str, channel: &str, watched: bool) {
-        if let Err(e) = self.db.set_yt_watched(id, title, channel, watched, now_unix()) {
+        if let Err(e) = self
+            .db
+            .set_yt_watched(id, title, channel, watched, now_unix())
+        {
             log::warn!("saving YouTube progress: {e:#}");
         }
         self.youtube.version += 1;
@@ -1878,7 +2244,12 @@ impl Shared {
         let found = flex_core::youtube::feeds::parse_subscriptions(&text);
         anyhow::ensure!(!found.is_empty(), "no YouTube channels in that file");
         let now = now_unix();
-        let focused: Vec<String> = self.yt_channels().into_iter().filter(|c| c.focused).map(|c| c.id).collect();
+        let focused: Vec<String> = self
+            .yt_channels()
+            .into_iter()
+            .filter(|c| c.focused)
+            .map(|c| c.id)
+            .collect();
         let mut added = 0;
         for sub in &found {
             added += usize::from(self.db.add_yt_channel(&sub.id, &sub.title, now)?);
@@ -1905,10 +2276,14 @@ impl Shared {
                 Msg::Feed(id, Err(e)) => log::warn!("youtube: feed for {id}: {e}"),
                 Msg::FeedsDone(_) => {
                     self.youtube.version += 1;
-                    self.youtube.find_durations(self.db.yt_missing_durations().unwrap_or_default());
+                    self.youtube
+                        .find_durations(self.db.yt_missing_durations().unwrap_or_default());
                 }
                 Msg::Durations(missing, Ok(found)) => {
-                    let durations: Vec<(String, f64)> = found.iter().map(|(_, id, secs)| (id.clone(), *secs)).collect();
+                    let durations: Vec<(String, f64)> = found
+                        .iter()
+                        .map(|(_, id, secs)| (id.clone(), *secs))
+                        .collect();
                     if let Err(e) = self.db.save_yt_durations(&durations) {
                         log::warn!("youtube: saving video lengths: {e:#}");
                     }
@@ -1934,7 +2309,11 @@ impl Shared {
                 Msg::Tools(Err(e)) => self.toast(format!("Couldn't set up YouTube: {e}")),
                 Msg::Channel(Ok((id, title))) => self.subscribe(&id, &title),
                 Msg::Channel(Err(e)) => self.toast(format!("Couldn't find that channel: {e}")),
-                Msg::Resolved(..) | Msg::Segments(..) | Msg::Search(..) | Msg::Related(..) | Msg::ForYou(..) => {}
+                Msg::Resolved(..)
+                | Msg::Segments(..)
+                | Msg::Search(..)
+                | Msg::Related(..)
+                | Msg::ForYou(..) => {}
             }
         }
         for notice in std::mem::take(&mut self.youtube.notices) {
@@ -1956,26 +2335,41 @@ impl Shared {
     /// `playing`: what the top screen is playing, if anything, and the library file.
     pub fn poll_plugins(&mut self, playing: Option<(Playback, Option<(i64, i64)>)>) {
         if let Some(web) = &self.web {
-            let now_playing = playing.as_ref().filter(|(p, _)| p.state != PlaybackState::Stopped).map(|(p, _)| flex_web::remote::NowPlaying {
-                title: p.title.clone(),
-                paused: p.state == PlaybackState::Paused,
-                // Whole seconds, so the status only changes once a second.
-                position: p.position.map(f64::floor),
-                duration: p.duration.map(f64::floor),
-            });
+            let now_playing = playing
+                .as_ref()
+                .filter(|(p, _)| p.state != PlaybackState::Stopped)
+                .map(|(p, _)| flex_web::remote::NowPlaying {
+                    title: p.title.clone(),
+                    paused: p.state == PlaybackState::Paused,
+                    // Whole seconds, so the status only changes once a second.
+                    position: p.position.map(f64::floor),
+                    duration: p.duration.map(f64::floor),
+                });
             let youtube = self.youtube.tools.is_some() && self.youtube_enabled();
-            web.set_status(flex_web::remote::Status { playing: now_playing, youtube });
+            web.set_status(flex_web::remote::Status {
+                playing: now_playing,
+                youtube,
+            });
         }
-        let need = playing.as_ref().filter(|(p, _)| p.state == PlaybackState::Playing).map(|(p, _)| {
-            if p.kind == "video" { crate::awake::Need::Screen } else { crate::awake::Need::System }
-        });
+        let need = playing
+            .as_ref()
+            .filter(|(p, _)| p.state == PlaybackState::Playing)
+            .map(|(p, _)| {
+                if p.kind == "video" {
+                    crate::awake::Need::Screen
+                } else {
+                    crate::awake::Need::System
+                }
+            });
         self.awake.set(need);
         let mut wait = self.plugins.poll(&self.db);
         let plugin_toasts = self.plugins.take_toasts();
         self.toasts.extend(plugin_toasts);
         // Plugins hear about starts, pauses, resumes and stops (not every frame); a stop
         // carries where playback got to. Something new starting stops the old one first.
-        let same = |a: &Playback, b: &Playback| a.state == b.state && a.title == b.title && a.kind == b.kind;
+        let same = |a: &Playback, b: &Playback| {
+            a.state == b.state && a.title == b.title && a.kind == b.kind
+        };
         let previous = self.playback_last.take();
         match (&playing, self.playback_sent.take()) {
             (Some((p, _)), Some(sent)) if same(p, &sent) => self.playback_sent = Some(sent),
@@ -1991,7 +2385,10 @@ impl Shared {
             (None, None) => {}
         }
         self.playback_last = playing;
-        let video = self.playback_sent.as_ref().is_some_and(|p| p.kind == "video");
+        let video = self
+            .playback_sent
+            .as_ref()
+            .is_some_and(|p| p.kind == "video");
         if let Some(lights) = self.ambient.tick(&self.plugins, video) {
             wait = Some(wait.map_or(lights, |w| w.min(lights)));
         }
@@ -2002,14 +2399,27 @@ impl Shared {
 
     fn send_stopped(&self, last: Option<(Playback, Option<(i64, i64)>)>) {
         let (last, file) = last.unwrap_or_default();
-        let stopped = self.with_media(Playback { state: PlaybackState::Stopped, ..last }, file);
+        let stopped = self.with_media(
+            Playback {
+                state: PlaybackState::Stopped,
+                ..last
+            },
+            file,
+        );
         self.plugins.send_playback(&stopped);
     }
 
     /// Adds what a library file is (a matched film or episode) to a playback event.
     fn with_media(&self, mut playback: Playback, file: Option<(i64, i64)>) -> Playback {
-        if playback.media.is_none() && self.plugins.plugins().iter().any(|p| p.running() && p.subscribes("playback")) {
-            playback.media = file.and_then(|(library_id, file_id)| self.media_info(library_id, file_id));
+        if playback.media.is_none()
+            && self
+                .plugins
+                .plugins()
+                .iter()
+                .any(|p| p.running() && p.subscribes("playback"))
+        {
+            playback.media =
+                file.and_then(|(library_id, file_id)| self.media_info(library_id, file_id));
         }
         playback
     }
@@ -2026,12 +2436,27 @@ impl Shared {
             _ => return None,
         };
         let anime = state.lib.kind == LibraryKind::Anime;
-        let media = flex_plugin::Media { title: entry.show.title.clone(), year: entry.show.year, tmdb, anilist, anime, ..Default::default() };
+        let media = flex_plugin::Media {
+            title: entry.show.title.clone(),
+            year: entry.show.year,
+            tmdb,
+            anilist,
+            anime,
+            ..Default::default()
+        };
         if entry.is_series() {
             let ep = entry.episodes.iter().find(|e| e.file_id == file_id)?;
-            Some(flex_plugin::Media { kind: "episode".into(), season: Some(ep.season), episode: ep.number, ..media })
+            Some(flex_plugin::Media {
+                kind: "episode".into(),
+                season: Some(ep.season),
+                episode: ep.number,
+                ..media
+            })
         } else {
-            Some(flex_plugin::Media { kind: "movie".into(), ..media })
+            Some(flex_plugin::Media {
+                kind: "movie".into(),
+                ..media
+            })
         }
     }
 
@@ -2042,7 +2467,8 @@ impl Shared {
 
     /// Looks for plugins installed since Flex started.
     pub fn refresh_plugins(&mut self) {
-        self.plugins.refresh(&flex_core::plugins::plugin_dirs(), &self.db);
+        self.plugins
+            .refresh(&flex_core::plugins::plugin_dirs(), &self.db);
     }
 
     /// Sets Settings → Ambient light option `choice` to its `value`th option.
@@ -2074,7 +2500,11 @@ impl Shared {
                     self.scan_cancel.remove(&id);
                     // Nothing to redo if no files came or went (tree, search, organising).
                     let outcome = result.and_then(|done| match done.changed {
-                        true => self.db.files(id).map(|files| (done, Some(files))).map_err(|e| format!("{e:#}")),
+                        true => self
+                            .db
+                            .files(id)
+                            .map(|files| (done, Some(files)))
+                            .map_err(|e| format!("{e:#}")),
                         false => Ok((done, None)),
                     });
                     let Some(l) = self.lib_mut(id) else { continue };
@@ -2086,7 +2516,8 @@ impl Shared {
                                 l.version += 1;
                                 reorganise.push(id);
                             }
-                            (!quiet || done.changed).then(|| format!("{}: {}", l.lib.name, done.msg))
+                            (!quiet || done.changed)
+                                .then(|| format!("{}: {}", l.lib.name, done.msg))
                         }
                         Err(e) => {
                             log::warn!("scan of {} failed: {e}", l.lib.name);
@@ -2138,20 +2569,23 @@ impl Shared {
                     music_artists.push(id);
                 }
                 ScanMsg::MusicArtists(id, done, total) => {
-                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    self.music_artists =
+                        Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
                     if let Some(l) = self.lib_mut(id) {
                         l.fetching = Some((done, total));
                         l.version += 1;
                     }
                 }
                 ScanMsg::MusicArtistReady(id) => {
-                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    self.music_artists =
+                        Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
                     if let Some(l) = self.lib_mut(id) {
                         l.version += 1;
                     }
                 }
                 ScanMsg::MusicArtistsDone(id, result) => {
-                    self.music_artists = Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
+                    self.music_artists =
+                        Arc::new(self.db.music_artists(i64::MAX).unwrap_or_default());
                     let Some(l) = self.lib_mut(id) else { continue };
                     l.fetching = None;
                     l.version += 1;
@@ -2245,14 +2679,25 @@ impl Shared {
         }
     }
 
-    pub fn search(&mut self, query: &str, scope: flex_core::search::Scope, limit: usize) -> Vec<Item> {
+    pub fn search(
+        &mut self,
+        query: &str,
+        scope: flex_core::search::Scope,
+        limit: usize,
+    ) -> Vec<Item> {
         if self.search.is_none() {
             let started = std::time::Instant::now();
             let index = SearchIndex::new(self.search_items());
-            log::info!("search index: {} items in {:?}", index.len(), started.elapsed());
+            log::info!(
+                "search index: {} items in {:?}",
+                index.len(),
+                started.elapsed()
+            );
             self.search = Some(index);
         }
-        self.search.as_mut().map_or_else(Vec::new, |i| i.search(query, scope, limit))
+        self.search
+            .as_mut()
+            .map_or_else(Vec::new, |i| i.search(query, scope, limit))
     }
 
     /// Everything searchable: shows/films (matched title plus folder titles as alternative
@@ -2269,21 +2714,48 @@ impl Shared {
         for l in self.libs.iter().filter(|l| !l.is_music()) {
             if let Some(catalog) = l.catalog() {
                 for entry in &catalog.shows {
-                    let mut also: Vec<String> = entry.groups.iter().map(|g| g.title.clone()).collect();
-                    if let Some(alt) = entry.show.provider_id.as_ref().and_then(|p| self.alt_titles.get(p)) {
+                    let mut also: Vec<String> =
+                        entry.groups.iter().map(|g| g.title.clone()).collect();
+                    if let Some(alt) = entry
+                        .show
+                        .provider_id
+                        .as_ref()
+                        .and_then(|p| self.alt_titles.get(p))
+                    {
                         also.extend(alt.iter().cloned());
                     }
                     let context = match entry.show.year {
                         Some(y) => format!("{} · {y}", l.lib.name),
                         None => l.lib.name.clone(),
                     };
-                    let target = Target::Show { library_id: l.lib.id, show_id: entry.show.id, series: entry.is_series() };
-                    items.push(Item::new(entry.show.title.clone(), context, target, 0, &also));
+                    let target = Target::Show {
+                        library_id: l.lib.id,
+                        show_id: entry.show.id,
+                        series: entry.is_series(),
+                    };
+                    items.push(Item::new(
+                        entry.show.title.clone(),
+                        context,
+                        target,
+                        0,
+                        &also,
+                    ));
                     if entry.is_series() {
                         for e in &entry.episodes {
-                            let Some(titles) = self.titles(l.lib.id, e.file_id) else { continue };
-                            let target = Target::Episode { library_id: l.lib.id, file_id: e.file_id };
-                            items.push(Item::new(titles.full(), l.lib.name.clone(), target, 0, &[]));
+                            let Some(titles) = self.titles(l.lib.id, e.file_id) else {
+                                continue;
+                            };
+                            let target = Target::Episode {
+                                library_id: l.lib.id,
+                                file_id: e.file_id,
+                            };
+                            items.push(Item::new(
+                                titles.full(),
+                                l.lib.name.clone(),
+                                target,
+                                0,
+                                &[],
+                            ));
                         }
                     }
                 }
@@ -2294,7 +2766,11 @@ impl Shared {
     }
 
     /// The phone remote's search, in one of the scopes the TV's search has.
-    fn remote_search(&mut self, query: &str, scope: flex_web::remote::Scope) -> Vec<flex_web::remote::Hit> {
+    fn remote_search(
+        &mut self,
+        query: &str,
+        scope: flex_web::remote::Scope,
+    ) -> Vec<flex_web::remote::Hit> {
         use flex_core::search::{Scope, Target};
         use flex_web::remote::Scope as Remote;
         let scope = match scope {
@@ -2306,11 +2782,28 @@ impl Shared {
             .into_iter()
             .filter_map(|item| {
                 let (library, show, file) = match item.target {
-                    Target::Show { library_id, show_id, .. } => (library_id, Some(show_id), None),
-                    Target::Episode { library_id, file_id } | Target::File { library_id, file_id } => (library_id, None, Some(file_id)),
+                    Target::Show {
+                        library_id,
+                        show_id,
+                        ..
+                    } => (library_id, Some(show_id), None),
+                    Target::Episode {
+                        library_id,
+                        file_id,
+                    }
+                    | Target::File {
+                        library_id,
+                        file_id,
+                    } => (library_id, None, Some(file_id)),
                     _ => return None,
                 };
-                Some(flex_web::remote::Hit { title: item.title, context: item.context, library, show, file })
+                Some(flex_web::remote::Hit {
+                    title: item.title,
+                    context: item.context,
+                    library,
+                    show,
+                    file,
+                })
             })
             .collect()
     }
@@ -2319,18 +2812,28 @@ impl Shared {
     /// organised libraries, else per folder), and its original language when its library
     /// picks audio by that. Nothing outside libraries (YouTube).
     pub fn track_memory(&self, req: &PlayRequest) -> TrackMemory {
-        let Some(state) = self.lib(req.library_id) else { return TrackMemory::default() };
+        let Some(state) = self.lib(req.library_id) else {
+            return TrackMemory::default();
+        };
         let entry = state.catalog().and_then(|c| c.show_of_file(req.file_id));
         let place = match (entry, state.tree.file(req.file_id)) {
             (Some(entry), _) => format!("{}:show:{}", req.library_id, entry.show.id),
-            (None, Some(file)) => format!("{}:dir:{}", req.library_id, file.rel_path.rsplit_once('/').map_or("", |(dir, _)| dir)),
+            (None, Some(file)) => format!(
+                "{}:dir:{}",
+                req.library_id,
+                file.rel_path.rsplit_once('/').map_or("", |(dir, _)| dir)
+            ),
             (None, None) => return TrackMemory::default(),
         };
         let original_language = entry
             .filter(|_| self.library_audio(req.library_id) == LibraryAudio::Original)
             .and_then(|e| e.show.original_language.clone())
             .filter(|l| !l.is_empty());
-        TrackMemory { sub_key: Some(format!("last_subtitle:{place}")), audio_key: Some(format!("last_audio:{place}")), original_language }
+        TrackMemory {
+            sub_key: Some(format!("last_subtitle:{place}")),
+            audio_key: Some(format!("last_audio:{place}")),
+            original_language,
+        }
     }
 
     /// How a library picks the audio track (the original language unless changed).
@@ -2342,27 +2845,45 @@ impl Shared {
     }
 
     pub fn set_library_audio(&mut self, library_id: i64, audio: LibraryAudio) {
-        let value = if audio == LibraryAudio::FileDefault { "file" } else { "original" };
+        let value = if audio == LibraryAudio::FileDefault {
+            "file"
+        } else {
+            "original"
+        };
         self.set_setting(&format!("audio:{library_id}"), value);
     }
 
     pub fn play_request(&self, library_id: i64, file_id: i64) -> Option<PlayRequest> {
         let state = self.lib(library_id)?;
         let file = state.tree.file(file_id)?;
-        let titles = self.titles(library_id, file_id).filter(|t| t.show.is_some());
+        let titles = self
+            .titles(library_id, file_id)
+            .filter(|t| t.show.is_some());
         // DVD/Blu-ray chunks play as the whole disc, titled after its folder.
         let (path, title) = match flex_core::parse::disc_folder(&file.rel_path) {
             Some(disc) => {
                 let named = disc.rsplit_once('/').map_or(disc, |(parent, _)| parent);
                 let title = named.rsplit('/').next().unwrap_or(named).to_owned();
-                (flex_core::library::join_rel(&state.lib.root, disc), titles.map_or(title, |t| t.full()))
+                (
+                    flex_core::library::join_rel(&state.lib.root, disc),
+                    titles.map_or(title, |t| t.full()),
+                )
             }
             None => {
                 let fallback = || flex_core::library::display_name(file.file_name(), true);
-                (file.abs_path(&state.lib.root), titles.map_or_else(fallback, |t| t.full()))
+                (
+                    file.abs_path(&state.lib.root),
+                    titles.map_or_else(fallback, |t| t.full()),
+                )
             }
         };
-        Some(PlayRequest { path, title, library_id, file_id, start: None })
+        Some(PlayRequest {
+            path,
+            title,
+            library_id,
+            file_id,
+            start: None,
+        })
     }
 
     /// Screenshot `index` of a file (see [`crate::shots`]), taken in the background if needed.
@@ -2370,7 +2891,9 @@ impl Shared {
         let Some(state) = self.libs.iter().find(|l| l.lib.id == library_id) else {
             return crate::shots::Shot::Failed("no such library".into());
         };
-        let Some(file) = state.tree.file(file_id) else { return crate::shots::Shot::Failed("no such file".into()) };
+        let Some(file) = state.tree.file(file_id) else {
+            return crate::shots::Shot::Failed("no such file".into());
+        };
         let path = match flex_core::parse::disc_folder(&file.rel_path) {
             Some(disc) => flex_core::library::join_rel(&state.lib.root, disc),
             None => file.abs_path(&state.lib.root),
@@ -2380,7 +2903,11 @@ impl Shared {
 
     /// A file's audio tracks, looked up in the background the first time (`None` until
     /// known, or if the file couldn't be read). Ask every frame while it's needed.
-    pub fn audio_tracks(&mut self, library_id: i64, file_id: i64) -> Option<Vec<flex_core::audio::AudioTrack>> {
+    pub fn audio_tracks(
+        &mut self,
+        library_id: i64,
+        file_id: i64,
+    ) -> Option<Vec<flex_core::audio::AudioTrack>> {
         let state = self.libs.iter().find(|l| l.lib.id == library_id)?;
         let file = state.tree.file(file_id)?;
         let (size, mtime) = (file.size, file.mtime);
@@ -2391,7 +2918,8 @@ impl Shared {
         }
         match self.db.audio_tracks(file_id, size, mtime) {
             Ok(Some(tracks)) => {
-                self.audio.insert(file_id, (size, mtime, Some(tracks.clone())));
+                self.audio
+                    .insert(file_id, (size, mtime, Some(tracks.clone())));
                 return Some(tracks);
             }
             Ok(None) => {}
@@ -2408,7 +2936,9 @@ impl Shared {
     /// Picks up audio tracks found in the background.
     fn poll_audio(&mut self) {
         while let Ok((file_id, result)) = self.audio_probe.results.try_recv() {
-            let Some(file) = self.libs.iter().find_map(|l| l.tree.file(file_id)) else { continue };
+            let Some(file) = self.libs.iter().find_map(|l| l.tree.file(file_id)) else {
+                continue;
+            };
             let (size, mtime) = (file.size, file.mtime);
             let tracks = match result {
                 Ok(tracks) => {
@@ -2438,7 +2968,10 @@ impl Shared {
     /// order until then). Movies have no neighbours.
     fn neighbour(&self, req: &PlayRequest, delta: isize) -> Option<PlayRequest> {
         let state = self.lib(req.library_id)?;
-        let id = match state.catalog().filter(|c| c.show_of_file(req.file_id).is_some()) {
+        let id = match state
+            .catalog()
+            .filter(|c| c.show_of_file(req.file_id).is_some())
+        {
             Some(catalog) if catalog.show_of_file(req.file_id)?.is_series() => {
                 catalog.neighbour_in_season(req.file_id, delta)?
             }

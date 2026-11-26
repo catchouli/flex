@@ -42,7 +42,10 @@ enum Filter {
     Unmatched,
 }
 
-const LAYOUTS: [(Layout, &str, &str); 2] = [(Layout::Posters, "Posters", "posters"), (Layout::List, "List", "list")];
+const LAYOUTS: [(Layout, &str, &str); 2] = [
+    (Layout::Posters, "Posters", "posters"),
+    (Layout::List, "List", "list"),
+];
 const SORTS: [(Sort, &str, &str); 4] = [
     (Sort::Added, "Recently added", "added"),
     (Sort::Played, "Recently played", "played"),
@@ -105,24 +108,44 @@ impl Prefs {
         let saved = sh.setting(&source.key()).unwrap_or_default();
         let mut parts = saved.split('|');
         let pick = |part: Option<&str>| part.unwrap_or_default().to_owned();
-        let (l, s, f, d) = (pick(parts.next()), pick(parts.next()), pick(parts.next()), pick(parts.next()));
+        let (l, s, f, d) = (
+            pick(parts.next()),
+            pick(parts.next()),
+            pick(parts.next()),
+            pick(parts.next()),
+        );
         let sort = SORTS.iter().find(|x| x.2 == s).map_or(Sort::Added, |x| x.0);
         Self {
-            layout: LAYOUTS.iter().find(|x| x.2 == l).map_or(Layout::Posters, |x| x.0),
+            layout: LAYOUTS
+                .iter()
+                .find(|x| x.2 == l)
+                .map_or(Layout::Posters, |x| x.0),
             sort,
             descending: match d.as_str() {
                 "desc" => true,
                 "asc" => false,
                 _ => sort.descending_by_default(),
             },
-            filter: FILTERS.iter().find(|x| x.2 == f).map_or(Filter::All, |x| x.0),
+            filter: FILTERS
+                .iter()
+                .find(|x| x.2 == f)
+                .map_or(Filter::All, |x| x.0),
         }
     }
 
     fn save(&self, sh: &mut Shared, source: Source) {
-        let l = LAYOUTS.iter().find(|x| x.0 == self.layout).map_or("posters", |x| x.2);
-        let s = SORTS.iter().find(|x| x.0 == self.sort).map_or("added", |x| x.2);
-        let f = FILTERS.iter().find(|x| x.0 == self.filter).map_or("all", |x| x.2);
+        let l = LAYOUTS
+            .iter()
+            .find(|x| x.0 == self.layout)
+            .map_or("posters", |x| x.2);
+        let s = SORTS
+            .iter()
+            .find(|x| x.0 == self.sort)
+            .map_or("added", |x| x.2);
+        let f = FILTERS
+            .iter()
+            .find(|x| x.0 == self.filter)
+            .map_or("all", |x| x.2);
         let d = if self.descending { "desc" } else { "asc" };
         sh.set_setting(&source.key(), &format!("{l}|{s}|{f}|{d}"));
     }
@@ -138,14 +161,35 @@ enum Tool {
     History,
 }
 
-const TOOLS: [Tool; 5] = [Tool::View, Tool::Sort, Tool::Show, Tool::Folders, Tool::History];
+const TOOLS: [Tool; 5] = [
+    Tool::View,
+    Tool::Sort,
+    Tool::Show,
+    Tool::Folders,
+    Tool::History,
+];
 
 impl Tool {
     fn label(self, prefs: &Prefs) -> String {
         match self {
-            Tool::View => format!("View: {}", LAYOUTS.iter().find(|x| x.0 == prefs.layout).map_or("", |x| x.1)),
-            Tool::Sort => format!("Sort: {}", SORTS.iter().find(|x| x.0 == prefs.sort).map_or("", |x| x.1)),
-            Tool::Show => format!("Show: {}", FILTERS.iter().find(|x| x.0 == prefs.filter).map_or("", |x| x.1)),
+            Tool::View => format!(
+                "View: {}",
+                LAYOUTS
+                    .iter()
+                    .find(|x| x.0 == prefs.layout)
+                    .map_or("", |x| x.1)
+            ),
+            Tool::Sort => format!(
+                "Sort: {}",
+                SORTS.iter().find(|x| x.0 == prefs.sort).map_or("", |x| x.1)
+            ),
+            Tool::Show => format!(
+                "Show: {}",
+                FILTERS
+                    .iter()
+                    .find(|x| x.0 == prefs.filter)
+                    .map_or("", |x| x.1)
+            ),
             Tool::Folders => "Browse folders".to_owned(),
             Tool::History => "History".to_owned(),
         }
@@ -154,9 +198,24 @@ impl Tool {
     /// Choices in this tool's dropdown, and which is current.
     fn options(self, prefs: &Prefs) -> (Vec<&'static str>, usize) {
         match self {
-            Tool::View => (LAYOUTS.iter().map(|x| x.1).collect(), LAYOUTS.iter().position(|x| x.0 == prefs.layout).unwrap_or(0)),
-            Tool::Sort => (SORTS.iter().map(|x| x.1).collect(), SORTS.iter().position(|x| x.0 == prefs.sort).unwrap_or(0)),
-            Tool::Show => (FILTERS.iter().map(|x| x.1).collect(), FILTERS.iter().position(|x| x.0 == prefs.filter).unwrap_or(0)),
+            Tool::View => (
+                LAYOUTS.iter().map(|x| x.1).collect(),
+                LAYOUTS
+                    .iter()
+                    .position(|x| x.0 == prefs.layout)
+                    .unwrap_or(0),
+            ),
+            Tool::Sort => (
+                SORTS.iter().map(|x| x.1).collect(),
+                SORTS.iter().position(|x| x.0 == prefs.sort).unwrap_or(0),
+            ),
+            Tool::Show => (
+                FILTERS.iter().map(|x| x.1).collect(),
+                FILTERS
+                    .iter()
+                    .position(|x| x.0 == prefs.filter)
+                    .unwrap_or(0),
+            ),
             Tool::Folders | Tool::History => (Vec::new(), 0),
         }
     }
@@ -195,8 +254,12 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
     // (library, show, watchlist "added" time)
     let entries: Vec<(&LibState, &flex_core::catalog::ShowEntry, Option<i64>)> = match source {
         Source::Library(id) => {
-            let Some(state) = sh.lib(id) else { return Vec::new() };
-            let Some(catalog) = state.catalog() else { return Vec::new() };
+            let Some(state) = sh.lib(id) else {
+                return Vec::new();
+            };
+            let Some(catalog) = state.catalog() else {
+                return Vec::new();
+            };
             catalog.shows.iter().map(|e| (state, e, None)).collect()
         }
         Source::Watchlist => sh
@@ -212,7 +275,11 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
     let mut items: Vec<(Item, i64, String, i64)> = entries
         .into_iter()
         .filter_map(|(state, entry, listed)| {
-            let files: Vec<_> = entry.episodes.iter().filter_map(|e| state.tree.file(e.file_id)).collect();
+            let files: Vec<_> = entry
+                .episodes
+                .iter()
+                .filter_map(|e| state.tree.file(e.file_id))
+                .collect();
             let unwatched = files.iter().filter(|f| !f.progress.watched).count();
             let keep = match prefs.filter {
                 Filter::All => true,
@@ -223,12 +290,26 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
             if !keep {
                 return None;
             }
-            let added = listed.unwrap_or_else(|| files.iter().map(|f| f.added_at).max().unwrap_or(0));
+            let added =
+                listed.unwrap_or_else(|| files.iter().map(|f| f.added_at).max().unwrap_or(0));
             // "2019-04-01"-style dates sort as text; fall back to the year.
-            let released = entry.show.release_date.clone().or_else(|| entry.show.year.map(|y| format!("{y:04}"))).unwrap_or_default();
+            let released = entry
+                .show
+                .release_date
+                .clone()
+                .or_else(|| entry.show.year.map(|y| format!("{y:04}")))
+                .unwrap_or_default();
             let series = entry.is_series();
-            let progress = if series { None } else { files.first().and_then(|f| f.progress.fraction()) };
-            let played = files.iter().filter_map(|f| f.progress.last_played).max().unwrap_or(0);
+            let progress = if series {
+                None
+            } else {
+                files.first().and_then(|f| f.progress.fraction())
+            };
+            let played = files
+                .iter()
+                .filter_map(|f| f.progress.last_played)
+                .max()
+                .unwrap_or(0);
             Some((
                 Item {
                     library_id: state.lib.id,
@@ -256,15 +337,22 @@ fn build_items(sh: &Shared, source: Source, prefs: &Prefs) -> Vec<Item> {
 fn sort_items(items: &mut [(Item, i64, String, i64)], prefs: &Prefs) {
     let way = |o: Ordering| if prefs.descending { o.reverse() } else { o };
     match prefs.sort {
-        Sort::Added => items.sort_by(|a, b| way(a.1.cmp(&b.1)).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
+        Sort::Added => items
+            .sort_by(|a, b| way(a.1.cmp(&b.1)).then_with(|| natural_cmp(&a.0.title, &b.0.title))),
         // Never played last, either way.
         Sort::Played => items.sort_by(|a, b| {
-            (a.3 == 0).cmp(&(b.3 == 0)).then_with(|| way(a.3.cmp(&b.3))).then_with(|| natural_cmp(&a.0.title, &b.0.title))
+            (a.3 == 0)
+                .cmp(&(b.3 == 0))
+                .then_with(|| way(a.3.cmp(&b.3)))
+                .then_with(|| natural_cmp(&a.0.title, &b.0.title))
         }),
         Sort::Title => items.sort_by(|a, b| way(natural_cmp(&a.0.title, &b.0.title))),
         // Undated last, either way.
         Sort::Released => items.sort_by(|a, b| {
-            a.2.is_empty().cmp(&b.2.is_empty()).then_with(|| way(a.2.cmp(&b.2))).then_with(|| natural_cmp(&a.0.title, &b.0.title))
+            a.2.is_empty()
+                .cmp(&b.2.is_empty())
+                .then_with(|| way(a.2.cmp(&b.2)))
+                .then_with(|| natural_cmp(&a.0.title, &b.0.title))
         }),
     }
 }
@@ -272,7 +360,10 @@ fn sort_items(items: &mut [(Item, i64, String, i64)], prefs: &Prefs) {
 /// Poster card size (2:3 poster plus two lines of text).
 const CARD_W: f32 = 230.0;
 const POSTER_H: f32 = CARD_W * 1.5;
-const GRID: GridSpec = GridSpec { card: egui::vec2(CARD_W, POSTER_H + 76.0), gap: 26.0 };
+const GRID: GridSpec = GridSpec {
+    card: egui::vec2(CARD_W, POSTER_H + 76.0),
+    gap: 26.0,
+};
 const TOOLBAR_H: f32 = 64.0;
 
 pub struct ShowsView {
@@ -321,7 +412,9 @@ impl ShowsView {
     fn refresh(&mut self, sh: &Shared) {
         let version = match self.source {
             Source::Library(id) => sh.lib(id).map_or(0, |l| l.version),
-            Source::Watchlist => sh.libs.iter().map(|l| l.version).sum::<u64>() + sh.watchlist_version,
+            Source::Watchlist => {
+                sh.libs.iter().map(|l| l.version).sum::<u64>() + sh.watchlist_version
+            }
         };
         let key = (version, self.prefs);
         if self.built_for != Some(key) {
@@ -331,7 +424,9 @@ impl ShowsView {
             let selected = index.and_then(|i| self.items.get(i)).map(|it| it.show_id);
             let same_prefs = self.built_for.is_some_and(|(_, p)| p == self.prefs);
             self.items = build_items(sh, self.source, &self.prefs);
-            let new_index = match selected.and_then(|id| self.items.iter().position(|it| it.show_id == id)) {
+            let new_index = match selected
+                .and_then(|id| self.items.iter().position(|it| it.show_id == id))
+            {
                 Some(i) => i,
                 None if same_prefs => index.unwrap_or(0).min(self.items.len().saturating_sub(1)),
                 None => 0,
@@ -370,7 +465,9 @@ impl ShowsView {
     }
 
     fn handle_popup(&mut self, sh: &mut Shared, press: Press) -> Nav {
-        let Some((tool, list)) = &mut self.popup else { return Nav::None };
+        let Some((tool, list)) = &mut self.popup else {
+            return Nav::None;
+        };
         let tool = *tool;
         if press.is(Action::Back) {
             self.popup = None;
@@ -406,18 +503,27 @@ impl ShowsView {
             let label = tool.label(&self.prefs);
             // The sort button ends with an arrow for its direction.
             let arrow = if *tool == Tool::Sort { 26.0 } else { 0.0 };
-            let text_w = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE).size().x;
+            let text_w = painter
+                .layout_no_wrap(label.clone(), font.clone(), Color32::WHITE)
+                .size()
+                .x;
             let width = text_w + arrow + 44.0;
             let r = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
             self.tool_x[i] = x;
             if widgets::hit(ui, r).any() {
                 self.toolbar = Some(i);
             }
-            let color = widgets::paint_focusable(painter, r, focused && self.toolbar == Some(i), false);
+            let color =
+                widgets::paint_focusable(painter, r, focused && self.toolbar == Some(i), false);
             let text_at = r.left_center() + vec2(22.0, 0.0);
             painter.text(text_at, Align2::LEFT_CENTER, label, font.clone(), color);
             if arrow > 0.0 {
-                widgets::paint_arrow(painter, text_at + vec2(text_w + 16.0, 0.0), self.prefs.descending, color);
+                widgets::paint_arrow(
+                    painter,
+                    text_at + vec2(text_w + 16.0, 0.0),
+                    self.prefs.descending,
+                    color,
+                );
             }
             x += width + 14.0;
         }
@@ -429,13 +535,20 @@ impl ShowsView {
         let (options, _) = tool.options(&self.prefs);
         let index = TOOLS.iter().position(|t| t == tool).unwrap_or(0);
         let x = self.tool_x[index];
-        Some(Rect::from_min_size(pos2(x, toolbar.bottom() + 8.0), vec2(420.0, 28.0 + 70.0 * options.len() as f32)))
+        Some(Rect::from_min_size(
+            pos2(x, toolbar.bottom() + 8.0),
+            vec2(420.0, 28.0 + 70.0 * options.len() as f32),
+        ))
     }
 
     /// The open dropdown, under its toolbar button.
     fn draw_popup(&mut self, ui: &mut Ui, toolbar: Rect) {
-        let Some(rect) = self.popup_rect(toolbar) else { return };
-        let Some((tool, list)) = &mut self.popup else { return };
+        let Some(rect) = self.popup_rect(toolbar) else {
+            return;
+        };
+        let Some((tool, list)) = &mut self.popup else {
+            return;
+        };
         let (options, current) = tool.options(&self.prefs);
         theme::paint_overlay(ui.painter(), rect.expand(6.0), 12.0);
         let rows: Vec<Row> = options
@@ -454,15 +567,31 @@ impl ShowsView {
     }
 }
 
-fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::TextureHandle>, focused: bool, style: &egui::Style) {
+fn paint_card(
+    painter: &Painter,
+    rect: Rect,
+    item: &Item,
+    poster: Option<&egui::TextureHandle>,
+    focused: bool,
+    style: &egui::Style,
+) {
     let poster_rect = Rect::from_min_size(rect.min, vec2(rect.width(), POSTER_H));
     match poster {
         Some(texture) => paint_cover(painter, poster_rect, texture),
         None => {
             // No poster (yet): the title on a plain tile.
             painter.rect_filled(poster_rect, CornerRadius::same(8), theme::panel());
-            let galley = painter.layout(item.title.clone(), TextStyle::Body.resolve(style), theme::dim(), poster_rect.width() - 30.0);
-            painter.galley(poster_rect.center() - galley.size() / 2.0, galley, theme::dim());
+            let galley = painter.layout(
+                item.title.clone(),
+                TextStyle::Body.resolve(style),
+                theme::dim(),
+                poster_rect.width() - 30.0,
+            );
+            painter.galley(
+                poster_rect.center() - galley.size() / 2.0,
+                galley,
+                theme::dim(),
+            );
         }
     }
     // Watched state: an unwatched-episode count, a tick when all watched, or progress.
@@ -476,24 +605,48 @@ fn paint_card(painter: &Painter, rect: Rect, item: &Item, poster: Option<&egui::
         let badge = Rect::from_center_size(badge_c, vec2(galley.size().x.max(18.0) + 18.0, 36.0));
         let badge = badge.translate(vec2(18.0 - badge.width() / 2.0, 0.0));
         painter.rect_filled(badge, CornerRadius::same(18), theme::accent());
-        painter.galley(badge.center() - galley.size() / 2.0, galley, theme::on_accent());
+        painter.galley(
+            badge.center() - galley.size() / 2.0,
+            galley,
+            theme::on_accent(),
+        );
     }
     if let Some(fraction) = item.progress {
         widgets::paint_progress(painter, poster_rect, fraction as f32, theme::progress());
     }
     theme::paint_picture_frame(painter, poster_rect, focused);
-    let text_color = if focused { theme::highlight() } else { theme::text() };
+    let text_color = if focused {
+        theme::highlight()
+    } else {
+        theme::text()
+    };
     let text_rect = Rect::from_min_max(pos2(rect.left(), poster_rect.bottom() + 8.0), rect.max);
     let clip = painter.with_clip_rect(text_rect);
-    clip.text(text_rect.left_top(), Align2::LEFT_TOP, &item.title, TextStyle::Small.resolve(style), text_color);
+    clip.text(
+        text_rect.left_top(),
+        Align2::LEFT_TOP,
+        &item.title,
+        TextStyle::Small.resolve(style),
+        text_color,
+    );
     let sub = match (item.year, item.series) {
         (Some(y), true) => format!("{y} · {} episodes", thousands(item.episodes)),
         (None, true) => format!("{} episodes", thousands(item.episodes)),
         (Some(y), false) => y.to_string(),
         (None, false) => String::new(),
     };
-    let sub = if item.unmatched { format!("{sub} · not matched") } else { sub };
-    clip.text(text_rect.left_top() + vec2(0.0, 32.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
+    let sub = if item.unmatched {
+        format!("{sub} · not matched")
+    } else {
+        sub
+    };
+    clip.text(
+        text_rect.left_top() + vec2(0.0, 32.0),
+        Align2::LEFT_TOP,
+        sub,
+        TextStyle::Small.resolve(style),
+        theme::dim(),
+    );
 }
 
 impl Screen for ShowsView {
@@ -508,7 +661,9 @@ impl Screen for ShowsView {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        let selected = self.selected_index().map(|i| (self.items[i].library_id, self.items[i].show_id));
+        let selected = self
+            .selected_index()
+            .map(|i| (self.items[i].library_id, self.items[i].show_id));
         if press.is(Action::Menu) {
             return selected.map_or(Nav::None, |(lib, id)| Nav::push(ShowOptions::new(lib, id)));
         }
@@ -523,7 +678,11 @@ impl Screen for ShowsView {
             }
             ListInput::Activate(i) => {
                 let (library_id, show_id) = (self.items[i].library_id, self.items[i].show_id);
-                match sh.lib(library_id).and_then(|l| l.catalog()?.show(show_id)).cloned() {
+                match sh
+                    .lib(library_id)
+                    .and_then(|l| l.catalog()?.show(show_id))
+                    .cloned()
+                {
                     Some(entry) => open_show(sh, library_id, &entry),
                     None => Nav::None,
                 }
@@ -536,21 +695,36 @@ impl Screen for ShowsView {
         self.refresh(sh);
         let (name, subtitle, organised) = match self.source {
             Source::Library(id) => {
-                let Some(state) = sh.lib(id) else { return Nav::Pop };
+                let Some(state) = sh.lib(id) else {
+                    return Nav::Pop;
+                };
                 let movies = state.lib.kind == flex_core::LibraryKind::Movies;
                 let what = if movies { "movies" } else { "shows" };
                 let subtitle = match state.catalog() {
                     Some(c) if self.items.len() == c.shows.len() => {
-                        format!("{} {what} · {}", thousands(self.items.len()), state.status())
+                        format!(
+                            "{} {what} · {}",
+                            thousands(self.items.len()),
+                            state.status()
+                        )
                     }
-                    Some(c) => format!("{} of {} {what} · {}", thousands(self.items.len()), thousands(c.shows.len()), state.status()),
+                    Some(c) => format!(
+                        "{} of {} {what} · {}",
+                        thousands(self.items.len()),
+                        thousands(c.shows.len()),
+                        state.status()
+                    ),
                     None => "Organising…".to_owned(),
                 };
                 (state.lib.name.clone(), subtitle, state.catalog().is_some())
             }
             Source::Watchlist => {
                 let total = sh.watchlist_shows().len();
-                let subtitle = if total == 1 { "1 title".to_owned() } else { format!("{} titles", thousands(total)) };
+                let subtitle = if total == 1 {
+                    "1 title".to_owned()
+                } else {
+                    format!("{} titles", thousands(total))
+                };
                 ("Watchlist".to_owned(), subtitle, true)
             }
         };
@@ -559,7 +733,10 @@ impl Screen for ShowsView {
         let toolbar = Rect::from_min_size(body.min, vec2(body.width(), TOOLBAR_H));
         if let Some(popup) = self.popup_rect(toolbar) {
             // Clicking outside the dropdown closes it.
-            let outside = ui.input(|i| i.pointer.primary_clicked() && i.pointer.hover_pos().is_some_and(|p| !popup.contains(p)));
+            let outside = ui.input(|i| {
+                i.pointer.primary_clicked()
+                    && i.pointer.hover_pos().is_some_and(|p| !popup.contains(p))
+            });
             if outside {
                 // Only closes it: nothing underneath gets the click.
                 self.popup = None;
@@ -588,11 +765,22 @@ impl Screen for ShowsView {
             match self.prefs.layout {
                 Layout::Posters => {
                     let (items, images) = (&self.items, &mut sh.images);
-                    let hit = widgets::grid(ui, content, items.len(), GRID, &mut self.grid, content_focused, |painter, i, r, f| {
-                        let item = &items[i];
-                        let poster = item.poster.as_deref().and_then(|p| images.get(p, Size::Poster));
-                        paint_card(painter, r, item, poster.as_ref(), f, &style);
-                    });
+                    let hit = widgets::grid(
+                        ui,
+                        content,
+                        items.len(),
+                        GRID,
+                        &mut self.grid,
+                        content_focused,
+                        |painter, i, r, f| {
+                            let item = &items[i];
+                            let poster = item
+                                .poster
+                                .as_deref()
+                                .and_then(|p| images.get(p, Size::Poster));
+                            paint_card(painter, r, item, poster.as_ref(), f, &style);
+                        },
+                    );
                     if hit.any() {
                         self.toolbar = None;
                     }
@@ -608,8 +796,14 @@ impl Screen for ShowsView {
                             };
                             let mut detail = match (it.series, it.unwatched) {
                                 (true, 0) => "All watched".to_owned(),
-                                (true, u) if u == it.episodes => format!("{} episodes", thousands(it.episodes)),
-                                (true, u) => format!("{} episodes · {} unwatched", thousands(it.episodes), thousands(u)),
+                                (true, u) if u == it.episodes => {
+                                    format!("{} episodes", thousands(it.episodes))
+                                }
+                                (true, u) => format!(
+                                    "{} episodes · {} unwatched",
+                                    thousands(it.episodes),
+                                    thousands(u)
+                                ),
                                 (false, 0) => "Watched".to_owned(),
                                 (false, _) => String::new(),
                             };
@@ -617,7 +811,10 @@ impl Screen for ShowsView {
                                 detail.push_str(" · not matched online");
                             }
                             let icon = if it.series { Icon::Folder } else { Icon::Video };
-                            Row::new(icon, title).detail(detail).progress(it.progress).dim(it.unwatched == 0)
+                            Row::new(icon, title)
+                                .detail(detail)
+                                .progress(it.progress)
+                                .dim(it.unwatched == 0)
                         })
                         .collect();
                     if widgets::list(ui, content, &rows, &mut self.list, content_focused).any() {
@@ -652,8 +849,20 @@ mod tests {
     }
 
     fn sorted(sort: Sort, descending: bool) -> Vec<String> {
-        let mut items = vec![item("b", 2, "2001", 0), item("a", 3, "", 5), item("c", 1, "1999-05-01", 9)];
-        sort_items(&mut items, &Prefs { layout: Layout::Posters, sort, descending, filter: Filter::All });
+        let mut items = vec![
+            item("b", 2, "2001", 0),
+            item("a", 3, "", 5),
+            item("c", 1, "1999-05-01", 9),
+        ];
+        sort_items(
+            &mut items,
+            &Prefs {
+                layout: Layout::Posters,
+                sort,
+                descending,
+                filter: Filter::All,
+            },
+        );
         items.into_iter().map(|(it, ..)| it.title).collect()
     }
 
@@ -675,7 +884,12 @@ mod tests {
 
     #[test]
     fn choosing_the_current_sort_flips_it() {
-        let mut prefs = Prefs { layout: Layout::Posters, sort: Sort::Added, descending: true, filter: Filter::All };
+        let mut prefs = Prefs {
+            layout: Layout::Posters,
+            sort: Sort::Added,
+            descending: true,
+            filter: Filter::All,
+        };
         let index = |sort| SORTS.iter().position(|x| x.0 == sort).unwrap();
         Tool::Sort.apply(&mut prefs, index(Sort::Added));
         assert!(!prefs.descending);

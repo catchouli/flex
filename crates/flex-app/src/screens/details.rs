@@ -9,8 +9,8 @@ use flex_core::metadata::CastMember;
 use flex_core::progress::{NextUp, next_up};
 
 use super::inspector::MatchInspector;
-use super::options::{OptionsMenu, Target};
 use super::match_online::MatchOnline;
+use super::options::{OptionsMenu, Target};
 use super::person::PersonPage;
 use super::screenshots::ScreenshotsView;
 use super::shows::{SeasonView, ShowOptions};
@@ -33,7 +33,10 @@ pub(super) const SECTION_GAP: f32 = 44.0;
 
 #[derive(Clone)]
 enum Button {
-    Play { label: String, req: PlayRequest },
+    Play {
+        label: String,
+        req: PlayRequest,
+    },
     MarkWatched(bool),
     /// Add to (true) or remove from the watchlist.
     Watchlist(bool),
@@ -69,7 +72,9 @@ pub(super) enum RowKind {
 }
 
 fn play_label(sh: &Shared, library_id: i64, file_id: i64) -> String {
-    sh.titles(library_id, file_id).and_then(|t| t.episode).unwrap_or_default()
+    sh.titles(library_id, file_id)
+        .and_then(|t| t.episode)
+        .unwrap_or_default()
 }
 
 /// "S1E5" for the label of the main button.
@@ -80,22 +85,44 @@ fn short_code(sh: &Shared, library_id: i64, file_id: i64) -> String {
 
 /// Resume / Play buttons for a single file.
 fn play_buttons(sh: &Shared, library_id: i64, file_id: i64) -> Vec<Button> {
-    let Some(req) = sh.play_request(library_id, file_id) else { return Vec::new() };
+    let Some(req) = sh.play_request(library_id, file_id) else {
+        return Vec::new();
+    };
     match sh.progress(library_id, file_id).and_then(|p| p.position) {
         Some(pos) => vec![
             Button::Play {
                 label: format!("Resume from {}", theme::format_time(pos)),
-                req: PlayRequest { start: Some(pos), ..req.clone() },
+                req: PlayRequest {
+                    start: Some(pos),
+                    ..req.clone()
+                },
             },
-            Button::Play { label: "Play from start".into(), req: PlayRequest { start: Some(0.0), ..req } },
+            Button::Play {
+                label: "Play from start".into(),
+                req: PlayRequest {
+                    start: Some(0.0),
+                    ..req
+                },
+            },
         ],
-        None => vec![Button::Play { label: "Play".into(), req: PlayRequest { start: Some(0.0), ..req } }],
+        None => vec![Button::Play {
+            label: "Play".into(),
+            req: PlayRequest {
+                start: Some(0.0),
+                ..req
+            },
+        }],
     }
 }
 
 /// The page's audio line: "Audio:  English · Dolby TrueHD 7.1   ·   Japanese · AAC stereo",
 /// with `which` ("S1E5") saying which episode it's from. `None` until known.
-fn audio_line(sh: &mut Shared, library_id: i64, file_id: i64, which: Option<&str>) -> Option<String> {
+fn audio_line(
+    sh: &mut Shared,
+    library_id: i64,
+    file_id: i64,
+    which: Option<&str>,
+) -> Option<String> {
     let tracks = sh.audio_tracks(library_id, file_id)?;
     if tracks.is_empty() {
         return None;
@@ -104,7 +131,10 @@ fn audio_line(sh: &mut Shared, library_id: i64, file_id: i64, which: Option<&str
         Some(w) if !w.is_empty() => format!("Audio ({w})"),
         _ => "Audio".to_owned(),
     };
-    Some(format!("{label}:  {}", flex_core::audio::summary(&tracks, 4)))
+    Some(format!(
+        "{label}:  {}",
+        flex_core::audio::summary(&tracks, 4)
+    ))
 }
 
 /// A horizontal row that scrolls to keep the selected item in view, with arrows on the
@@ -166,13 +196,26 @@ fn button_row(
     mut draw: impl FnMut(usize, Rect, bool),
 ) -> bool {
     const SPACING: f32 = 16.0;
-    let widths: Vec<f32> = labels.iter().map(|l| button_width(painter, l, style)).collect();
-    let span = |range: std::ops::Range<usize>| widths[range.clone()].iter().sum::<f32>() + SPACING * range.len().saturating_sub(1) as f32;
+    let widths: Vec<f32> = labels
+        .iter()
+        .map(|l| button_width(painter, l, style))
+        .collect();
+    let span = |range: std::ops::Range<usize>| {
+        widths[range.clone()].iter().sum::<f32>() + SPACING * range.len().saturating_sub(1) as f32
+    };
     let overflows = span(0..widths.len()) > row.width();
     // Where buttons go when the row starts at `from`: gutters for the arrows if it overflows.
     let bounds = |from: usize| {
-        let left = if from > 0 { row.left() + widgets::HINT_SPACE } else { row.left() };
-        let right = if overflows { row.right() - widgets::HINT_SPACE } else { row.right() };
+        let left = if from > 0 {
+            row.left() + widgets::HINT_SPACE
+        } else {
+            row.left()
+        };
+        let right = if overflows {
+            row.right() - widgets::HINT_SPACE
+        } else {
+            row.right()
+        };
         (left, right)
     };
     *selected = (*selected).min(widths.len().saturating_sub(1));
@@ -190,7 +233,10 @@ fn button_row(
         if i > *offset && x + w > right {
             break;
         }
-        rects.push((i, Rect::from_min_size(pos2(x, row.top()), vec2(*w, row.height()))));
+        rects.push((
+            i,
+            Rect::from_min_size(pos2(x, row.top()), vec2(*w, row.height())),
+        ));
         x += w + SPACING;
     }
     let last = rects.last().map_or(*offset, |(i, _)| *i);
@@ -208,7 +254,15 @@ fn button_row(
 }
 
 /// A portrait card (actor photo or poster) with two lines of text under it.
-pub(super) fn paint_card(painter: &Painter, rect: Rect, title: &str, sub: &str, photo: Option<&egui::TextureHandle>, focused: bool, style: &egui::Style) {
+pub(super) fn paint_card(
+    painter: &Painter,
+    rect: Rect,
+    title: &str,
+    sub: &str,
+    photo: Option<&egui::TextureHandle>,
+    focused: bool,
+    style: &egui::Style,
+) {
     let photo_rect = Rect::from_min_size(rect.min, vec2(rect.width(), rect.width() * 1.5));
     match photo {
         Some(t) => paint_cover(painter, photo_rect, t),
@@ -219,23 +273,65 @@ pub(super) fn paint_card(painter: &Painter, rect: Rect, title: &str, sub: &str, 
     theme::paint_picture_frame(painter, photo_rect, focused);
     let text = Rect::from_min_max(pos2(rect.left(), photo_rect.bottom() + 6.0), rect.max);
     let clip = painter.with_clip_rect(text);
-    let color = if focused { theme::highlight() } else { theme::text() };
-    clip.text(text.left_top(), Align2::LEFT_TOP, title, TextStyle::Small.resolve(style), color);
-    clip.text(text.left_top() + vec2(0.0, 30.0), Align2::LEFT_TOP, sub, TextStyle::Small.resolve(style), theme::dim());
+    let color = if focused {
+        theme::highlight()
+    } else {
+        theme::text()
+    };
+    clip.text(
+        text.left_top(),
+        Align2::LEFT_TOP,
+        title,
+        TextStyle::Small.resolve(style),
+        color,
+    );
+    clip.text(
+        text.left_top() + vec2(0.0, 30.0),
+        Align2::LEFT_TOP,
+        sub,
+        TextStyle::Small.resolve(style),
+        theme::dim(),
+    );
 }
 
-fn paint_button(painter: &Painter, rect: Rect, label: &str, focused: bool, primary: bool, style: &egui::Style) {
+fn paint_button(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    focused: bool,
+    primary: bool,
+    style: &egui::Style,
+) {
     let color = widgets::paint_focusable(painter, rect, focused, false);
     if primary && !focused {
         // Play stands out a little: the panel tinted towards the accent.
         let radius = theme::current().panel.radius.round().clamp(0.0, 255.0) as u8;
-        painter.rect_filled(rect, CornerRadius::same(radius), theme::accent().gamma_multiply(0.18));
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(radius),
+            theme::accent().gamma_multiply(0.18),
+        );
     }
-    theme::panel_shadow_text(painter, rect.center(), Align2::CENTER_CENTER, label, TextStyle::Body.resolve(style), color);
+    theme::panel_shadow_text(
+        painter,
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        TextStyle::Body.resolve(style),
+        color,
+    );
 }
 
 fn button_width(painter: &Painter, label: &str, style: &egui::Style) -> f32 {
-    painter.layout_no_wrap(label.to_owned(), TextStyle::Body.resolve(style), Color32::WHITE).size().x + 56.0
+    painter
+        .layout_no_wrap(
+            label.to_owned(),
+            TextStyle::Body.resolve(style),
+            Color32::WHITE,
+        )
+        .size()
+        .x
+        + 56.0
 }
 
 /// Shared focus/scroll handling for the pages.
@@ -267,7 +363,13 @@ impl PageNav {
         let &(kind, len) = rows.get(self.row)?;
         let c = &mut self.col[Self::kind_index(kind)];
         match press.action {
-            Action::Up if self.row == 0 => return Some(if press.repeat { Nav::None } else { Nav::FocusTopBar }),
+            Action::Up if self.row == 0 => {
+                return Some(if press.repeat {
+                    Nav::None
+                } else {
+                    Nav::FocusTopBar
+                });
+            }
             Action::Up => self.row -= 1,
             Action::Down => self.row = (self.row + 1).min(rows.len() - 1),
             Action::Left => *c = c.saturating_sub(1),
@@ -279,7 +381,8 @@ impl PageNav {
     }
 
     pub fn focused(&self, rows: &[(RowKind, usize)]) -> Option<(RowKind, usize)> {
-        rows.get(self.row).map(|&(kind, _)| (kind, self.col[Self::kind_index(kind)]))
+        rows.get(self.row)
+            .map(|&(kind, _)| (kind, self.col[Self::kind_index(kind)]))
     }
 
     /// Scrolls so the focused row (top..bottom, relative to content) is visible.
@@ -308,32 +411,64 @@ pub struct TitlePage {
 
 impl TitlePage {
     pub fn new(library_id: i64, show_id: i64) -> Self {
-        Self { library_id, show_id, nav: PageNav::default(), cast: None, voice: false }
+        Self {
+            library_id,
+            show_id,
+            nav: PageNav::default(),
+            cast: None,
+            voice: false,
+        }
     }
 
     fn buttons(&self, sh: &Shared) -> Vec<Button> {
-        let Some(state) = sh.lib(self.library_id) else { return Vec::new() };
-        let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)) else { return Vec::new() };
+        let Some(state) = sh.lib(self.library_id) else {
+            return Vec::new();
+        };
+        let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)) else {
+            return Vec::new();
+        };
         let mut buttons = if entry.is_series() {
             let play = |id, label: String, start| {
-                sh.play_request(self.library_id, id).map(|req| Button::Play { label, req: PlayRequest { start, ..req } })
+                sh.play_request(self.library_id, id)
+                    .map(|req| Button::Play {
+                        label,
+                        req: PlayRequest { start, ..req },
+                    })
             };
             let main = match next_up(entry, &state.tree) {
                 Some(NextUp::Resume(id)) => {
                     let pos = sh.progress(self.library_id, id).and_then(|p| p.position);
-                    play(id, format!("Resume {}", short_code(sh, self.library_id, id)), pos)
+                    play(
+                        id,
+                        format!("Resume {}", short_code(sh, self.library_id, id)),
+                        pos,
+                    )
                 }
-                Some(NextUp::Next(id)) => play(id, format!("Play {}", short_code(sh, self.library_id, id)), Some(0.0)),
+                Some(NextUp::Next(id)) => play(
+                    id,
+                    format!("Play {}", short_code(sh, self.library_id, id)),
+                    Some(0.0),
+                ),
                 Some(NextUp::Start(id)) => play(id, "Play from start".into(), Some(0.0)),
                 None => None,
             };
             main.into_iter().collect()
         } else {
-            entry.episodes.first().map_or_else(Vec::new, |e| play_buttons(sh, self.library_id, e.file_id))
+            entry
+                .episodes
+                .first()
+                .map_or_else(Vec::new, |e| play_buttons(sh, self.library_id, e.file_id))
         };
-        let all_watched = entry.episodes.iter().all(|e| state.tree.file(e.file_id).is_some_and(|f| f.progress.watched));
+        let all_watched = entry.episodes.iter().all(|e| {
+            state
+                .tree
+                .file(e.file_id)
+                .is_some_and(|f| f.progress.watched)
+        });
         buttons.push(Button::MarkWatched(!all_watched));
-        buttons.push(Button::Watchlist(!sh.on_watchlist(self.library_id, self.show_id)));
+        buttons.push(Button::Watchlist(
+            !sh.on_watchlist(self.library_id, self.show_id),
+        ));
         if !entry.is_series()
             && let Some(e) = entry.episodes.first()
         {
@@ -345,7 +480,9 @@ impl TitlePage {
     }
 
     fn rows(&self, sh: &Shared, buttons: usize) -> Vec<(RowKind, usize)> {
-        let entry = sh.lib(self.library_id).and_then(|l| l.catalog()?.show(self.show_id));
+        let entry = sh
+            .lib(self.library_id)
+            .and_then(|l| l.catalog()?.show(self.show_id));
         let mut rows = vec![(RowKind::Buttons, buttons)];
         if let Some(e) = entry.filter(|e| e.is_series()) {
             rows.push((RowKind::Seasons, e.seasons().len()));
@@ -358,7 +495,9 @@ impl TitlePage {
     }
 
     fn load_cast(&mut self, sh: &Shared) {
-        let Some(state) = sh.lib(self.library_id) else { return };
+        let Some(state) = sh.lib(self.library_id) else {
+            return;
+        };
         if self.cast.as_ref().is_some_and(|(v, _)| *v == state.version) {
             return;
         }
@@ -367,7 +506,11 @@ impl TitlePage {
             // Anime: the Japanese voice cast when known.
             Some(pid) => {
                 let voice = sh.credits(&pid, "voice");
-                if voice.is_empty() { (sh.credits(&pid, "cast"), false) } else { (voice, true) }
+                if voice.is_empty() {
+                    (sh.credits(&pid, "cast"), false)
+                } else {
+                    (voice, true)
+                }
             }
             None => (Vec::new(), false),
         };
@@ -387,20 +530,33 @@ impl Screen for TitlePage {
         if press.is(Action::Menu) {
             // On a season card: options for that season; otherwise for the whole show.
             if let Some((RowKind::Seasons, i)) = self.nav.focused(&rows)
-                && let Some(entry) = sh.lib(self.library_id).and_then(|l| l.catalog()?.show(self.show_id))
+                && let Some(entry) = sh
+                    .lib(self.library_id)
+                    .and_then(|l| l.catalog()?.show(self.show_id))
                 && let Some(season) = entry.seasons().get(i).copied()
             {
                 let ids = entry.season_episodes(season).map(|e| e.file_id).collect();
-                let name = if season == 0 { "Specials".to_owned() } else { format!("Season {season}") };
+                let name = if season == 0 {
+                    "Specials".to_owned()
+                } else {
+                    format!("Season {season}")
+                };
                 let label = format!("{} · {name}", entry.show.title);
-                return Nav::push(OptionsMenu::new(Target::Files { library_id: self.library_id, ids, label }));
+                return Nav::push(OptionsMenu::new(Target::Files {
+                    library_id: self.library_id,
+                    ids,
+                    label,
+                }));
             }
             return Nav::push(ShowOptions::new(self.library_id, self.show_id));
         }
         if press.is(Action::PlayPause)
             && let Some(Button::Play { req, .. }) = buttons.first()
         {
-            return Nav::Play { req: req.clone(), replace: false };
+            return Nav::Play {
+                req: req.clone(),
+                replace: false,
+            };
         }
         if let Some(nav) = self.nav.handle(press, &rows) {
             return nav;
@@ -410,7 +566,10 @@ impl Screen for TitlePage {
         }
         match self.nav.focused(&rows) {
             Some((RowKind::Buttons, i)) => match buttons.get(i).cloned() {
-                Some(Button::Play { req, .. }) => Nav::Play { req, replace: false },
+                Some(Button::Play { req, .. }) => Nav::Play {
+                    req,
+                    replace: false,
+                },
                 Some(Button::MarkWatched(w)) => {
                     let ids: Vec<i64> = sh
                         .lib(self.library_id)
@@ -423,14 +582,25 @@ impl Screen for TitlePage {
                     sh.set_watchlist(self.library_id, self.show_id, on);
                     Nav::None
                 }
-                Some(Button::MatchOnline) => Nav::push(MatchOnline::new(sh, self.library_id, self.show_id)),
-                Some(Button::Folders) => Nav::push(MatchInspector::new(self.library_id, self.show_id)),
-                Some(Button::Screenshots(file_id)) => Nav::push(ScreenshotsView::new(self.library_id, file_id)),
+                Some(Button::MatchOnline) => {
+                    Nav::push(MatchOnline::new(sh, self.library_id, self.show_id))
+                }
+                Some(Button::Folders) => {
+                    Nav::push(MatchInspector::new(self.library_id, self.show_id))
+                }
+                Some(Button::Screenshots(file_id)) => {
+                    Nav::push(ScreenshotsView::new(self.library_id, file_id))
+                }
                 None => Nav::None,
             },
             Some((RowKind::Seasons, i)) => {
-                let season = sh.lib(self.library_id).and_then(|l| l.catalog()?.show(self.show_id)).and_then(|e| e.seasons().get(i).copied());
-                season.map_or(Nav::None, |s| Nav::push(SeasonView::new(sh, self.library_id, self.show_id, s)))
+                let season = sh
+                    .lib(self.library_id)
+                    .and_then(|l| l.catalog()?.show(self.show_id))
+                    .and_then(|e| e.seasons().get(i).copied());
+                season.map_or(Nav::None, |s| {
+                    Nav::push(SeasonView::new(sh, self.library_id, self.show_id, s))
+                })
             }
             Some((RowKind::Cast, i)) => match self.cast.as_ref().and_then(|(_, c)| c.get(i)) {
                 Some(member) => Nav::push(PersonPage::new(sh, member.clone())),
@@ -442,18 +612,34 @@ impl Screen for TitlePage {
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         self.load_cast(sh);
-        let Some(state) = sh.lib(self.library_id) else { return Nav::Pop };
+        let Some(state) = sh.lib(self.library_id) else {
+            return Nav::Pop;
+        };
         // The show may have been merged into another or split up.
-        let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)).cloned() else { return Nav::Pop };
+        let Some(entry) = state.catalog().and_then(|c| c.show(self.show_id)).cloned() else {
+            return Nav::Pop;
+        };
         // Season cards: (name, summary).
         let season_cards: Vec<(String, String)> = entry
             .seasons()
             .into_iter()
             .map(|s| {
                 let (total, unwatched) = entry.season_episodes(s).fold((0, 0), |(t, u), e| {
-                    (t + 1, u + usize::from(!state.tree.file(e.file_id).is_some_and(|f| f.progress.watched)))
+                    (
+                        t + 1,
+                        u + usize::from(
+                            !state
+                                .tree
+                                .file(e.file_id)
+                                .is_some_and(|f| f.progress.watched),
+                        ),
+                    )
                 });
-                let name = if s == 0 { "Specials".to_owned() } else { format!("Season {s}") };
+                let name = if s == 0 {
+                    "Specials".to_owned()
+                } else {
+                    format!("Season {s}")
+                };
                 let sub = match unwatched {
                     0 => format!("{total} episodes · watched"),
                     u if u == total => format!("{total} episodes"),
@@ -464,7 +650,11 @@ impl Screen for TitlePage {
             .collect();
         let buttons = self.buttons(sh);
         let rows = self.rows(sh, buttons.len());
-        let focus = if focused { self.nav.focused(&rows) } else { None };
+        let focus = if focused {
+            self.nav.focused(&rows)
+        } else {
+            None
+        };
         let style = ui.style().clone();
 
         // Vertical layout (relative to the content top), then scroll the focused row into view.
@@ -502,7 +692,12 @@ impl Screen for TitlePage {
         }
         theme::paint_scrim(&painter, header);
         let poster_rect = Rect::from_min_size(origin, POSTER);
-        match entry.show.poster.as_deref().and_then(|p| sh.images.get(p, Size::Poster)) {
+        match entry
+            .show
+            .poster
+            .as_deref()
+            .and_then(|p| sh.images.get(p, Size::Poster))
+        {
             Some(t) => paint_cover(&painter, poster_rect, &t),
             None => {
                 painter.rect_filled(poster_rect, CornerRadius::same(8), theme::panel());
@@ -516,22 +711,39 @@ impl Screen for TitlePage {
         let text_left = poster_rect.right() + 44.0;
         let text_rect = Rect::from_min_max(
             pos2(text_left, origin.y + HEADER_PAD),
-            pos2(rect.right() - HEADER_PAD, origin.y + header_h - HEADER_PAD - BUTTON_H - 20.0),
+            pos2(
+                rect.right() - HEADER_PAD,
+                origin.y + header_h - HEADER_PAD - BUTTON_H - 20.0,
+            ),
         );
         let clip = painter.with_clip_rect(text_rect.intersect(rect));
         let title = match entry.show.year {
             Some(y) => format!("{} ({y})", entry.show.title),
             None => entry.show.title.clone(),
         };
-        clip.text(text_rect.left_top(), Align2::LEFT_TOP, title, TextStyle::Heading.resolve(&style), theme::panel_text());
+        clip.text(
+            text_rect.left_top(),
+            Align2::LEFT_TOP,
+            title,
+            TextStyle::Heading.resolve(&style),
+            theme::panel_text(),
+        );
         let mut facts = Vec::new();
         if entry.is_series() {
             let seasons = entry.seasons().iter().filter(|s| **s != 0).count();
-            facts.push(if seasons == 1 { "1 season".to_owned() } else { format!("{seasons} seasons") });
+            facts.push(if seasons == 1 {
+                "1 season".to_owned()
+            } else {
+                format!("{seasons} seasons")
+            });
             facts.push(format!("{} episodes", thousands(entry.episodes.len())));
         }
         if let Some(rt) = entry.show.runtime {
-            facts.push(if rt >= 60 { format!("{} h {} min", rt / 60, rt % 60) } else { format!("{rt} min") });
+            facts.push(if rt >= 60 {
+                format!("{} h {} min", rt / 60, rt % 60)
+            } else {
+                format!("{rt} min")
+            });
         }
         if let Some(g) = &entry.show.genres {
             facts.push(g.clone());
@@ -539,11 +751,19 @@ impl Screen for TitlePage {
         if entry.show.state == "unmatched" {
             facts.push("not matched online".into());
         }
-        clip.text(text_rect.left_top() + vec2(0.0, 72.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::panel_dim());
+        clip.text(
+            text_rect.left_top() + vec2(0.0, 72.0),
+            Align2::LEFT_TOP,
+            facts.join("  ·  "),
+            TextStyle::Small.resolve(&style),
+            theme::panel_dim(),
+        );
         // A film's audio; for a series, the episode the main button plays (a show's
         // episodes are usually all alike).
         let audio = if entry.is_series() {
-            let next = sh.lib(self.library_id).and_then(|l| next_up(&entry, &l.tree));
+            let next = sh
+                .lib(self.library_id)
+                .and_then(|l| next_up(&entry, &l.tree));
             let id = match next {
                 Some(NextUp::Resume(id) | NextUp::Next(id) | NextUp::Start(id)) => Some(id),
                 None => entry.episodes.first().map(|e| e.file_id),
@@ -553,17 +773,35 @@ impl Screen for TitlePage {
                 audio_line(sh, self.library_id, id, Some(&code))
             })
         } else {
-            entry.episodes.first().and_then(|e| audio_line(sh, self.library_id, e.file_id, None))
+            entry
+                .episodes
+                .first()
+                .and_then(|e| audio_line(sh, self.library_id, e.file_id, None))
         };
         let mut overview_top = 124.0;
         if let Some(audio) = audio {
-            clip.text(text_rect.left_top() + vec2(0.0, 108.0), Align2::LEFT_TOP, audio, TextStyle::Small.resolve(&style), theme::panel_dim());
+            clip.text(
+                text_rect.left_top() + vec2(0.0, 108.0),
+                Align2::LEFT_TOP,
+                audio,
+                TextStyle::Small.resolve(&style),
+                theme::panel_dim(),
+            );
             overview_top = 160.0;
         }
         if let Some(overview) = entry.show.overview.as_deref().filter(|o| !o.is_empty()) {
-            let r = Rect::from_min_max(text_rect.left_top() + vec2(0.0, overview_top), text_rect.max);
+            let r = Rect::from_min_max(
+                text_rect.left_top() + vec2(0.0, overview_top),
+                text_rect.max,
+            );
             let r = r.with_max_x(r.left() + r.width().min(1100.0));
-            widgets::text_block(&painter, r, overview, TextStyle::Body.resolve(&style), theme::panel_text());
+            widgets::text_block(
+                &painter,
+                r,
+                overview,
+                TextStyle::Body.resolve(&style),
+                theme::panel_text(),
+            );
         }
 
         // Rows. `hovered` = (row, item) under the mouse; `arrow_row` = row whose scroll
@@ -581,41 +819,127 @@ impl Screen for TitlePage {
             match kind {
                 RowKind::Buttons => {
                     let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
-                    let row = Rect::from_min_max(pos2(text_left, origin.y + top), pos2(rect.right() - HEADER_PAD, origin.y + top + BUTTON_H));
-                    let arrow = button_row(ui, &painter, row, &labels, &mut self.nav.col[0], &mut self.nav.offset[0], &style, |i, r, _| {
-                        hit(index, i, r);
-                        paint_button(&painter, r, &labels[i], row_focus == Some(i), i == 0 && matches!(buttons[i], Button::Play { .. }), &style);
-                    });
+                    let row = Rect::from_min_max(
+                        pos2(text_left, origin.y + top),
+                        pos2(rect.right() - HEADER_PAD, origin.y + top + BUTTON_H),
+                    );
+                    let arrow = button_row(
+                        ui,
+                        &painter,
+                        row,
+                        &labels,
+                        &mut self.nav.col[0],
+                        &mut self.nav.offset[0],
+                        &style,
+                        |i, r, _| {
+                            hit(index, i, r);
+                            paint_button(
+                                &painter,
+                                r,
+                                &labels[i],
+                                row_focus == Some(i),
+                                i == 0 && matches!(buttons[i], Button::Play { .. }),
+                                &style,
+                            );
+                        },
+                    );
                     if arrow {
                         arrow_row = Some(index);
                     }
                 }
                 RowKind::Seasons => {
-                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, "Seasons", TextStyle::Body.resolve(&style), theme::text());
-                    let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
-                    let arrow = hrow(ui, &painter, area, SEASON_CARD, *count, &mut self.nav.col[1], &mut self.nav.offset[1], |p, i, r, _| {
-                        hit(index, i, r);
-                        let (name, sub) = &season_cards[i];
-                        let color = widgets::paint_focusable(p, r, row_focus == Some(i), false);
-                        p.text(r.left_top() + vec2(20.0, 16.0), Align2::LEFT_TOP, name, TextStyle::Body.resolve(&style), color);
-                        p.text(r.left_bottom() + vec2(20.0, -14.0), Align2::LEFT_BOTTOM, sub, TextStyle::Small.resolve(&style), color);
-                    });
+                    painter.text(
+                        origin + vec2(0.0, top),
+                        Align2::LEFT_TOP,
+                        "Seasons",
+                        TextStyle::Body.resolve(&style),
+                        theme::text(),
+                    );
+                    let area = Rect::from_min_size(
+                        origin + vec2(0.0, top + ROW_LABEL_H),
+                        vec2(rect.width(), 0.0),
+                    );
+                    let arrow = hrow(
+                        ui,
+                        &painter,
+                        area,
+                        SEASON_CARD,
+                        *count,
+                        &mut self.nav.col[1],
+                        &mut self.nav.offset[1],
+                        |p, i, r, _| {
+                            hit(index, i, r);
+                            let (name, sub) = &season_cards[i];
+                            let color = widgets::paint_focusable(p, r, row_focus == Some(i), false);
+                            p.text(
+                                r.left_top() + vec2(20.0, 16.0),
+                                Align2::LEFT_TOP,
+                                name,
+                                TextStyle::Body.resolve(&style),
+                                color,
+                            );
+                            p.text(
+                                r.left_bottom() + vec2(20.0, -14.0),
+                                Align2::LEFT_BOTTOM,
+                                sub,
+                                TextStyle::Small.resolve(&style),
+                                color,
+                            );
+                        },
+                    );
                     if arrow {
                         arrow_row = Some(index);
                     }
                 }
                 RowKind::Cast => {
-                    let label = if self.voice { "Voice cast (Japanese)" } else { "Cast" };
-                    painter.text(origin + vec2(0.0, top), Align2::LEFT_TOP, label, TextStyle::Body.resolve(&style), theme::text());
-                    let cast = self.cast.as_ref().map(|(_, c)| c.clone()).unwrap_or_default();
+                    let label = if self.voice {
+                        "Voice cast (Japanese)"
+                    } else {
+                        "Cast"
+                    };
+                    painter.text(
+                        origin + vec2(0.0, top),
+                        Align2::LEFT_TOP,
+                        label,
+                        TextStyle::Body.resolve(&style),
+                        theme::text(),
+                    );
+                    let cast = self
+                        .cast
+                        .as_ref()
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_default();
                     let images = &mut sh.images;
-                    let area = Rect::from_min_size(origin + vec2(0.0, top + ROW_LABEL_H), vec2(rect.width(), 0.0));
-                    let arrow = hrow(ui, &painter, area, CAST_CARD, *count, &mut self.nav.col[2], &mut self.nav.offset[2], |p, i, r, _| {
-                        hit(index, i, r);
-                        let member = &cast[i];
-                        let photo = member.image.as_deref().and_then(|img| images.get(img, Size::Profile));
-                        paint_card(p, r, &member.name, &member.role, photo.as_ref(), row_focus == Some(i), &style);
-                    });
+                    let area = Rect::from_min_size(
+                        origin + vec2(0.0, top + ROW_LABEL_H),
+                        vec2(rect.width(), 0.0),
+                    );
+                    let arrow = hrow(
+                        ui,
+                        &painter,
+                        area,
+                        CAST_CARD,
+                        *count,
+                        &mut self.nav.col[2],
+                        &mut self.nav.offset[2],
+                        |p, i, r, _| {
+                            hit(index, i, r);
+                            let member = &cast[i];
+                            let photo = member
+                                .image
+                                .as_deref()
+                                .and_then(|img| images.get(img, Size::Profile));
+                            paint_card(
+                                p,
+                                r,
+                                &member.name,
+                                &member.role,
+                                photo.as_ref(),
+                                row_focus == Some(i),
+                                &style,
+                            );
+                        },
+                    );
                     if arrow {
                         arrow_row = Some(index);
                     }
@@ -647,12 +971,18 @@ pub struct EpisodePage {
 
 impl EpisodePage {
     pub fn new(library_id: i64, file_id: i64) -> Self {
-        Self { library_id, file_id, nav: PageNav::default() }
+        Self {
+            library_id,
+            file_id,
+            nav: PageNav::default(),
+        }
     }
 
     fn buttons(&self, sh: &Shared) -> Vec<Button> {
         let mut buttons = play_buttons(sh, self.library_id, self.file_id);
-        let watched = sh.progress(self.library_id, self.file_id).is_some_and(|p| p.watched);
+        let watched = sh
+            .progress(self.library_id, self.file_id)
+            .is_some_and(|p| p.watched);
         buttons.push(Button::MarkWatched(!watched));
         buttons.push(Button::Screenshots(self.file_id));
         buttons
@@ -670,10 +1000,16 @@ impl Screen for EpisodePage {
         if press.is(Action::PlayPause)
             && let Some(Button::Play { req, .. }) = buttons.first()
         {
-            return Nav::Play { req: req.clone(), replace: false };
+            return Nav::Play {
+                req: req.clone(),
+                replace: false,
+            };
         }
         if press.is(Action::Menu) {
-            let target = Target::File { library_id: self.library_id, file_id: self.file_id };
+            let target = Target::File {
+                library_id: self.library_id,
+                file_id: self.file_id,
+            };
             return Nav::push(OptionsMenu::new(target));
         }
         if let Some(nav) = self.nav.handle(press, &[(RowKind::Buttons, buttons.len())]) {
@@ -683,44 +1019,77 @@ impl Screen for EpisodePage {
             return Nav::None;
         }
         match buttons.get(self.nav.col[0]).cloned() {
-            Some(Button::Play { req, .. }) => Nav::Play { req, replace: false },
+            Some(Button::Play { req, .. }) => Nav::Play {
+                req,
+                replace: false,
+            },
             Some(Button::MarkWatched(w)) => {
                 sh.set_watched(self.library_id, &[self.file_id], w);
                 Nav::None
             }
-            Some(Button::Screenshots(file_id)) => Nav::push(ScreenshotsView::new(self.library_id, file_id)),
+            Some(Button::Screenshots(file_id)) => {
+                Nav::push(ScreenshotsView::new(self.library_id, file_id))
+            }
             _ => Nav::None,
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some(titles) = sh.titles(self.library_id, self.file_id) else { return Nav::Pop };
+        let Some(titles) = sh.titles(self.library_id, self.file_id) else {
+            return Nav::Pop;
+        };
         let meta = sh.episode_meta(self.library_id, self.file_id).cloned();
         let buttons = self.buttons(sh);
         let style = ui.style().clone();
         let painter = ui.painter().with_clip_rect(rect);
 
         let still_rect = Rect::from_min_size(rect.min, STILL);
-        match meta.as_ref().and_then(|m| m.still.clone()).and_then(|p| sh.images.get(&p, Size::Still)) {
+        match meta
+            .as_ref()
+            .and_then(|m| m.still.clone())
+            .and_then(|p| sh.images.get(&p, Size::Still))
+        {
             Some(t) => paint_cover(&painter, still_rect, &t),
             None => {
                 painter.rect_filled(still_rect, CornerRadius::same(8), theme::panel());
             }
         }
-        if let Some(fraction) = sh.progress(self.library_id, self.file_id).and_then(|p| p.fraction()) {
+        if let Some(fraction) = sh
+            .progress(self.library_id, self.file_id)
+            .and_then(|p| p.fraction())
+        {
             widgets::paint_progress(&painter, still_rect, fraction as f32, theme::progress());
         }
         let left = still_rect.right() + 44.0;
-        let text = Rect::from_min_max(pos2(left, rect.top()), pos2(rect.right(), still_rect.bottom()));
+        let text = Rect::from_min_max(
+            pos2(left, rect.top()),
+            pos2(rect.right(), still_rect.bottom()),
+        );
         let clip = painter.with_clip_rect(text);
-        let code = titles.episode.as_deref().map(|e| e.split(" · ").next().unwrap_or(e).to_owned()).unwrap_or_default();
+        let code = titles
+            .episode
+            .as_deref()
+            .map(|e| e.split(" · ").next().unwrap_or(e).to_owned())
+            .unwrap_or_default();
         let show_line = match &titles.show {
             Some(show) if !code.is_empty() => format!("{show} · {code}"),
             Some(show) => show.clone(),
             None => String::new(),
         };
-        clip.text(text.left_top(), Align2::LEFT_TOP, show_line, TextStyle::Body.resolve(&style), theme::dim());
-        clip.text(text.left_top() + vec2(0.0, 46.0), Align2::LEFT_TOP, &titles.name, TextStyle::Heading.resolve(&style), theme::text());
+        clip.text(
+            text.left_top(),
+            Align2::LEFT_TOP,
+            show_line,
+            TextStyle::Body.resolve(&style),
+            theme::dim(),
+        );
+        clip.text(
+            text.left_top() + vec2(0.0, 46.0),
+            Align2::LEFT_TOP,
+            &titles.name,
+            TextStyle::Heading.resolve(&style),
+            theme::text(),
+        );
         let mut facts = Vec::new();
         if let Some(m) = &meta {
             facts.extend(m.air_date.clone());
@@ -733,26 +1102,60 @@ impl Screen for EpisodePage {
                 facts.push(theme::format_remaining(left));
             }
         }
-        clip.text(text.left_top() + vec2(0.0, 120.0), Align2::LEFT_TOP, facts.join("  ·  "), TextStyle::Small.resolve(&style), theme::dim());
+        clip.text(
+            text.left_top() + vec2(0.0, 120.0),
+            Align2::LEFT_TOP,
+            facts.join("  ·  "),
+            TextStyle::Small.resolve(&style),
+            theme::dim(),
+        );
         let mut overview_top = 170.0;
         if let Some(audio) = audio_line(sh, self.library_id, self.file_id, None) {
-            clip.text(text.left_top() + vec2(0.0, 156.0), Align2::LEFT_TOP, audio, TextStyle::Small.resolve(&style), theme::dim());
+            clip.text(
+                text.left_top() + vec2(0.0, 156.0),
+                Align2::LEFT_TOP,
+                audio,
+                TextStyle::Small.resolve(&style),
+                theme::dim(),
+            );
             overview_top = 206.0;
         }
-        if let Some(overview) = meta.as_ref().map(|m| m.overview.clone()).filter(|o| !o.is_empty()) {
+        if let Some(overview) = meta
+            .as_ref()
+            .map(|m| m.overview.clone())
+            .filter(|o| !o.is_empty())
+        {
             let r = Rect::from_min_max(text.left_top() + vec2(0.0, overview_top), text.max);
             let r = r.with_max_x(r.left() + r.width().min(1000.0));
-            widgets::text_block(&painter, r, &overview, TextStyle::Body.resolve(&style), theme::text());
+            widgets::text_block(
+                &painter,
+                r,
+                &overview,
+                TextStyle::Body.resolve(&style),
+                theme::text(),
+            );
         }
         let labels: Vec<String> = buttons.iter().map(|b| b.label()).collect();
-        let row = Rect::from_min_size(pos2(rect.left(), still_rect.bottom() + 40.0), vec2(rect.width(), BUTTON_H));
+        let row = Rect::from_min_size(
+            pos2(rect.left(), still_rect.bottom() + 40.0),
+            vec2(rect.width(), BUTTON_H),
+        );
         let mut hovered = None;
-        button_row(ui, &painter, row, &labels, &mut self.nav.col[0], &mut self.nav.offset[0], &style, |i, r, selected| {
-            if widgets::hit(ui, r.intersect(rect)).any() {
-                hovered = Some(i);
-            }
-            paint_button(&painter, r, &labels[i], focused && selected, i == 0, &style);
-        });
+        button_row(
+            ui,
+            &painter,
+            row,
+            &labels,
+            &mut self.nav.col[0],
+            &mut self.nav.offset[0],
+            &style,
+            |i, r, selected| {
+                if widgets::hit(ui, r.intersect(rect)).any() {
+                    hovered = Some(i);
+                }
+                paint_button(&painter, r, &labels[i], focused && selected, i == 0, &style);
+            },
+        );
         if let Some(i) = hovered {
             self.nav.col[0] = i;
         }
@@ -763,7 +1166,9 @@ impl Screen for EpisodePage {
 /// Opens the right page for a file: the episode's page, the film's page, or (for files not
 /// organised into a show) plays it.
 pub fn open_file(sh: &Shared, library_id: i64, file_id: i64) -> Nav {
-    let show = sh.lib(library_id).and_then(|l| l.catalog()?.show_of_file(file_id));
+    let show = sh
+        .lib(library_id)
+        .and_then(|l| l.catalog()?.show_of_file(file_id));
     match show {
         Some(s) if s.is_series() => Nav::push(EpisodePage::new(library_id, file_id)),
         Some(s) => Nav::push(TitlePage::new(library_id, s.show.id)),
@@ -781,20 +1186,31 @@ pub struct TitleOf {
 
 impl TitleOf {
     pub fn new(library_id: i64, file_id: i64) -> Self {
-        Self { library_id, file_id }
+        Self {
+            library_id,
+            file_id,
+        }
     }
 
     /// The page to show, `Some(None)` if there isn't one, or `None` while still sorting.
     fn resolve(&self, sh: &Shared) -> Option<Option<TitlePage>> {
         let state = sh.lib(self.library_id)?;
         let catalog = state.catalog()?;
-        Some(catalog.show_of_file(self.file_id).map(|s| TitlePage::new(self.library_id, s.show.id)))
+        Some(
+            catalog
+                .show_of_file(self.file_id)
+                .map(|s| TitlePage::new(self.library_id, s.show.id)),
+        )
     }
 }
 
 impl Screen for TitleOf {
     fn handle(&mut self, _sh: &mut Shared, press: Press) -> Nav {
-        if press.is(Action::Back) { Nav::Pop } else { Nav::None }
+        if press.is(Action::Back) {
+            Nav::Pop
+        } else {
+            Nav::None
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, _focused: bool) -> Nav {

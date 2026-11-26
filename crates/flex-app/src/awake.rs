@@ -41,7 +41,9 @@ impl KeepAwake {
 #[cfg(windows)]
 mod imp {
     use super::Need;
-    use windows_sys::Win32::System::Power::{ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState};
+    use windows_sys::Win32::System::Power::{
+        ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
+    };
 
     /// Windows' own setting for media players. It belongs to the thread that set it, which
     /// is always Flex's UI thread.
@@ -49,9 +51,18 @@ mod imp {
 
     impl Hold {
         pub fn new(need: Need) -> Result<Self, String> {
-            let display = if need == Need::Screen { ES_DISPLAY_REQUIRED } else { 0 };
-            let previous = unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | display) };
-            if previous == 0 { Err("Windows refused".into()) } else { Ok(Hold) }
+            let display = if need == Need::Screen {
+                ES_DISPLAY_REQUIRED
+            } else {
+                0
+            };
+            let previous =
+                unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | display) };
+            if previous == 0 {
+                Err("Windows refused".into())
+            } else {
+                Ok(Hold)
+            }
         }
     }
 
@@ -76,7 +87,9 @@ mod imp {
             let mut cmd = command(need);
             // If Flex dies without stopping it, the helper goes too: `caffeinate -w` watches
             // Flex, and `cat` ends when Flex's end of its stdin closes.
-            cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
             let name = cmd.get_program().to_string_lossy().into_owned();
             cmd.spawn().map(Hold).map_err(|e| format!("{name}: {e}"))
         }
@@ -85,16 +98,27 @@ mod imp {
     #[cfg(target_os = "macos")]
     fn command(need: Need) -> Command {
         let mut cmd = Command::new("caffeinate");
-        cmd.arg(if need == Need::Screen { "-di" } else { "-i" }).args(["-w", &std::process::id().to_string()]);
+        cmd.arg(if need == Need::Screen { "-di" } else { "-i" })
+            .args(["-w", &std::process::id().to_string()]);
         cmd
     }
 
     #[cfg(not(target_os = "macos"))]
     fn command(need: Need) -> Command {
         // "idle" also stops logind blanking the screen; music only needs "sleep".
-        let what = if need == Need::Screen { "idle:sleep" } else { "sleep" };
+        let what = if need == Need::Screen {
+            "idle:sleep"
+        } else {
+            "sleep"
+        };
         let mut cmd = Command::new("systemd-inhibit");
-        cmd.args([&format!("--what={what}"), "--who=Flex", "--why=Playing", "--mode=block", "cat"]);
+        cmd.args([
+            &format!("--what={what}"),
+            "--who=Flex",
+            "--why=Playing",
+            "--mode=block",
+            "cat",
+        ]);
         cmd
     }
 

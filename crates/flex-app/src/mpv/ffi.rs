@@ -59,7 +59,8 @@ pub struct RenderParam {
     pub data: *mut c_void,
 }
 
-pub type GetProcAddressFn = unsafe extern "C" fn(ctx: *mut c_void, name: *const c_char) -> *mut c_void;
+pub type GetProcAddressFn =
+    unsafe extern "C" fn(ctx: *mut c_void, name: *const c_char) -> *mut c_void;
 
 #[repr(C)]
 pub struct OpenGlInitParams {
@@ -163,9 +164,17 @@ fn candidates() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os(PATH_ENV) {
         return vec![PathBuf::from(path)];
     }
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from));
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from));
     let mut out = Vec::new();
-    for dir in PREFERRED.get().into_iter().cloned().chain(exe_dir).chain(EXTRA_DIRS.iter().map(PathBuf::from)) {
+    for dir in PREFERRED
+        .get()
+        .into_iter()
+        .cloned()
+        .chain(exe_dir)
+        .chain(EXTRA_DIRS.iter().map(PathBuf::from))
+    {
         out.extend(NAMES.iter().map(|n| dir.join(n)));
     }
     // Bare names last, so the OS search path (PATH / DYLD paths) gets a chance.
@@ -179,7 +188,9 @@ fn candidates() -> Vec<PathBuf> {
 unsafe fn load(path: &std::path::Path) -> Result<Library, libloading::Error> {
     use libloading::os::windows::{LOAD_WITH_ALTERED_SEARCH_PATH, Library as WinLibrary};
     if path.is_absolute() {
-        unsafe { WinLibrary::load_with_flags(path, LOAD_WITH_ALTERED_SEARCH_PATH).map(Library::from) }
+        unsafe {
+            WinLibrary::load_with_flags(path, LOAD_WITH_ALTERED_SEARCH_PATH).map(Library::from)
+        }
     } else {
         unsafe { Library::new(path) }
     }
@@ -207,7 +218,10 @@ pub fn api() -> Result<&'static Api, String> {
                 Err(e) => errors.push(format!("  {}: {e}", path.display())),
             }
         }
-        Err(format!("Could not load libmpv. Tried:\n{}", errors.join("\n")))
+        Err(format!(
+            "Could not load libmpv. Tried:\n{}",
+            errors.join("\n")
+        ))
     })
     .as_ref()
     .map_err(Clone::clone)

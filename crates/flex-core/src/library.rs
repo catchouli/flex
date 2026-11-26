@@ -88,8 +88,8 @@ pub fn join_rel(root: &Path, rel: &str) -> PathBuf {
 }
 
 pub const VIDEO_EXTENSIONS: &[&str] = &[
-    "mkv", "mp4", "m4v", "avi", "mov", "wmv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg", "vob", "ogv",
-    "flv", "3gp", "rmvb", "divx", "iso",
+    "mkv", "mp4", "m4v", "avi", "mov", "wmv", "webm", "ts", "m2ts", "mts", "mpg", "mpeg", "vob",
+    "ogv", "flv", "3gp", "rmvb", "divx", "iso",
 ];
 
 pub fn is_video(path: &Path) -> bool {
@@ -102,7 +102,10 @@ pub fn is_video(path: &Path) -> bool {
 /// ("2 Fast 2 Furious 2003"). Names that already contain spaces are left alone.
 pub fn display_name(name: &str, strip_extension: bool) -> String {
     let stem = if strip_extension {
-        Path::new(name).file_stem().and_then(|s| s.to_str()).unwrap_or(name)
+        Path::new(name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(name)
     } else {
         name
     };
@@ -119,8 +122,14 @@ mod tests {
 
     #[test]
     fn display_names() {
-        assert_eq!(display_name("2.Fast.2.Furious.2003.mkv", true), "2 Fast 2 Furious 2003");
-        assert_eq!(display_name("(CBB) Dorohedoro - 01.mkv", true), "(CBB) Dorohedoro - 01");
+        assert_eq!(
+            display_name("2.Fast.2.Furious.2003.mkv", true),
+            "2 Fast 2 Furious 2003"
+        );
+        assert_eq!(
+            display_name("(CBB) Dorohedoro - 01.mkv", true),
+            "(CBB) Dorohedoro - 01"
+        );
         assert_eq!(display_name("Some_Folder", false), "Some Folder");
     }
 

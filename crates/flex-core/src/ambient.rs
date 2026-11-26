@@ -31,23 +31,36 @@ pub enum Mode {
 /// How much of the picture "Edges" uses, from each side.
 const EDGE_FRACTION: f32 = 0.15;
 
-static TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| std::array::from_fn(|i| srgb_to_linear(i as f32 / 255.0)));
+static TO_LINEAR: LazyLock<[f32; 256]> =
+    LazyLock::new(|| std::array::from_fn(|i| srgb_to_linear(i as f32 / 255.0)));
 
 fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Linear light to sRGB, 0.0–1.0 (e.g. to show a light's colour on screen).
 pub fn linear_to_srgb(c: f32) -> f32 {
     let c = c.clamp(0.0, 1.0);
-    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 impl Grid {
     fn cell(&self, x: usize, y: usize) -> Linear {
         let i = (y * self.width + x) * 4;
         let px = &self.rgba[i..i + 3];
-        [TO_LINEAR[px[0] as usize], TO_LINEAR[px[1] as usize], TO_LINEAR[px[2] as usize]]
+        [
+            TO_LINEAR[px[0] as usize],
+            TO_LINEAR[px[1] as usize],
+            TO_LINEAR[px[2] as usize],
+        ]
     }
 
     fn mean(&self, cells: impl Iterator<Item = (usize, usize)>) -> Linear {
@@ -59,7 +72,11 @@ impl Grid {
             }
             n += 1;
         }
-        if n == 0 { [0.0; 3] } else { sum.map(|s| s / n as f32) }
+        if n == 0 {
+            [0.0; 3]
+        } else {
+            sum.map(|s| s / n as f32)
+        }
     }
 
     /// One colour for the whole strip.
@@ -70,8 +87,13 @@ impl Grid {
             Mode::Edges => {
                 let ex = ((w as f32 * EDGE_FRACTION).ceil() as usize).max(1);
                 let ey = ((h as f32 * EDGE_FRACTION).ceil() as usize).max(1);
-                let edge = move |&(x, y): &(usize, usize)| x < ex || x + ex >= w || y < ey || y + ey >= h;
-                self.mean((0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(edge))
+                let edge =
+                    move |&(x, y): &(usize, usize)| x < ex || x + ex >= w || y < ey || y + ey >= h;
+                self.mean(
+                    (0..h)
+                        .flat_map(|y| (0..w).map(move |x| (x, y)))
+                        .filter(edge),
+                )
             }
         }
     }
@@ -151,7 +173,10 @@ impl Noticeable {
                     (HUE_BUCKETS, GREY_WEIGHT)
                 } else {
                     let turn = (b.atan2(a) / std::f32::consts::TAU).rem_euclid(1.0);
-                    (((turn * HUE_BUCKETS as f32) as usize).min(HUE_BUCKETS - 1), chroma * (0.5 + l))
+                    (
+                        ((turn * HUE_BUCKETS as f32) as usize).min(HUE_BUCKETS - 1),
+                        chroma * (0.5 + l),
+                    )
                 };
                 score[bucket] += weight;
                 for k in 0..3 {
@@ -159,19 +184,33 @@ impl Noticeable {
                 }
             }
         }
-        let (best, best_score) = score.iter().copied().enumerate().fold((0, 0.0), |m, (i, s)| if s > m.1 { (i, s) } else { m });
+        let (best, best_score) = score
+            .iter()
+            .copied()
+            .enumerate()
+            .fold((0, 0.0), |m, (i, s)| if s > m.1 { (i, s) } else { m });
         if best_score <= 0.0 {
             self.current = None;
             return [0.0; 3];
         }
-        let keep = self.current.filter(|&c| score[c] > 0.0 && score[c] * SWITCH_MARGIN >= best_score);
+        let keep = self
+            .current
+            .filter(|&c| score[c] > 0.0 && score[c] * SWITCH_MARGIN >= best_score);
         let chosen = keep.unwrap_or(best);
         self.current = Some(chosen);
         let colour = sum[chosen].map(|v| v / score[chosen]);
         // As bright as the whole picture (so dark scenes stay dim), in the chosen colour.
         let peak = colour.iter().copied().fold(0.0f32, f32::max);
-        let target = grid.average(Mode::Whole).iter().copied().fold(0.0f32, f32::max);
-        if peak <= 0.0 { [0.0; 3] } else { colour.map(|v| v / peak * target) }
+        let target = grid
+            .average(Mode::Whole)
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
+        if peak <= 0.0 {
+            [0.0; 3]
+        } else {
+            colour.map(|v| v / peak * target)
+        }
     }
 }
 
@@ -193,13 +232,20 @@ pub struct Boost {
 
 impl Default for Boost {
     fn default() -> Self {
-        Self { gain: 1.0, perceived: false, dark_cutoff: 0.003 }
+        Self {
+            gain: 1.0,
+            perceived: false,
+            dark_cutoff: 0.003,
+        }
     }
 }
 
 impl Boost {
     pub fn apply(&self, zones: &[Linear]) -> Vec<Linear> {
-        let peak = zones.iter().flat_map(|c| c.iter().copied()).fold(0.0f32, f32::max);
+        let peak = zones
+            .iter()
+            .flat_map(|c| c.iter().copied())
+            .fold(0.0f32, f32::max);
         if peak < self.dark_cutoff {
             return vec![[0.0; 3]; zones.len()];
         }
@@ -207,7 +253,11 @@ impl Boost {
             .iter()
             .map(|c| {
                 let max = c.iter().copied().fold(0.0f32, f32::max);
-                let curve = if self.perceived && max > 0.0 { linear_to_srgb(max) / max } else { 1.0 };
+                let curve = if self.perceived && max > 0.0 {
+                    linear_to_srgb(max) / max
+                } else {
+                    1.0
+                };
                 c.map(|ch| ch * curve * self.gain)
             })
             .collect()
@@ -218,8 +268,14 @@ impl Boost {
 /// brightness (that of the brightest zone). Channels over 1.0 (from a [`Boost`]) are
 /// capped. `saturation`: 1.0 leaves colours alone; more makes them more vivid.
 pub fn to_light(zones: &[Linear], saturation: f32) -> Light {
-    let zones: Vec<Linear> = zones.iter().map(|c| c.map(|ch| ch.clamp(0.0, 1.0))).collect();
-    let value = zones.iter().flat_map(|c| c.iter().copied()).fold(0.0f32, f32::max);
+    let zones: Vec<Linear> = zones
+        .iter()
+        .map(|c| c.map(|ch| ch.clamp(0.0, 1.0)))
+        .collect();
+    let value = zones
+        .iter()
+        .flat_map(|c| c.iter().copied())
+        .fold(0.0f32, f32::max);
     let colours = zones
         .iter()
         .map(|c| {
@@ -231,14 +287,25 @@ pub fn to_light(zones: &[Linear], saturation: f32) -> Light {
             let min = c.iter().copied().fold(1.0f32, f32::min);
             let sat = ((max - min) / max * saturation).clamp(0.0, 1.0);
             let new_min = max * (1.0 - sat);
-            let scale = if max > min { (max - new_min) / (max - min) } else { 0.0 };
+            let scale = if max > min {
+                (max - new_min) / (max - min)
+            } else {
+                0.0
+            };
             c.map(|ch| {
-                let ch = if max > min { max - (max - ch) * scale } else { ch };
+                let ch = if max > min {
+                    max - (max - ch) * scale
+                } else {
+                    ch
+                };
                 (ch / max * 255.0).round().clamp(0.0, 255.0) as u8
             })
         })
         .collect();
-    Light { zones: colours, brightness: value }
+    Light {
+        zones: colours,
+        brightness: value,
+    }
 }
 
 /// Eases colours towards their targets so scene cuts and flicker don't strobe the room.
@@ -267,7 +334,9 @@ impl Smoother {
     /// Whether the colours are (visibly) at `target`.
     pub fn settled(&self, target: &[Linear]) -> bool {
         self.current.len() == target.len()
-            && self.current.iter().zip(target).all(|(c, t)| (0..3).all(|k| (linear_to_srgb(c[k]) - linear_to_srgb(t[k])).abs() < 0.5 / 255.0))
+            && self.current.iter().zip(target).all(|(c, t)| {
+                (0..3).all(|k| (linear_to_srgb(c[k]) - linear_to_srgb(t[k])).abs() < 0.5 / 255.0)
+            })
     }
 
     pub fn current(&self) -> &[Linear] {
@@ -292,7 +361,11 @@ mod tests {
                 rgba.push(255);
             }
         }
-        Grid { width, height, rgba }
+        Grid {
+            width,
+            height,
+            rgba,
+        }
     }
 
     #[test]
@@ -301,12 +374,21 @@ mod tests {
         // naive averaging of the bytes would give a dim 128.
         let g = grid(4, 2, |x, _| if x < 2 { [255, 0, 0] } else { [0, 255, 0] });
         let avg = g.average(Mode::Whole).map(linear_to_srgb);
-        assert!((avg[0] * 255.0 - 188.0).abs() < 2.0 && (avg[1] - avg[0]).abs() < 0.01 && avg[2] == 0.0, "{avg:?}");
+        assert!(
+            (avg[0] * 255.0 - 188.0).abs() < 2.0 && (avg[1] - avg[0]).abs() < 0.01 && avg[2] == 0.0,
+            "{avg:?}"
+        );
     }
 
     #[test]
     fn edges_ignore_the_middle() {
-        let g = grid(32, 18, |x, y| if (8..24).contains(&x) && (5..13).contains(&y) { [255, 255, 255] } else { [0, 0, 255] });
+        let g = grid(32, 18, |x, y| {
+            if (8..24).contains(&x) && (5..13).contains(&y) {
+                [255, 255, 255]
+            } else {
+                [0, 0, 255]
+            }
+        });
         assert_eq!(g.average(Mode::Edges), linear([0, 0, 255]));
         assert!(g.average(Mode::Whole)[0] > 0.1);
     }
@@ -331,7 +413,10 @@ mod tests {
         assert!((l.brightness - 0.5).abs() < 1e-6);
         // Output stays linear: a blueish scene (60, 90, 140 on screen) must stay clearly
         // blue on an LED, not the pale (109, 164, 255) that sRGB values give.
-        assert_eq!(to_light(&[linear([60, 90, 140])], 1.0).zones, vec![[44, 99, 255]]);
+        assert_eq!(
+            to_light(&[linear([60, 90, 140])], 1.0).zones,
+            vec![[44, 99, 255]]
+        );
         // Saturation boost pulls the weakest channel down; grey stays grey.
         assert_eq!(to_light(&[[0.8, 0.4, 0.4]], 2.0).zones, vec![[255, 0, 0]]);
         assert_eq!(to_light(&[[0.3; 3]], 2.0).zones, vec![[255, 255, 255]]);
@@ -342,21 +427,49 @@ mod tests {
     fn boost_brightens_then_washes_out() {
         let blue = linear([60, 90, 140]);
         // Doubling keeps the colour and doubles the light.
-        let double = to_light(&Boost { gain: 2.0, ..Boost::default() }.apply(&[blue]), 1.0);
+        let double = to_light(
+            &Boost {
+                gain: 2.0,
+                ..Boost::default()
+            }
+            .apply(&[blue]),
+            1.0,
+        );
         assert_eq!(double.zones, vec![[44, 99, 255]]);
         assert!((double.brightness - 2.0 * blue[2]).abs() < 1e-5);
         // Far too much: blue caps at full and the others catch up, towards white.
-        let washed = to_light(&Boost { gain: 20.0, ..Boost::default() }.apply(&[blue]), 1.0);
+        let washed = to_light(
+            &Boost {
+                gain: 20.0,
+                ..Boost::default()
+            }
+            .apply(&[blue]),
+            1.0,
+        );
         assert_eq!(washed.brightness, 1.0);
         assert!(washed.zones[0][0] > 150, "{:?}", washed.zones);
         // "How bright it looks": a scene that looks 30% bright drives the light at 30%,
         // not the 7% of its light, and keeps its colour.
-        let looks = Boost { perceived: true, ..Boost::default() };
+        let looks = Boost {
+            perceived: true,
+            ..Boost::default()
+        };
         let grey = to_light(&looks.apply(&[linear([77, 77, 77])]), 1.0);
-        assert!((grey.brightness - 77.0 / 255.0).abs() < 0.01, "{}", grey.brightness);
-        assert_eq!(to_light(&looks.apply(&[blue]), 1.0).zones, vec![[44, 99, 255]]);
+        assert!(
+            (grey.brightness - 77.0 / 255.0).abs() < 0.01,
+            "{}",
+            grey.brightness
+        );
+        assert_eq!(
+            to_light(&looks.apply(&[blue]), 1.0).zones,
+            vec![[44, 99, 255]]
+        );
         // Dark scenes switch off whatever the boost.
-        let lots = Boost { gain: 4.0, perceived: true, ..Boost::default() };
+        let lots = Boost {
+            gain: 4.0,
+            perceived: true,
+            ..Boost::default()
+        };
         assert_eq!(lots.apply(&[linear([8, 8, 8])]), vec![[0.0; 3]]);
         assert!(lots.apply(&[linear([20, 20, 20])])[0][0] > 0.0);
     }
@@ -368,35 +481,72 @@ mod tests {
             b.atan2(a)
         };
         // Half red, half blue: one of them, not the purple an average makes.
-        let split = grid(32, 18, |x, _| if x < 16 { [220, 30, 30] } else { [30, 30, 220] });
+        let split = grid(
+            32,
+            18,
+            |x, _| if x < 16 { [220, 30, 30] } else { [30, 30, 220] },
+        );
         let picked = Noticeable::default().pick(&split);
         let (red, blue) = (hue(linear([220, 30, 30])), hue(linear([30, 30, 220])));
-        assert!((hue(picked) - red).abs() < 0.2 || (hue(picked) - blue).abs() < 0.2, "{picked:?}");
+        assert!(
+            (hue(picked) - red).abs() < 0.2 || (hue(picked) - blue).abs() < 0.2,
+            "{picked:?}"
+        );
         let average = split.average(Mode::Whole);
-        assert!((hue(average) - red).abs() > 0.3 && (hue(average) - blue).abs() > 0.3, "the average is neither");
+        assert!(
+            (hue(average) - red).abs() > 0.3 && (hue(average) - blue).abs() > 0.3,
+            "the average is neither"
+        );
 
         // A small vivid area beats a big grey one.
-        let small = grid(32, 18, |x, y| if x < 6 && y < 4 { [255, 160, 0] } else { [120, 120, 120] });
+        let small = grid(32, 18, |x, y| {
+            if x < 6 && y < 4 {
+                [255, 160, 0]
+            } else {
+                [120, 120, 120]
+            }
+        });
         let picked = Noticeable::default().pick(&small);
         assert!(picked[0] > picked[2] * 3.0, "orange, not grey: {picked:?}");
         // ...at the whole picture's brightness, so it's not suddenly brighter.
-        let target = small.average(Mode::Whole).iter().copied().fold(0.0f32, f32::max);
+        let target = small
+            .average(Mode::Whole)
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
         assert!((picked.iter().copied().fold(0.0f32, f32::max) - target).abs() < 1e-5);
 
         // A speck of colour (1 pixel) doesn't override a grey scene.
-        let speck = Noticeable::default().pick(&grid(32, 18, |x, y| if (x, y) == (3, 3) { [255, 0, 0] } else { [120, 120, 120] }));
+        let speck = Noticeable::default().pick(&grid(32, 18, |x, y| {
+            if (x, y) == (3, 3) {
+                [255, 0, 0]
+            } else {
+                [120, 120, 120]
+            }
+        }));
         assert!((speck[0] - speck[2]).abs() < 1e-4, "grey: {speck:?}");
 
         // All grey: grey. All black: black.
         let grey = Noticeable::default().pick(&grid(8, 8, |_, _| [128, 128, 128]));
         assert!((grey[0] - grey[2]).abs() < 1e-4 && grey[0] > 0.1);
-        assert_eq!(Noticeable::default().pick(&grid(8, 8, |_, _| [0, 0, 0])), [0.0; 3]);
+        assert_eq!(
+            Noticeable::default().pick(&grid(8, 8, |_, _| [0, 0, 0])),
+            [0.0; 3]
+        );
     }
 
     #[test]
     fn noticeable_doesnt_flicker_between_close_colours() {
         let mut pick = Noticeable::default();
-        let mostly_red = |red_cols: usize| grid(32, 18, move |x, _| if x < red_cols { [220, 30, 30] } else { [30, 30, 220] });
+        let mostly_red = |red_cols: usize| {
+            grid(32, 18, move |x, _| {
+                if x < red_cols {
+                    [220, 30, 30]
+                } else {
+                    [30, 30, 220]
+                }
+            })
+        };
         let is_red = |c: Linear| c[0] > c[2];
         assert!(is_red(pick.pick(&mostly_red(20))));
         // Blue edges ahead a little: stays red.

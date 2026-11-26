@@ -112,7 +112,9 @@ pub struct Installed {
 /// release), then `plugins` in the data folder (installed by hand), which wins when both
 /// have the same plugin.
 pub fn plugin_dirs() -> Vec<PathBuf> {
-    let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.join("plugins")));
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("plugins")));
     beside.into_iter().chain([user_plugin_dir()]).collect()
 }
 
@@ -124,11 +126,21 @@ pub fn user_plugin_dir() -> PathBuf {
 pub fn discover(dirs: &[PathBuf]) -> Vec<Installed> {
     let mut found: Vec<Installed> = Vec::new();
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.join("plugin.toml").is_file()).collect();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        let mut entries: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.join("plugin.toml").is_file())
+            .collect();
         entries.sort();
         for dir in entries {
-            let id = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let id = dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             match read_manifest(&dir) {
                 Ok(manifest) => {
                     found.retain(|p| p.id != id);
@@ -151,9 +163,17 @@ fn read_manifest(dir: &Path) -> Result<Manifest> {
 fn program(plugin: &Installed) -> PathBuf {
     let command = &plugin.manifest.command;
     let path = plugin.dir.join(command);
-    let path = if cfg!(windows) && path.extension().is_none() { path.with_extension("exe") } else { path };
+    let path = if cfg!(windows) && path.extension().is_none() {
+        path.with_extension("exe")
+    } else {
+        path
+    };
     let bare = Path::new(command).components().count() == 1;
-    if bare && !path.exists() { PathBuf::from(command) } else { path }
+    if bare && !path.exists() {
+        PathBuf::from(command)
+    } else {
+        path
+    }
 }
 
 /// Messages to one plugin. Light updates aren't queued: only the newest is kept, so a
@@ -274,7 +294,9 @@ impl Plugin {
 
     /// Options for a choice setting: the plugin's own list, else the manifest's.
     pub fn options<'a>(&'a self, spec: &'a SettingSpec) -> &'a [Choice] {
-        self.choices.get(&spec.key).map_or(&spec.options, Vec::as_slice)
+        self.choices
+            .get(&spec.key)
+            .map_or(&spec.options, Vec::as_slice)
     }
 }
 
@@ -308,7 +330,11 @@ pub struct Toast {
 
 impl Toast {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), seconds: None, key: None }
+        Self {
+            text: text.into(),
+            seconds: None,
+            key: None,
+        }
     }
 }
 
@@ -320,7 +346,13 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(60);
 impl Host {
     pub fn new(dirs: &[PathBuf], db: &Db, waker: impl Fn() + Send + Sync + 'static) -> Self {
         let (tx, rx) = channel();
-        let mut host = Self { plugins: Vec::new(), tx, rx, waker: Arc::new(waker), toasts: Vec::new() };
+        let mut host = Self {
+            plugins: Vec::new(),
+            tx,
+            rx,
+            waker: Arc::new(waker),
+            toasts: Vec::new(),
+        };
         host.refresh(dirs, db);
         host
     }
@@ -328,14 +360,23 @@ impl Host {
     /// Looks for newly installed plugins (and forgets removed ones that aren't running).
     pub fn refresh(&mut self, dirs: &[PathBuf], db: &Db) {
         let found = discover(dirs);
-        self.plugins.retain(|p| p.running() || found.iter().any(|f| f.id == p.installed.id));
+        self.plugins
+            .retain(|p| p.running() || found.iter().any(|f| f.id == p.installed.id));
         for installed in found {
-            if let Some(p) = self.plugins.iter_mut().find(|p| p.installed.id == installed.id) {
+            if let Some(p) = self
+                .plugins
+                .iter_mut()
+                .find(|p| p.installed.id == installed.id)
+            {
                 p.installed = installed;
                 continue;
             }
             let id = &installed.id;
-            let enabled = db.setting(&enabled_key(id)).ok().flatten().is_some_and(|v| v == "true");
+            let enabled = db
+                .setting(&enabled_key(id))
+                .ok()
+                .flatten()
+                .is_some_and(|v| v == "true");
             let mut settings: Settings = installed
                 .manifest
                 .settings
@@ -343,10 +384,16 @@ impl Host {
                 .filter_map(|s| Some((s.key.clone(), s.default.clone()?)))
                 .collect();
             let saved = db.setting(&settings_key(id)).ok().flatten();
-            if let Some(Ok(serde_json::Value::Object(saved))) = saved.map(|s| serde_json::from_str(&s)) {
+            if let Some(Ok(serde_json::Value::Object(saved))) =
+                saved.map(|s| serde_json::from_str(&s))
+            {
                 settings.extend(saved);
             }
-            log::info!("plugin {id}: {} ({})", installed.manifest.name, if enabled { "on" } else { "off" });
+            log::info!(
+                "plugin {id}: {} ({})",
+                installed.manifest.name,
+                if enabled { "on" } else { "off" }
+            );
             self.plugins.push(Plugin {
                 installed,
                 enabled,
@@ -367,7 +414,9 @@ impl Host {
 
     /// Whether any running plugin wants screen colours.
     pub fn wants_light(&self) -> bool {
-        self.plugins.iter().any(|p| p.running() && p.subscribes("light"))
+        self.plugins
+            .iter()
+            .any(|p| p.running() && p.subscribes("light"))
     }
 
     /// Sends light to every running `light` subscriber; `make` gives the colours for a
@@ -398,8 +447,13 @@ impl Host {
     }
 
     pub fn set_enabled(&mut self, i: usize, on: bool, db: &Db) {
-        let Some(p) = self.plugins.get_mut(i) else { return };
-        if let Err(e) = db.set_setting(&enabled_key(&p.installed.id), if on { "true" } else { "false" }) {
+        let Some(p) = self.plugins.get_mut(i) else {
+            return;
+        };
+        if let Err(e) = db.set_setting(
+            &enabled_key(&p.installed.id),
+            if on { "true" } else { "false" },
+        ) {
             log::warn!("saving plugin setting: {e:#}");
         }
         p.enabled = on;
@@ -416,18 +470,24 @@ impl Host {
     }
 
     pub fn set_setting(&mut self, i: usize, key: &str, value: serde_json::Value, db: &Db) {
-        let Some(p) = self.plugins.get_mut(i) else { return };
+        let Some(p) = self.plugins.get_mut(i) else {
+            return;
+        };
         p.settings.insert(key.to_owned(), value);
         save_settings(p, db);
         if let Some(process) = &p.process {
-            process.outbox.send(HostMessage::Settings { settings: p.settings.clone() });
+            process.outbox.send(HostMessage::Settings {
+                settings: p.settings.clone(),
+            });
         }
     }
 
     /// A `button` setting was pressed.
     pub fn action(&mut self, i: usize, key: &str) {
         if let Some(process) = self.plugins.get(i).and_then(|p| p.process.as_ref()) {
-            process.outbox.send(HostMessage::Action { id: key.to_owned() });
+            process
+                .outbox
+                .send(HostMessage::Action { id: key.to_owned() });
         }
     }
 
@@ -440,10 +500,18 @@ impl Host {
     /// to call again for a pending restart.
     pub fn poll(&mut self, db: &Db) -> Option<Duration> {
         while let Ok((i, generation, incoming)) = self.rx.try_recv() {
-            let Some(p) = self.plugins.get_mut(i).filter(|p| p.generation == generation) else { continue };
+            let Some(p) = self
+                .plugins
+                .get_mut(i)
+                .filter(|p| p.generation == generation)
+            else {
+                continue;
+            };
             let id = &p.installed.id;
             match incoming {
-                Incoming::Message(PluginMessage::Status { ok, text }) => p.status = Some((ok, text)),
+                Incoming::Message(PluginMessage::Status { ok, text }) => {
+                    p.status = Some((ok, text))
+                }
                 Incoming::Message(PluginMessage::Choices { key, options }) => {
                     p.choices.insert(key, options);
                 }
@@ -454,7 +522,11 @@ impl Host {
                 Incoming::Message(PluginMessage::Toast { text, seconds, key }) => {
                     // Keys are per plugin, so plugins can't clear each other's toasts.
                     let key = key.map(|k| format!("plugin:{id}:{k}"));
-                    let text = if text.is_empty() { text } else { format!("{}: {text}", p.installed.manifest.name) };
+                    let text = if text.is_empty() {
+                        text
+                    } else {
+                        format!("{}: {text}", p.installed.manifest.name)
+                    };
                     self.toasts.push(Toast { text, seconds, key });
                 }
                 Incoming::Message(PluginMessage::Log { level, text }) => {
@@ -468,15 +540,21 @@ impl Host {
                 }
                 Incoming::Message(PluginMessage::Unknown) => {}
                 Incoming::Exited => {
-                    let Some(mut process) = p.process.take() else { continue };
+                    let Some(mut process) = p.process.take() else {
+                        continue;
+                    };
                     let code = process.child.wait().ok().and_then(|s| s.code());
                     log::warn!("plugin {id} exited (code {code:?})");
                     if process.started.elapsed() > HEALTHY_AFTER {
                         p.failures = 0;
                     }
                     p.failures += 1;
-                    let wait = Duration::from_secs(1 << p.failures.min(6)).min(Duration::from_secs(60));
-                    p.status = Some((false, format!("Stopped unexpectedly; restarting in {}s", wait.as_secs())));
+                    let wait =
+                        Duration::from_secs(1 << p.failures.min(6)).min(Duration::from_secs(60));
+                    p.status = Some((
+                        false,
+                        format!("Stopped unexpectedly; restarting in {}s", wait.as_secs()),
+                    ));
                     p.restart_at = p.enabled.then(|| Instant::now() + wait);
                 }
             }
@@ -488,7 +566,11 @@ impl Host {
                 self.start(i);
             }
         }
-        self.plugins.iter().filter_map(|p| p.restart_at.filter(|_| p.process.is_none())).min().map(|t| t.saturating_duration_since(now))
+        self.plugins
+            .iter()
+            .filter_map(|p| p.restart_at.filter(|_| p.process.is_none()))
+            .min()
+            .map(|t| t.saturating_duration_since(now))
     }
 
     fn start(&mut self, i: usize) {
@@ -568,50 +650,70 @@ fn spawn(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd.spawn().with_context(|| format!("running {}", path.display()))?;
-    let (Some(mut stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("running {}", path.display()))?;
+    let (Some(mut stdin), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
         anyhow::bail!("no pipes to the plugin");
     };
     let id = plugin.id.clone();
 
     let outbox = Arc::new(Outbox::default());
-    outbox.send(HostMessage::Hello { api: flex_plugin::API, flex_version: env!("CARGO_PKG_VERSION").to_owned(), settings: settings.clone() });
+    outbox.send(HostMessage::Hello {
+        api: flex_plugin::API,
+        flex_version: env!("CARGO_PKG_VERSION").to_owned(),
+        settings: settings.clone(),
+    });
     let writer = Arc::clone(&outbox);
-    std::thread::Builder::new().name(format!("plugin-{id}-in")).spawn(move || {
-        while let Some(msg) = writer.next() {
-            let Ok(mut line) = serde_json::to_vec(&msg) else { continue };
-            line.push(b'\n');
-            if stdin.write_all(&line).and_then(|()| stdin.flush()).is_err() {
-                break;
+    std::thread::Builder::new()
+        .name(format!("plugin-{id}-in"))
+        .spawn(move || {
+            while let Some(msg) = writer.next() {
+                let Ok(mut line) = serde_json::to_vec(&msg) else {
+                    continue;
+                };
+                line.push(b'\n');
+                if stdin.write_all(&line).and_then(|()| stdin.flush()).is_err() {
+                    break;
+                }
             }
-        }
-    })?;
+        })?;
 
     let log_id = id.clone();
-    std::thread::Builder::new().name(format!("plugin-{id}-err")).spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            log::info!("plugin {log_id}: {line}");
-        }
-    })?;
-
-    std::thread::Builder::new().name(format!("plugin-{id}-out")).spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if line.trim().is_empty() {
-                continue;
+    std::thread::Builder::new()
+        .name(format!("plugin-{id}-err"))
+        .spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                log::info!("plugin {log_id}: {line}");
             }
-            match serde_json::from_str::<PluginMessage>(&line) {
-                Ok(msg) => {
-                    let _ = tx.send((i, generation, Incoming::Message(msg)));
-                    waker();
+        })?;
+
+    std::thread::Builder::new()
+        .name(format!("plugin-{id}-out"))
+        .spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
                 }
-                Err(_) => log::info!("plugin {id}: {line}"),
+                match serde_json::from_str::<PluginMessage>(&line) {
+                    Ok(msg) => {
+                        let _ = tx.send((i, generation, Incoming::Message(msg)));
+                        waker();
+                    }
+                    Err(_) => log::info!("plugin {id}: {line}"),
+                }
             }
-        }
-        let _ = tx.send((i, generation, Incoming::Exited));
-        waker();
-    })?;
+            let _ = tx.send((i, generation, Incoming::Exited));
+            waker();
+        })?;
 
-    Ok(Process { child, outbox, started: Instant::now() })
+    Ok(Process {
+        child,
+        outbox,
+        started: Instant::now(),
+    })
 }
 
 #[cfg(test)]
@@ -660,7 +762,11 @@ mod tests {
         };
         assert_eq!(program(&plugin("here")), dir.join(exe));
         assert_eq!(program(&plugin("python3")), PathBuf::from("python3"));
-        let tool = if cfg!(windows) { "bin/tool.exe" } else { "bin/tool" };
+        let tool = if cfg!(windows) {
+            "bin/tool.exe"
+        } else {
+            "bin/tool"
+        };
         assert_eq!(program(&plugin("bin/tool")), dir.join(tool));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -671,7 +777,11 @@ mod tests {
         for (dir, name) in [("a", "Bundled"), ("b", "Installed")] {
             let p = root.join(dir).join("lights");
             std::fs::create_dir_all(&p).unwrap();
-            std::fs::write(p.join("plugin.toml"), format!("name = \"{name}\"\ncommand = \"x\"")).unwrap();
+            std::fs::write(
+                p.join("plugin.toml"),
+                format!("name = \"{name}\"\ncommand = \"x\""),
+            )
+            .unwrap();
         }
         std::fs::create_dir_all(root.join("a/broken")).unwrap();
         std::fs::write(root.join("a/broken/plugin.toml"), "not toml [").unwrap();
@@ -684,7 +794,10 @@ mod tests {
     #[test]
     fn outbox_keeps_only_the_newest_light() {
         let outbox = Outbox::default();
-        let light = |b| Light { zones: vec![[255, 0, 0]], brightness: b };
+        let light = |b| Light {
+            zones: vec![[255, 0, 0]],
+            brightness: b,
+        };
         outbox.set_light(light(0.1));
         outbox.send(HostMessage::Action { id: "a".into() });
         outbox.set_light(light(0.2));
@@ -707,13 +820,22 @@ mod tests {
                 host.status(true, format!("max {}", settings["max"]));
             }
             fn light(&mut self, host: &flex_plugin::Host, light: &Light) {
-                host.status(true, format!("{} zones at {}", light.zones.len(), light.brightness));
+                host.status(
+                    true,
+                    format!("{} zones at {}", light.zones.len(), light.brightness),
+                );
             }
             fn action(&mut self, host: &flex_plugin::Host, id: &str) {
                 let mut s = Settings::new();
                 s.insert("found".into(), serde_json::json!(id));
                 host.set(s);
-                host.choices("device", vec![Choice { id: "1".into(), label: "Strip".into() }]);
+                host.choices(
+                    "device",
+                    vec![Choice {
+                        id: "1".into(),
+                        label: "Strip".into(),
+                    }],
+                );
             }
         }
         flex_plugin::run(&mut Echo);
@@ -746,20 +868,37 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
         };
-        wait_for(&mut host, "hello", &|p| p.status.as_ref().is_some_and(|s| s.1 == "max 80"));
+        wait_for(&mut host, "hello", &|p| {
+            p.status.as_ref().is_some_and(|s| s.1 == "max 80")
+        });
         assert!(host.wants_light());
-        host.send_light(|zones| Light { zones: vec![[1, 2, 3]; zones], brightness: 0.5 });
-        wait_for(&mut host, "light", &|p| p.status.as_ref().is_some_and(|s| s.1 == "2 zones at 0.5"));
+        host.send_light(|zones| Light {
+            zones: vec![[1, 2, 3]; zones],
+            brightness: 0.5,
+        });
+        wait_for(&mut host, "light", &|p| {
+            p.status.as_ref().is_some_and(|s| s.1 == "2 zones at 0.5")
+        });
         host.action(0, "scan");
-        wait_for(&mut host, "set", &|p| p.settings.get("found").is_some() && p.choices.contains_key("device"));
-        assert!(db.setting("plugin.echo.settings").unwrap().unwrap().contains("\"found\":\"scan\""));
+        wait_for(&mut host, "set", &|p| {
+            p.settings.get("found").is_some() && p.choices.contains_key("device")
+        });
+        assert!(
+            db.setting("plugin.echo.settings")
+                .unwrap()
+                .unwrap()
+                .contains("\"found\":\"scan\"")
+        );
 
         host.set_enabled(0, false, &db);
         assert!(!host.plugins()[0].running() && !host.wants_light());
         // Settings survive a restart of Flex.
         let host = Host::new(std::slice::from_ref(&root), &db, || {});
         assert!(!host.plugins()[0].enabled);
-        assert_eq!(host.plugins()[0].settings["found"], serde_json::json!("scan"));
+        assert_eq!(
+            host.plugins()[0].settings["found"],
+            serde_json::json!("scan")
+        );
         drop(host);
         let _ = std::fs::remove_dir_all(&root);
     }

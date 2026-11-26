@@ -32,7 +32,8 @@ pub fn thumbnail(video_id: &str) -> String {
     format!("https://i.ytimg.com/vi/{video_id}/mqdefault.jpg")
 }
 
-static CHANNEL_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"UC[A-Za-z0-9_-]{22}").expect("valid regex"));
+static CHANNEL_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"UC[A-Za-z0-9_-]{22}").expect("valid regex"));
 
 /// A channel id ("UC" + 22 characters) in a URL or on its own.
 pub fn channel_id(s: &str) -> Option<String> {
@@ -41,7 +42,10 @@ pub fn channel_id(s: &str) -> Option<String> {
 
 /// Fetches a channel's feed: its title and latest videos.
 pub fn fetch_feed(channel_id: &str) -> Result<(String, Vec<FeedVideo>)> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .into();
     let url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
     // The feeds occasionally fail for no reason; one retry covers most of it.
     let mut last_error = None;
@@ -51,13 +55,17 @@ pub fn fetch_feed(channel_id: &str) -> Result<(String, Vec<FeedVideo>)> {
         }
         match agent.get(&url).header("User-Agent", USER_AGENT).call() {
             Ok(mut response) => {
-                let xml = response.body_mut().read_to_string().context("reading the feed")?;
+                let xml = response
+                    .body_mut()
+                    .read_to_string()
+                    .context("reading the feed")?;
                 return parse_feed(&xml, channel_id);
             }
             Err(e) => last_error = Some(e),
         }
     }
-    Err(last_error.expect("tried at least once")).with_context(|| format!("fetching the feed for {channel_id}"))
+    Err(last_error.expect("tried at least once"))
+        .with_context(|| format!("fetching the feed for {channel_id}"))
 }
 
 fn parse_feed(xml: &str, channel_id: &str) -> Result<(String, Vec<FeedVideo>)> {
@@ -77,11 +85,17 @@ fn parse_feed(xml: &str, channel_id: &str) -> Result<(String, Vec<FeedVideo>)> {
                 .find(|c| c.tag_name().name() == "link" && c.attribute("rel") == Some("alternate"))
                 .and_then(|l| l.attribute("href"))
                 .unwrap_or_default();
-            let author = child(entry, "author").map(|a| text(a, "name")).unwrap_or_default();
+            let author = child(entry, "author")
+                .map(|a| text(a, "name"))
+                .unwrap_or_default();
             Some(FeedVideo {
                 title: text(entry, "title"),
                 channel_id: channel_id.to_owned(),
-                channel: if author.is_empty() { channel.clone() } else { author },
+                channel: if author.is_empty() {
+                    channel.clone()
+                } else {
+                    author
+                },
                 published: parse_time(&text(entry, "published")).unwrap_or(0),
                 short: link.contains("/shorts/"),
                 id,
@@ -97,13 +111,24 @@ fn child<'a, 'i>(node: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree:
 
 /// The trimmed text of `node`'s child `name`, or "".
 fn text(node: roxmltree::Node, name: &str) -> String {
-    child(node, name).and_then(|c| c.text()).unwrap_or_default().trim().to_owned()
+    child(node, name)
+        .and_then(|c| c.text())
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
 }
 
 /// "2026-10-01T12:30:00+00:00" (or with "Z") as Unix time.
 fn parse_time(s: &str) -> Option<i64> {
     let num = |range: std::ops::Range<usize>| s.get(range)?.parse::<i64>().ok();
-    let (y, mo, d, h, mi, se) = (num(0..4)?, num(5..7)?, num(8..10)?, num(11..13)?, num(14..16)?, num(17..19)?);
+    let (y, mo, d, h, mi, se) = (
+        num(0..4)?,
+        num(5..7)?,
+        num(8..10)?,
+        num(11..13)?,
+        num(14..16)?,
+        num(17..19)?,
+    );
     // Days from 1970-01-01 (Howard Hinnant's days_from_civil).
     let y = if mo <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
@@ -113,8 +138,15 @@ fn parse_time(s: &str) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
     let mut t = days * 86_400 + h * 3600 + mi * 60 + se;
     // A "+01:00" style offset.
-    let tz = s.get(19..).unwrap_or("").trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
-    if let (Some(sign), Some(oh), Some(om)) = (tz.chars().next(), tz.get(1..3).and_then(|v| v.parse::<i64>().ok()), tz.get(4..6).and_then(|v| v.parse::<i64>().ok())) {
+    let tz = s
+        .get(19..)
+        .unwrap_or("")
+        .trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
+    if let (Some(sign), Some(oh), Some(om)) = (
+        tz.chars().next(),
+        tz.get(1..3).and_then(|v| v.parse::<i64>().ok()),
+        tz.get(4..6).and_then(|v| v.parse::<i64>().ok()),
+    ) {
         let offset = oh * 3600 + om * 60;
         t -= if sign == '-' { -offset } else { offset };
     }
@@ -138,24 +170,47 @@ pub fn parse_subscriptions(text: &str) -> Vec<Subscription> {
         if let Some(id) = id
             && !found.iter().any(|f| f.id == id)
         {
-            found.push(Subscription { id, title: title.trim().to_owned(), focused });
+            found.push(Subscription {
+                id,
+                title: title.trim().to_owned(),
+                focused,
+            });
         }
     };
     let trimmed = text.trim_start_matches('\u{feff}').trim();
     // JSON (NewPipe, FreeTube), possibly one object per line (FreeTube's .db files).
     let values: Vec<serde_json::Value> = match serde_json::from_str(trimmed) {
         Ok(v) => vec![v],
-        Err(_) => trimmed.lines().filter_map(|l| serde_json::from_str(l.trim()).ok()).collect(),
+        Err(_) => trimmed
+            .lines()
+            .filter_map(|l| serde_json::from_str(l.trim()).ok())
+            .collect(),
     };
     for value in &values {
         let lists = match value {
             serde_json::Value::Array(items) => vec![items],
-            other => other.get("subscriptions").and_then(|s| s.as_array()).into_iter().collect(),
+            other => other
+                .get("subscriptions")
+                .and_then(|s| s.as_array())
+                .into_iter()
+                .collect(),
         };
         for item in lists.into_iter().flatten() {
-            let id = ["id", "url", "channelId"].iter().find_map(|k| item.get(*k)?.as_str()).and_then(channel_id);
-            let title = ["name", "title"].iter().find_map(|k| item.get(*k)?.as_str()).unwrap_or_default();
-            add(id, title, item.get("focused").and_then(|f| f.as_bool()).unwrap_or(false));
+            let id = ["id", "url", "channelId"]
+                .iter()
+                .find_map(|k| item.get(*k)?.as_str())
+                .and_then(channel_id);
+            let title = ["name", "title"]
+                .iter()
+                .find_map(|k| item.get(*k)?.as_str())
+                .unwrap_or_default();
+            add(
+                id,
+                title,
+                item.get("focused")
+                    .and_then(|f| f.as_bool())
+                    .unwrap_or(false),
+            );
         }
     }
     if !values.is_empty() {
@@ -165,14 +220,27 @@ pub fn parse_subscriptions(text: &str) -> Vec<Subscription> {
     if trimmed.starts_with('<')
         && let Ok(doc) = roxmltree::Document::parse(trimmed)
     {
-        for outline in doc.descendants().filter(|n| n.tag_name().name() == "outline") {
+        for outline in doc
+            .descendants()
+            .filter(|n| n.tag_name().name() == "outline")
+        {
             let id = outline.attribute("xmlUrl").and_then(channel_id);
-            add(id, outline.attribute("title").or(outline.attribute("text")).unwrap_or_default(), false);
+            add(
+                id,
+                outline
+                    .attribute("title")
+                    .or(outline.attribute("text"))
+                    .unwrap_or_default(),
+                false,
+            );
         }
         return found;
     }
     // Takeout CSV: "Channel Id,Channel Url,Channel Title".
-    for line in trimmed.lines().skip_while(|l| !l.contains("UC") && l.to_ascii_lowercase().starts_with("channel")) {
+    for line in trimmed
+        .lines()
+        .skip_while(|l| !l.contains("UC") && l.to_ascii_lowercase().starts_with("channel"))
+    {
         let fields = csv_fields(line);
         let id = fields.first().and_then(|f| channel_id(f));
         add(id, fields.get(2).map_or("", String::as_str), false);
@@ -243,8 +311,15 @@ fn listed(flat: Flat) -> Vec<Listed> {
             Some(Listed {
                 id,
                 title: e.title.unwrap_or_default(),
-                channel: e.channel.or(e.uploader).or_else(|| flat.channel.clone()).unwrap_or_default(),
-                channel_id: e.channel_id.or_else(|| flat.channel_id.clone()).unwrap_or_default(),
+                channel: e
+                    .channel
+                    .or(e.uploader)
+                    .or_else(|| flat.channel.clone())
+                    .unwrap_or_default(),
+                channel_id: e
+                    .channel_id
+                    .or_else(|| flat.channel_id.clone())
+                    .unwrap_or_default(),
                 duration: e.duration,
                 views: e.view_count,
                 published: None,
@@ -261,10 +336,17 @@ impl Tools {
             cmd.arg("--playlist-items").arg(format!("1:{n}"));
         }
         let _in_use = super::InUse::new();
-        let out = cmd.arg(target).output().with_context(|| format!("running {}", self.yt_dlp.display()))?;
+        let out = cmd
+            .arg(target)
+            .output()
+            .with_context(|| format!("running {}", self.yt_dlp.display()))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
-            let line = err.lines().rev().find(|l| l.starts_with("ERROR")).unwrap_or(err.trim());
+            let line = err
+                .lines()
+                .rev()
+                .find(|l| l.starts_with("ERROR"))
+                .unwrap_or(err.trim());
             bail!("yt-dlp: {}", line.trim_start_matches("ERROR: "));
         }
         serde_json::from_slice(&out.stdout).context("reading yt-dlp's output")
@@ -272,22 +354,40 @@ impl Tools {
 
     /// Searches YouTube for videos.
     pub fn search(&self, query: &str, count: usize) -> Result<Vec<Listed>> {
-        Ok(listed(self.flat(&format!("ytsearch{count}:{query}"), None)?))
+        Ok(listed(
+            self.flat(&format!("ytsearch{count}:{query}"), None)?,
+        ))
     }
 
     /// A channel's id and name from any link to it (an @handle, /channel/, /c/ or /user/
     /// URL, or a video of theirs).
     pub fn channel(&self, url: &str) -> Result<(String, String)> {
         let url = url.trim();
-        let url = if url.starts_with('@') { format!("https://www.youtube.com/{url}") } else { url.to_owned() };
+        let url = if url.starts_with('@') {
+            format!("https://www.youtube.com/{url}")
+        } else {
+            url.to_owned()
+        };
         if let Some(id) = super::video_id(&url) {
             let video = self.flat(&format!("https://www.youtube.com/watch?v={id}"), None)?;
-            let channel_id = video.channel_id.context("yt-dlp didn't say whose video that is")?;
-            return Ok((channel_id, video.channel.or(video.uploader).unwrap_or_default()));
+            let channel_id = video
+                .channel_id
+                .context("yt-dlp didn't say whose video that is")?;
+            return Ok((
+                channel_id,
+                video.channel.or(video.uploader).unwrap_or_default(),
+            ));
         }
         let flat = self.flat(&url, Some(1))?;
-        let id = flat.channel_id.or_else(|| channel_id(&url)).context("that doesn't look like a YouTube channel")?;
-        let name = flat.channel.or(flat.uploader).or(flat.title).unwrap_or_default();
+        let id = flat
+            .channel_id
+            .or_else(|| channel_id(&url))
+            .context("that doesn't look like a YouTube channel")?;
+        let name = flat
+            .channel
+            .or(flat.uploader)
+            .or(flat.title)
+            .unwrap_or_default();
         Ok((id, name.trim_end_matches(" - Videos").to_owned()))
     }
 }
@@ -320,10 +420,20 @@ mod tests {
         let (channel, videos) = parse_feed(FEED, "UCSMOQeBJ2RAnuFungnQOxLg").unwrap();
         assert_eq!(channel, "Blender");
         assert_eq!(videos.len(), 2);
-        assert_eq!((videos[0].id.as_str(), videos[0].title.as_str(), videos[0].short), ("aqz-KE-bpKQ", "Big Buck Bunny", false));
+        assert_eq!(
+            (
+                videos[0].id.as_str(),
+                videos[0].title.as_str(),
+                videos[0].short
+            ),
+            ("aqz-KE-bpKQ", "Big Buck Bunny", false)
+        );
         assert_eq!(videos[0].published, 1_415_628_355);
         assert!(videos[1].short);
-        assert_eq!(videos[1].channel, "Blender", "falls back to the feed's title");
+        assert_eq!(
+            videos[1].channel, "Blender",
+            "falls back to the feed's title"
+        );
         assert_eq!(videos[1].published, 1_790_852_400, "offset applied");
     }
 
@@ -331,7 +441,10 @@ mod tests {
     fn parses_times() {
         assert_eq!(parse_time("1970-01-01T00:00:00+00:00"), Some(0));
         assert_eq!(parse_time("2000-03-01T00:00:00Z"), Some(951_868_800));
-        assert_eq!(parse_time("2026-10-01T11:00:00.123-01:00"), Some(1_790_856_000));
+        assert_eq!(
+            parse_time("2026-10-01T11:00:00.123-01:00"),
+            Some(1_790_856_000)
+        );
         assert_eq!(parse_time("nonsense"), None);
     }
 
@@ -339,31 +452,56 @@ mod tests {
     const B: &str = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
 
     fn sub(id: &str, title: &str) -> Subscription {
-        Subscription { id: id.into(), title: title.into(), focused: false }
+        Subscription {
+            id: id.into(),
+            title: title.into(),
+            focused: false,
+        }
     }
 
     #[test]
     fn imports_focused_channels() {
-        let json = format!(r#"{{"subscriptions":[{{"id":"{A}","name":"Blender","focused":true}},{{"id":"{B}","name":"Google","focused":false}}]}}"#);
-        assert_eq!(parse_subscriptions(&json), vec![Subscription { focused: true, ..sub(A, "Blender") }, sub(B, "Google")]);
+        let json = format!(
+            r#"{{"subscriptions":[{{"id":"{A}","name":"Blender","focused":true}},{{"id":"{B}","name":"Google","focused":false}}]}}"#
+        );
+        assert_eq!(
+            parse_subscriptions(&json),
+            vec![
+                Subscription {
+                    focused: true,
+                    ..sub(A, "Blender")
+                },
+                sub(B, "Google")
+            ]
+        );
     }
 
     #[test]
     fn imports_takeout_csv() {
-        let csv = format!("Channel Id,Channel Url,Channel Title\n{A},http://www.youtube.com/channel/{A},Blender\n{B},http://www.youtube.com/channel/{B},\"Google, for Developers\"\n");
-        assert_eq!(parse_subscriptions(&csv), vec![sub(A, "Blender"), sub(B, "Google, for Developers")]);
+        let csv = format!(
+            "Channel Id,Channel Url,Channel Title\n{A},http://www.youtube.com/channel/{A},Blender\n{B},http://www.youtube.com/channel/{B},\"Google, for Developers\"\n"
+        );
+        assert_eq!(
+            parse_subscriptions(&csv),
+            vec![sub(A, "Blender"), sub(B, "Google, for Developers")]
+        );
     }
 
     #[test]
     fn imports_newpipe_and_freetube() {
-        let newpipe = format!(r#"{{"app_version":"0.27","subscriptions":[{{"service_id":0,"url":"https://www.youtube.com/channel/{A}","name":"Blender"}}]}}"#);
+        let newpipe = format!(
+            r#"{{"app_version":"0.27","subscriptions":[{{"service_id":0,"url":"https://www.youtube.com/channel/{A}","name":"Blender"}}]}}"#
+        );
         assert_eq!(parse_subscriptions(&newpipe), vec![sub(A, "Blender")]);
         // FreeTube's profiles file: one JSON object per line; duplicates across profiles.
         let freetube = format!(
             "{{\"name\":\"All Channels\",\"subscriptions\":[{{\"id\":\"{A}\",\"name\":\"Blender\"}},{{\"id\":\"{B}\",\"name\":\"Google\"}}],\"_id\":\"allChannels\"}}\n\
              {{\"name\":\"Art\",\"subscriptions\":[{{\"id\":\"{A}\",\"name\":\"Blender\"}}],\"_id\":\"x\"}}\n"
         );
-        assert_eq!(parse_subscriptions(&freetube), vec![sub(A, "Blender"), sub(B, "Google")]);
+        assert_eq!(
+            parse_subscriptions(&freetube),
+            vec![sub(A, "Blender"), sub(B, "Google")]
+        );
     }
 
     #[test]
@@ -383,7 +521,10 @@ mod tests {
         .unwrap();
         let got = listed(flat);
         assert_eq!(got.len(), 1);
-        assert_eq!((got[0].id.as_str(), got[0].duration), ("aqz-KE-bpKQ", Some(635.0)));
+        assert_eq!(
+            (got[0].id.as_str(), got[0].duration),
+            ("aqz-KE-bpKQ", Some(635.0))
+        );
     }
 
     /// Real network: `cargo test -p flex-core youtube_online -- --ignored --nocapture`.
@@ -391,11 +532,21 @@ mod tests {
     #[ignore]
     fn youtube_online() {
         let (channel, videos) = fetch_feed(A).unwrap();
-        eprintln!("feed: {channel}, {} videos, newest {:?}", videos.len(), videos.first().map(|v| &v.title));
+        eprintln!(
+            "feed: {channel}, {} videos, newest {:?}",
+            videos.len(),
+            videos.first().map(|v| &v.title)
+        );
         assert!(!videos.is_empty());
         let tools = Tools::find().expect("yt-dlp");
         let results = tools.search("big buck bunny blender", 5).unwrap();
-        eprintln!("search: {:?}", results.iter().map(|r| (&r.title, &r.channel)).collect::<Vec<_>>());
+        eprintln!(
+            "search: {:?}",
+            results
+                .iter()
+                .map(|r| (&r.title, &r.channel))
+                .collect::<Vec<_>>()
+        );
         assert!(!results.is_empty());
         let (id, name) = tools.channel("@BlenderOfficial").unwrap();
         eprintln!("channel: {id} {name}");

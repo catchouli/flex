@@ -5,7 +5,9 @@
 //! With a keyboard: just start typing anywhere to search. There's also a Back button on
 //! screens that have somewhere to go back to.
 
-use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2};
+use eframe::egui::{
+    self, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, TextStyle, Ui, pos2, vec2,
+};
 
 use crate::input::{Action, Press};
 use crate::shared::Shared;
@@ -58,7 +60,9 @@ pub fn focus_text(ctx: &egui::Context) {
 pub fn typed_text(ctx: &egui::Context) -> bool {
     ctx.input(|i| {
         !i.modifiers.command
-            && i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if !t.trim().is_empty()))
+            && i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Text(t) if !t.trim().is_empty()))
     })
 }
 
@@ -66,12 +70,23 @@ impl TopBar {
     /// The items in d-pad order (left to right).
     fn items(&self) -> Vec<Item> {
         let back = self.can_go_back.then_some(Item::Back);
-        [Some(Item::Search), back, Some(Item::Fullscreen), Some(Item::Settings)].into_iter().flatten().collect()
+        [
+            Some(Item::Search),
+            back,
+            Some(Item::Fullscreen),
+            Some(Item::Settings),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 
     pub fn handle(&mut self, ctx: &egui::Context, press: Press) -> Event {
         let items = self.items();
-        let i = items.iter().position(|it| Some(*it) == self.focus).unwrap_or(0);
+        let i = items
+            .iter()
+            .position(|it| Some(*it) == self.focus)
+            .unwrap_or(0);
         match press.action {
             Action::Left => self.focus = Some(items[i.saturating_sub(1)]),
             Action::Right => self.focus = Some(items[(i + 1).min(items.len() - 1)]),
@@ -97,8 +112,17 @@ impl TopBar {
             self.focus = Some(Item::Fullscreen);
         }
         let painter = ui.painter().clone();
-        let (heading, small) = (TextStyle::Heading.resolve(ui.style()), TextStyle::Small.resolve(ui.style()));
-        let name = painter.text(rect.left_center(), Align2::LEFT_CENTER, "Flex", heading.clone(), theme::highlight());
+        let (heading, small) = (
+            TextStyle::Heading.resolve(ui.style()),
+            TextStyle::Small.resolve(ui.style()),
+        );
+        let name = painter.text(
+            rect.left_center(),
+            Align2::LEFT_CENTER,
+            "Flex",
+            heading.clone(),
+            theme::highlight(),
+        );
         // The version beside the name, smaller and dimmer, on the same baseline (fonts
         // descend about a fifth of their size below it).
         let baseline = name.bottom() - heading.size * 0.2;
@@ -111,7 +135,8 @@ impl TopBar {
         );
 
         let search_left = (rect.left() + 170.0).max(version.right() + 36.0);
-        let search_rect = Rect::from_min_size(pos2(search_left, rect.center().y - 30.0), vec2(700.0, 60.0));
+        let search_rect =
+            Rect::from_min_size(pos2(search_left, rect.center().y - 30.0), vec2(700.0, 60.0));
         // A panel in the theme's style, with the text box on it.
         theme::paint_panel(&painter, search_rect, false, false);
         let edit = egui::TextEdit::singleline(&mut sh.search_query)
@@ -121,7 +146,12 @@ impl TopBar {
             .font(TextStyle::Body)
             .desired_width(search_rect.width());
         let had_focus = std::mem::replace(&mut self.text_focused_last, false);
-        let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+        let (enter, escape) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
         let response = ui.put(search_rect, edit);
         self.text_focused_last = response.has_focus();
 
@@ -139,29 +169,68 @@ impl TopBar {
                 event = Event::FocusContent;
             }
         } else if self.focus == Some(Item::Search) {
-            painter.rect_stroke(search_rect, CornerRadius::same(6), Stroke::new(3.0, theme::accent()), StrokeKind::Outside);
+            painter.rect_stroke(
+                search_rect,
+                CornerRadius::same(6),
+                Stroke::new(3.0, theme::accent()),
+                StrokeKind::Outside,
+            );
         }
         if response.lost_focus() && enter {
             self.focus = None;
             event = Event::Submit;
         }
 
-        let settings_rect = Rect::from_min_size(pos2(rect.right() - 220.0, rect.center().y - 30.0), vec2(220.0, 60.0));
-        widgets::button(&painter, settings_rect, "Settings", self.focus == Some(Item::Settings), ui.style());
-        if ui.interact(settings_rect, egui::Id::new("flex-settings"), Sense::click()).clicked() {
+        let settings_rect = Rect::from_min_size(
+            pos2(rect.right() - 220.0, rect.center().y - 30.0),
+            vec2(220.0, 60.0),
+        );
+        widgets::button(
+            &painter,
+            settings_rect,
+            "Settings",
+            self.focus == Some(Item::Settings),
+            ui.style(),
+        );
+        if ui
+            .interact(
+                settings_rect,
+                egui::Id::new("flex-settings"),
+                Sense::click(),
+            )
+            .clicked()
+        {
             event = Event::OpenSettings;
         }
         let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen).unwrap_or(false);
         let fs_rect = settings_rect.translate(vec2(-settings_rect.width() - 20.0, 0.0));
         let fs_label = if fullscreen { "Windowed" } else { "Fullscreen" };
-        widgets::button(&painter, fs_rect, fs_label, self.focus == Some(Item::Fullscreen), ui.style());
-        if ui.interact(fs_rect, egui::Id::new("flex-fullscreen"), Sense::click()).clicked() {
+        widgets::button(
+            &painter,
+            fs_rect,
+            fs_label,
+            self.focus == Some(Item::Fullscreen),
+            ui.style(),
+        );
+        if ui
+            .interact(fs_rect, egui::Id::new("flex-fullscreen"), Sense::click())
+            .clicked()
+        {
             event = Event::ToggleFullscreen;
         }
         if can_go_back {
-            let back_rect = Rect::from_min_size(fs_rect.min - vec2(160.0 + 20.0, 0.0), vec2(160.0, fs_rect.height()));
+            let back_rect = Rect::from_min_size(
+                fs_rect.min - vec2(160.0 + 20.0, 0.0),
+                vec2(160.0, fs_rect.height()),
+            );
             let back = ui.interact(back_rect, egui::Id::new("flex-back"), Sense::click());
-            widgets::button(&painter, back_rect, "‹ Back", back.hovered() || self.focus == Some(Item::Back), ui.style());
+            widgets::button(
+                &painter,
+                back_rect,
+                "‹ Back",
+                back.hovered() || self.focus == Some(Item::Back),
+                ui.style(),
+            );
             if back.clicked() {
                 event = Event::Back;
             }

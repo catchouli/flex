@@ -31,7 +31,10 @@ fn main() -> anyhow::Result<()> {
         files.sort();
         println!("== {top}  ({} files)", files.len());
         show("folder", &hunch::hunch(&top));
-        let names: Vec<&str> = files.iter().map(|p| p.rsplit('/').next().unwrap_or(p)).collect();
+        let names: Vec<&str> = files
+            .iter()
+            .map(|p| p.rsplit('/').next().unwrap_or(p))
+            .collect();
         for path in files.iter().take(2) {
             let name = path.rsplit('/').next().unwrap_or(path);
             println!("  file   {path}");

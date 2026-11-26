@@ -13,7 +13,10 @@ use eframe::egui;
 pub enum Event {
     FileLoaded,
     /// Playback finished; `error` is set if the file failed to play.
-    EndFile { eof: bool, error: Option<String> },
+    EndFile {
+        eof: bool,
+        error: Option<String>,
+    },
     Shutdown,
 }
 
@@ -44,7 +47,14 @@ impl Mpv {
             ("vo", "libmpv"),
             // Windows: decoding on the GPU but copying frames back avoids the D3D11→OpenGL
             // hand-over, which glitches on some GPUs (seen as blocky artefacts on motion).
-            ("hwdec", if cfg!(windows) { "auto-copy-safe" } else { "auto-safe" }),
+            (
+                "hwdec",
+                if cfg!(windows) {
+                    "auto-copy-safe"
+                } else {
+                    "auto-safe"
+                },
+            ),
             // Time video to the display's refresh, resampling audio slightly to match:
             // smoother motion than timing by the audio clock alone.
             ("video-sync", "display-resample"),
@@ -60,14 +70,25 @@ impl Mpv {
         let options: Vec<(&str, &str)> = defaults.iter().chain(options).copied().collect();
         let mut mpv = Self::create(&options)?;
         mpv.wakeup_ctx = Box::into_raw(Box::new(egui_ctx.clone()));
-        unsafe { (mpv.api.mpv_set_wakeup_callback)(mpv.handle, Some(request_repaint), mpv.wakeup_ctx.cast()) };
+        unsafe {
+            (mpv.api.mpv_set_wakeup_callback)(
+                mpv.handle,
+                Some(request_repaint),
+                mpv.wakeup_ctx.cast(),
+            )
+        };
         Ok(mpv)
     }
 
     /// A player with no window or wakeups, for background work (screenshots): events are
     /// read with [`Mpv::wait_event`].
     pub fn headless(options: &[(&str, &str)]) -> Result<Self> {
-        let defaults = [("config", "no"), ("terminal", "no"), ("idle", "yes"), ("input-default-bindings", "no")];
+        let defaults = [
+            ("config", "no"),
+            ("terminal", "no"),
+            ("idle", "yes"),
+            ("input-default-bindings", "no"),
+        ];
         let options: Vec<(&str, &str)> = defaults.iter().chain(options).copied().collect();
         Self::create(&options)
     }
@@ -76,13 +97,21 @@ impl Mpv {
         let api = ffi::api().map_err(|e| anyhow!(e))?;
         let version = unsafe { (api.mpv_client_api_version)() };
         if version >> 16 != 2 {
-            bail!("unsupported libmpv client API version {}.{}", version >> 16, version & 0xffff);
+            bail!(
+                "unsupported libmpv client API version {}.{}",
+                version >> 16,
+                version & 0xffff
+            );
         }
         let handle = unsafe { (api.mpv_create)() };
         if handle.is_null() {
             bail!("mpv_create failed");
         }
-        let mpv = Self { api, handle, wakeup_ctx: ptr::null_mut() };
+        let mpv = Self {
+            api,
+            handle,
+            wakeup_ctx: ptr::null_mut(),
+        };
         for (k, v) in options {
             mpv.set_option(k, v)?;
         }
@@ -123,9 +152,15 @@ impl Mpv {
     pub fn load(&self, path: &std::path::Path) -> Result<()> {
         use flex_core::disc::{DiscImage, disc_image, dvd_main_title};
         let disc = if path.is_dir() {
-            let bluray = path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("BDMV"));
+            let bluray = path
+                .file_name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("BDMV"));
             // libbluray wants the folder that contains `BDMV`.
-            Some(if bluray { (DiscImage::Bluray, path.parent().unwrap_or(path)) } else { (DiscImage::Dvd, path) })
+            Some(if bluray {
+                (DiscImage::Bluray, path.parent().unwrap_or(path))
+            } else {
+                (DiscImage::Dvd, path)
+            })
         } else {
             disc_image(path).map(|kind| (kind, path))
         };
@@ -140,7 +175,12 @@ impl Mpv {
                 "dvd://".to_owned()
             }
             Some((DiscImage::Dvd, image)) => match dvd_main_title(image) {
-                Some(range) => format!("slice://{}-{}@{}", range.start, range.end, image.to_string_lossy()),
+                Some(range) => format!(
+                    "slice://{}-{}@{}",
+                    range.start,
+                    range.end,
+                    image.to_string_lossy()
+                ),
                 None => image.to_string_lossy().into_owned(),
             },
         };
@@ -148,14 +188,20 @@ impl Mpv {
     }
 
     fn has_protocol(&self, name: &str) -> bool {
-        self.get_string("protocol-list").is_some_and(|list| list.split(',').any(|p| p == name))
+        self.get_string("protocol-list")
+            .is_some_and(|list| list.split(',').any(|p| p == name))
     }
 
     pub fn set_string(&self, name: &str, value: &str) -> Result<()> {
         let value = cstr(value);
         let mut ptr = value.as_ptr();
         let code = unsafe {
-            (self.api.mpv_set_property)(self.handle, cstr(name).as_ptr(), ffi::FORMAT_STRING, (&raw mut ptr).cast())
+            (self.api.mpv_set_property)(
+                self.handle,
+                cstr(name).as_ptr(),
+                ffi::FORMAT_STRING,
+                (&raw mut ptr).cast(),
+            )
         };
         self.check(code, &format!("set {name}"))
     }
@@ -163,7 +209,12 @@ impl Mpv {
     pub fn set_flag(&self, name: &str, value: bool) -> Result<()> {
         let mut v: c_int = value.into();
         let code = unsafe {
-            (self.api.mpv_set_property)(self.handle, cstr(name).as_ptr(), ffi::FORMAT_FLAG, (&raw mut v).cast())
+            (self.api.mpv_set_property)(
+                self.handle,
+                cstr(name).as_ptr(),
+                ffi::FORMAT_FLAG,
+                (&raw mut v).cast(),
+            )
         };
         self.check(code, &format!("set {name}"))
     }
@@ -171,7 +222,12 @@ impl Mpv {
     fn get_raw<T: Default>(&self, name: &str, format: c_int) -> Option<T> {
         let mut out = T::default();
         let code = unsafe {
-            (self.api.mpv_get_property)(self.handle, cstr(name).as_ptr(), format, (&raw mut out).cast())
+            (self.api.mpv_get_property)(
+                self.handle,
+                cstr(name).as_ptr(),
+                format,
+                (&raw mut out).cast(),
+            )
         };
         (code >= 0).then_some(out)
     }
@@ -185,18 +241,26 @@ impl Mpv {
     }
 
     pub fn get_flag(&self, name: &str) -> Option<bool> {
-        self.get_raw::<c_int>(name, ffi::FORMAT_FLAG).map(|v| v != 0)
+        self.get_raw::<c_int>(name, ffi::FORMAT_FLAG)
+            .map(|v| v != 0)
     }
 
     pub fn get_string(&self, name: &str) -> Option<String> {
         let mut out: *mut c_char = ptr::null_mut();
         let code = unsafe {
-            (self.api.mpv_get_property)(self.handle, cstr(name).as_ptr(), ffi::FORMAT_STRING, (&raw mut out).cast())
+            (self.api.mpv_get_property)(
+                self.handle,
+                cstr(name).as_ptr(),
+                ffi::FORMAT_STRING,
+                (&raw mut out).cast(),
+            )
         };
         if code < 0 || out.is_null() {
             return None;
         }
-        let s = unsafe { CStr::from_ptr(out) }.to_string_lossy().into_owned();
+        let s = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
         unsafe { (self.api.mpv_free)(out.cast()) };
         Some(s)
     }
@@ -218,7 +282,9 @@ impl Mpv {
     pub fn wait_event(&self, timeout: f64) -> Option<Event> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout);
         loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+            let left = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_secs_f64();
             match self.next_event(left)? {
                 Some(e) => return Some(e),
                 None if left <= 0.0 => return None,
@@ -241,12 +307,19 @@ impl Mpv {
                     let msg = unsafe { CStr::from_ptr((self.api.mpv_error_string)(data.error)) };
                     msg.to_string_lossy().into_owned()
                 });
-                Some(Event::EndFile { eof: data.reason == ffi::END_FILE_REASON_EOF, error })
+                Some(Event::EndFile {
+                    eof: data.reason == ffi::END_FILE_REASON_EOF,
+                    error,
+                })
             }
             ffi::EVENT_LOG_MESSAGE => {
                 let m = unsafe { &*(ev.data as *const ffi::EventLogMessage) };
                 let (prefix, text) = unsafe { (CStr::from_ptr(m.prefix), CStr::from_ptr(m.text)) };
-                log::warn!("mpv[{}] {}", prefix.to_string_lossy(), text.to_string_lossy().trim_end());
+                log::warn!(
+                    "mpv[{}] {}",
+                    prefix.to_string_lossy(),
+                    text.to_string_lossy().trim_end()
+                );
                 None
             }
             _ => None,
@@ -290,7 +363,11 @@ unsafe impl Send for Renderer {}
 unsafe impl Sync for Renderer {}
 
 impl Renderer {
-    pub fn new(mpv: Arc<Mpv>, proc_address: GetProcAddress, egui_ctx: &egui::Context) -> Result<Self> {
+    pub fn new(
+        mpv: Arc<Mpv>,
+        proc_address: GetProcAddress,
+        egui_ctx: &egui::Context,
+    ) -> Result<Self> {
         let api = mpv.api;
         let proc_address = Box::new(proc_address);
         let mut init = ffi::OpenGlInitParams {
@@ -298,17 +375,38 @@ impl Renderer {
             get_proc_address_ctx: (&raw const *proc_address).cast_mut().cast(),
         };
         let mut params = [
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_API_TYPE, data: c"opengl".as_ptr().cast_mut().cast() },
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_OPENGL_INIT_PARAMS, data: (&raw mut init).cast() },
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_INVALID, data: ptr::null_mut() },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_API_TYPE,
+                data: c"opengl".as_ptr().cast_mut().cast(),
+            },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_OPENGL_INIT_PARAMS,
+                data: (&raw mut init).cast(),
+            },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         let mut ctx = ptr::null_mut();
-        let code = unsafe { (api.mpv_render_context_create)(&mut ctx, mpv.handle, params.as_mut_ptr()) };
+        let code =
+            unsafe { (api.mpv_render_context_create)(&mut ctx, mpv.handle, params.as_mut_ptr()) };
         mpv.check(code, "render context create")?;
 
         let update_ctx = Box::into_raw(Box::new(egui_ctx.clone()));
-        unsafe { (api.mpv_render_context_set_update_callback)(ctx, Some(request_repaint), update_ctx.cast()) };
-        Ok(Self { ctx, mpv, _proc_address: proc_address, update_ctx })
+        unsafe {
+            (api.mpv_render_context_set_update_callback)(
+                ctx,
+                Some(request_repaint),
+                update_ctx.cast(),
+            )
+        };
+        Ok(Self {
+            ctx,
+            mpv,
+            _proc_address: proc_address,
+            update_ctx,
+        })
     }
 
     /// Renders the current video frame to framebuffer `fbo` (0 = default) of size `w`×`h` pixels.
@@ -319,12 +417,26 @@ impl Renderer {
     pub fn render(&self, fbo: i32, w: i32, h: i32, flip_y: bool) {
         let api = self.mpv.api;
         unsafe { (api.mpv_render_context_report_swap)(self.ctx) };
-        let mut target = ffi::OpenGlFbo { fbo, w, h, internal_format: 0 };
+        let mut target = ffi::OpenGlFbo {
+            fbo,
+            w,
+            h,
+            internal_format: 0,
+        };
         let mut flip: c_int = flip_y.into();
         let mut params = [
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_OPENGL_FBO, data: (&raw mut target).cast() },
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_FLIP_Y, data: (&raw mut flip).cast() },
-            ffi::RenderParam { kind: ffi::RENDER_PARAM_INVALID, data: ptr::null_mut() },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_OPENGL_FBO,
+                data: (&raw mut target).cast(),
+            },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_FLIP_Y,
+                data: (&raw mut flip).cast(),
+            },
+            ffi::RenderParam {
+                kind: ffi::RENDER_PARAM_INVALID,
+                data: ptr::null_mut(),
+            },
         ];
         unsafe {
             (api.mpv_render_context_update)(self.ctx);
@@ -361,7 +473,13 @@ mod tests {
         assert!(matches!(mpv.wait_event(10.0), Some(Event::FileLoaded)));
         let count = mpv.get_i64("chapter-list/count").unwrap_or(0);
         let chapters: Vec<(f64, String)> = (0..count)
-            .filter_map(|i| Some((mpv.get_f64(&format!("chapter-list/{i}/time"))?, mpv.get_string(&format!("chapter-list/{i}/title")).unwrap_or_default())))
+            .filter_map(|i| {
+                Some((
+                    mpv.get_f64(&format!("chapter-list/{i}/time"))?,
+                    mpv.get_string(&format!("chapter-list/{i}/title"))
+                        .unwrap_or_default(),
+                ))
+            })
             .collect();
         eprintln!("chapters: {chapters:?}");
         let skips = flex_core::skip::find(&chapters, mpv.get_f64("duration"));
@@ -379,23 +497,46 @@ mod tests {
         let ffmpeg = "ffmpeg";
         let video = std::env::temp_dir().join(format!("flex-seek-{}.mkv", std::process::id()));
         let made = std::process::Command::new(ffmpeg)
-            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=100:rate=10:size=160x90"])
+            .args([
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=duration=100:rate=10:size=160x90",
+            ])
             .arg(&video)
             .status()
             .unwrap();
         assert!(made.success());
-        let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("pause", "yes"), ("hr-seek", "yes")]).unwrap();
-        mpv.command(&["loadfile", &video.to_string_lossy()]).unwrap();
+        let mpv = Mpv::headless(&[
+            ("vo", "null"),
+            ("ao", "null"),
+            ("pause", "yes"),
+            ("hr-seek", "yes"),
+        ])
+        .unwrap();
+        mpv.command(&["loadfile", &video.to_string_lossy()])
+            .unwrap();
         assert!(matches!(mpv.wait_event(10.0), Some(Event::FileLoaded)));
         for (n, expected) in [(7, 70.0), (0, 0.0), (9, 90.0)] {
-            mpv.command(&["seek", &(n * 10).to_string(), "absolute-percent"]).unwrap();
+            mpv.command(&["seek", &(n * 10).to_string(), "absolute-percent"])
+                .unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 let _ = mpv.poll_events();
-                if mpv.get_f64("time-pos").is_some_and(|p| (p - expected).abs() < 0.5) {
+                if mpv
+                    .get_f64("time-pos")
+                    .is_some_and(|p| (p - expected).abs() < 0.5)
+                {
                     break;
                 }
-                assert!(Instant::now() < deadline, "{n}: at {:?}, wanted {expected}", mpv.get_f64("time-pos"));
+                assert!(
+                    Instant::now() < deadline,
+                    "{n}: at {:?}, wanted {expected}",
+                    mpv.get_f64("time-pos")
+                );
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -408,15 +549,22 @@ mod tests {
     #[ignore]
     fn plays_youtube() {
         let _ = env_logger::builder().is_test(true).try_init();
-        let tools = flex_core::youtube::Tools::find().expect("yt-dlp in the tools folder or on the PATH");
+        let tools =
+            flex_core::youtube::Tools::find().expect("yt-dlp in the tools folder or on the PATH");
         let started = Instant::now();
         let video = tools.resolve("aqz-KE-bpKQ", 1080, false).unwrap();
-        eprintln!("resolved in {:?}: {} ({:?}p)", started.elapsed(), video.title, video.height);
+        eprintln!(
+            "resolved in {:?}: {} ({:?}p)",
+            started.elapsed(),
+            video.title,
+            video.height
+        );
 
         let mpv = Mpv::headless(&[("vo", "null"), ("ao", "null"), ("hwdec", "no")]).unwrap();
         let loading = Instant::now();
         // Through the relay, as the player does.
-        mpv.command(&["loadfile", &video.relayed_mpv_url()]).unwrap();
+        mpv.command(&["loadfile", &video.relayed_mpv_url()])
+            .unwrap();
         match mpv.wait_event(30.0) {
             Some(Event::FileLoaded) => {}
             Some(Event::EndFile { error, .. }) => panic!("didn't play: {error:?}"),
@@ -424,9 +572,14 @@ mod tests {
         }
         eprintln!("loaded in {:?}", loading.elapsed());
         let count = mpv.get_i64("track-list/count").unwrap_or(0);
-        let kinds: Vec<String> = (0..count).filter_map(|i| mpv.get_string(&format!("track-list/{i}/type"))).collect();
+        let kinds: Vec<String> = (0..count)
+            .filter_map(|i| mpv.get_string(&format!("track-list/{i}/type")))
+            .collect();
         eprintln!("tracks: {kinds:?}, duration {:?}", mpv.get_f64("duration"));
-        assert!(kinds.iter().any(|k| k == "video") && kinds.iter().any(|k| k == "audio"), "{kinds:?}");
+        assert!(
+            kinds.iter().any(|k| k == "video") && kinds.iter().any(|k| k == "audio"),
+            "{kinds:?}"
+        );
 
         let wait_for = |what: &str, done: &dyn Fn(f64) -> bool| {
             let deadline = Instant::now() + Duration::from_secs(30);
@@ -457,8 +610,14 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         };
-        eprintln!("played to {pos:.1}s in {:?} with {stalls} stalls", t.elapsed());
-        assert!(pos >= 17.0 && stalls == 0, "buffering: {stalls} stalls, reached {pos:.1}s");
+        eprintln!(
+            "played to {pos:.1}s in {:?} with {stalls} stalls",
+            t.elapsed()
+        );
+        assert!(
+            pos >= 17.0 && stalls == 0,
+            "buffering: {stalls} stalls, reached {pos:.1}s"
+        );
         let t = Instant::now();
         mpv.command(&["seek", "300", "absolute"]).unwrap();
         let pos = wait_for("seek", &|p| p >= 300.0);

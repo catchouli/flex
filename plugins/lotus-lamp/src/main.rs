@@ -31,9 +31,19 @@ struct Config {
 impl Config {
     fn from(settings: &Settings) -> Self {
         Self {
-            device: settings.get("device").and_then(Value::as_str).unwrap_or_default().to_owned(),
-            max_brightness: settings.get("max_brightness").and_then(Value::as_u64).map_or(100, |b| b.clamp(1, 100) as u8),
-            off_on_exit: settings.get("off_on_exit").and_then(Value::as_bool).unwrap_or(true),
+            device: settings
+                .get("device")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            max_brightness: settings
+                .get("max_brightness")
+                .and_then(Value::as_u64)
+                .map_or(100, |b| b.clamp(1, 100) as u8),
+            off_on_exit: settings
+                .get("off_on_exit")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
         }
     }
 }
@@ -49,13 +59,24 @@ struct Lamp {
 impl Plugin for Lamp {
     fn hello(&mut self, host: &Host, settings: &Settings) {
         let config = Config::from(settings);
-        let mut options = vec![Choice { id: String::new(), label: "The first one found".into() }];
+        let mut options = vec![Choice {
+            id: String::new(),
+            label: "The first one found".into(),
+        }];
         if !config.device.is_empty() {
-            options.push(Choice { id: config.device.clone(), label: "The strip used last time".into() });
+            options.push(Choice {
+                id: config.device.clone(),
+                label: "The strip used last time".into(),
+            });
         }
         host.choices("device", options);
         self.config.send_replace(Some(config));
-        let (host, config, light, stop) = (host.clone(), self.config.subscribe(), self.light.subscribe(), self.stop.subscribe());
+        let (host, config, light, stop) = (
+            host.clone(),
+            self.config.subscribe(),
+            self.light.subscribe(),
+            self.stop.subscribe(),
+        );
         self.task = Some(self.rt.spawn(drive(host, config, light, stop)));
     }
 
@@ -71,19 +92,37 @@ impl Plugin for Lamp {
         if id != "find" {
             return;
         }
-        let (host, current) = (host.clone(), self.config.borrow().as_ref().map(|c| c.device.clone()).unwrap_or_default());
+        let (host, current) = (
+            host.clone(),
+            self.config
+                .borrow()
+                .as_ref()
+                .map(|c| c.device.clone())
+                .unwrap_or_default(),
+        );
         self.rt.spawn(async move {
             host.toast("Looking for LED strips…");
             match LedStrip::discover(FIND).await {
                 Ok(found) => {
-                    let mut options = vec![Choice { id: String::new(), label: "The first one found".into() }];
+                    let mut options = vec![Choice {
+                        id: String::new(),
+                        label: "The first one found".into(),
+                    }];
                     for s in &found {
-                        let rssi = s.rssi.map_or(String::new(), |r| format!(", signal {r} dBm"));
-                        options.push(Choice { id: s.id.clone(), label: format!("{} ({}{rssi})", s.name, short(&s.id)) });
+                        let rssi = s
+                            .rssi
+                            .map_or(String::new(), |r| format!(", signal {r} dBm"));
+                        options.push(Choice {
+                            id: s.id.clone(),
+                            label: format!("{} ({}{rssi})", s.name, short(&s.id)),
+                        });
                     }
                     // A connected strip stops advertising, so it may not be in the list.
                     if !current.is_empty() && !found.iter().any(|s| s.matches(&current)) {
-                        options.push(Choice { id: current.clone(), label: format!("Connected strip ({})", short(&current)) });
+                        options.push(Choice {
+                            id: current.clone(),
+                            label: format!("Connected strip ({})", short(&current)),
+                        });
                     }
                     host.toast(match found.len() {
                         0 => "No other strips found (a connected strip doesn't show up)".to_owned(),
@@ -100,7 +139,9 @@ impl Plugin for Lamp {
     fn shutdown(&mut self, _host: &Host) {
         self.stop.send_replace(true);
         if let Some(task) = self.task.take() {
-            let _ = self.rt.block_on(async { tokio::time::timeout(Duration::from_millis(1500), task).await });
+            let _ = self
+                .rt
+                .block_on(async { tokio::time::timeout(Duration::from_millis(1500), task).await });
         }
     }
 }
@@ -120,7 +161,9 @@ async fn drive(
 ) {
     let mut retry = Duration::from_secs(2);
     while !*stop.borrow() {
-        let Some(cfg) = config.borrow_and_update().clone() else { return };
+        let Some(cfg) = config.borrow_and_update().clone() else {
+            return;
+        };
         host.status(true, "Looking for the strip…");
         let strip = tokio::select! {
             r = connect(&cfg.device) => r,
@@ -224,8 +267,15 @@ async fn run_connected(
                 continue;
             }
         }
-        let Some(l) = light.borrow_and_update().clone() else { continue };
-        let [r, g, b] = l.zones.first().copied().unwrap_or_default().map(|c| (f32::from(c) * l.brightness.clamp(0.0, 1.0)).round() as u8);
+        let Some(l) = light.borrow_and_update().clone() else {
+            continue;
+        };
+        let [r, g, b] = l
+            .zones
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .map(|c| (f32::from(c) * l.brightness.clamp(0.0, 1.0)).round() as u8);
         strip.set_color(r, g, b).await?;
         if trace {
             eprintln!("colour {r:02x}{g:02x}{b:02x}");
@@ -235,7 +285,11 @@ async fn run_connected(
 }
 
 fn main() {
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio runtime");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
     let mut lamp = Lamp {
         rt,
         config: watch::Sender::new(None),

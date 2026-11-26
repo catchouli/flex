@@ -27,7 +27,9 @@ const USER_AGENT: &str = concat!("flex/", env!("CARGO_PKG_VERSION"));
 const REFRESH_BEFORE_SECS: u64 = 24 * 3600;
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// A signed-in Trakt account.
@@ -53,7 +55,12 @@ impl Auth {
     }
 
     fn from_settings(s: &Settings) -> Option<Self> {
-        let text = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let text = |k: &str| {
+            s.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         let access = text("access_token");
         (!access.is_empty()).then(|| Self {
             access,
@@ -98,16 +105,30 @@ enum Poll {
 
 impl Client {
     fn agent() -> ureq::Agent {
-        ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).http_status_as_error(false).build().into()
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(20)))
+            .http_status_as_error(false)
+            .build()
+            .into()
     }
 
     /// Sends a request; returns the status and the JSON answer (Null if none).
-    fn call(&self, method: &str, path: &str, body: Option<&Value>, token: Option<&str>) -> Result<(u16, Value), String> {
+    fn call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        token: Option<&str>,
+    ) -> Result<(u16, Value), String> {
         let url = format!("{}{path}", self.base);
         let agent = Self::agent();
         let auth = token.map(|t| format!("Bearer {t}"));
         let result = if method == "GET" {
-            let mut req = agent.get(&url).header("trakt-api-version", "2").header("trakt-api-key", &self.id).header("User-Agent", USER_AGENT);
+            let mut req = agent
+                .get(&url)
+                .header("trakt-api-version", "2")
+                .header("trakt-api-key", &self.id)
+                .header("User-Agent", USER_AGENT);
             if let Some(a) = &auth {
                 req = req.header("Authorization", a);
             }
@@ -127,18 +148,29 @@ impl Client {
         let mut response = result.map_err(|e| format!("couldn't reach Trakt: {e}"))?;
         let status = response.status().as_u16();
         let text = response.body_mut().read_to_string().unwrap_or_default();
-        Ok((status, flex_plugin::serde_json::from_str(&text).unwrap_or(Value::Null)))
+        Ok((
+            status,
+            flex_plugin::serde_json::from_str(&text).unwrap_or(Value::Null),
+        ))
     }
 
     fn device_code(&self) -> Result<DeviceCode, String> {
-        let (status, v) = self.call("POST", "/oauth/device/code", Some(&json!({ "client_id": self.id })), None)?;
+        let (status, v) = self.call(
+            "POST",
+            "/oauth/device/code",
+            Some(&json!({ "client_id": self.id })),
+            None,
+        )?;
         if status != 200 {
             return Err(format!("Trakt said {status} (is the app ID right?)"));
         }
         Ok(DeviceCode {
             device_code: v["device_code"].as_str().unwrap_or_default().to_owned(),
             user_code: v["user_code"].as_str().unwrap_or_default().to_owned(),
-            url: v["verification_url"].as_str().unwrap_or("https://auth.trakt.tv/activate").to_owned(),
+            url: v["verification_url"]
+                .as_str()
+                .unwrap_or("https://auth.trakt.tv/activate")
+                .to_owned(),
             interval: v["interval"].as_u64().unwrap_or(5),
             expires_in: v["expires_in"].as_u64().unwrap_or(600),
         })
@@ -148,7 +180,9 @@ impl Client {
         let body = json!({ "code": device_code, "client_id": self.id });
         let (status, v) = self.call("POST", "/oauth/device/token", Some(&body), None)?;
         match status {
-            200 => Auth::from_token(&v).map(Poll::Done).ok_or_else(|| "Trakt sent no token".to_owned()),
+            200 => Auth::from_token(&v)
+                .map(Poll::Done)
+                .ok_or_else(|| "Trakt sent no token".to_owned()),
             400 => Ok(Poll::Pending),
             429 => Ok(Poll::SlowDown),
             404 => Err("Trakt didn't recognise the code".into()),
@@ -166,15 +200,27 @@ impl Client {
         match self.call("POST", "/oauth/token", Some(&body), None)? {
             (200, v) => {
                 let fresh = Auth::from_token(&v).ok_or("Trakt sent no token")?;
-                Ok(Auth { username: auth.username.clone(), ..fresh })
+                Ok(Auth {
+                    username: auth.username.clone(),
+                    ..fresh
+                })
             }
-            (status, _) => Err(format!("Trakt wouldn't renew the sign-in ({status}): press Connect again")),
+            (status, _) => Err(format!(
+                "Trakt wouldn't renew the sign-in ({status}): press Connect again"
+            )),
         }
     }
 
     fn username(&self, token: &str) -> Option<String> {
-        let (status, v) = self.call("GET", "/users/settings", None, Some(token)).ok()?;
-        (status == 200).then(|| v["user"]["username"].as_str().unwrap_or_default().to_owned())
+        let (status, v) = self
+            .call("GET", "/users/settings", None, Some(token))
+            .ok()?;
+        (status == 200).then(|| {
+            v["user"]["username"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
     }
 
     fn revoke(&self, auth: &Auth) {
@@ -213,7 +259,9 @@ fn endpoint(state: PlaybackState) -> &'static str {
 /// How far through, in percent.
 fn progress(p: &Playback) -> f64 {
     match (p.position, p.duration) {
-        (Some(pos), Some(dur)) if dur > 0.0 => ((pos / dur * 100.0).clamp(0.0, 100.0) * 100.0).round() / 100.0,
+        (Some(pos), Some(dur)) if dur > 0.0 => {
+            ((pos / dur * 100.0).clamp(0.0, 100.0) * 100.0).round() / 100.0
+        }
         _ => 0.0,
     }
 }
@@ -228,13 +276,26 @@ struct Trakt {
 impl Trakt {
     fn new() -> Self {
         let base = std::env::var("FLEX_TRAKT_API").unwrap_or_else(|_| API.to_owned());
-        Self { settings: Settings::new(), auth: Arc::default(), connecting: Arc::default(), base }
+        Self {
+            settings: Settings::new(),
+            auth: Arc::default(),
+            connecting: Arc::default(),
+            base,
+        }
     }
 
     /// The app's ID: from the settings, else Flex's.
     fn client(&self) -> Option<Client> {
-        let setting = self.settings.get("client_id").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
-        Some(Client { base: self.base.clone(), id: setting.unwrap_or(CLIENT_ID).to_owned() })
+        let setting = self
+            .settings
+            .get("client_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        Some(Client {
+            base: self.base.clone(),
+            id: setting.unwrap_or(CLIENT_ID).to_owned(),
+        })
     }
 
     fn auth(&self) -> Option<Auth> {
@@ -248,7 +309,9 @@ impl Trakt {
 
     fn show_status(&self, host: &Host) {
         match (self.auth(), self.client()) {
-            (Some(a), _) if !a.username.is_empty() => host.status(true, format!("Connected as {}", a.username)),
+            (Some(a), _) if !a.username.is_empty() => {
+                host.status(true, format!("Connected as {}", a.username))
+            }
             (Some(_), _) => host.status(true, "Connected"),
             (None, None) => host.status(false, "Needs a Trakt app ID (below)"),
             (None, Some(_)) => host.status(true, "Not connected: press Connect to Trakt"),
@@ -285,7 +348,11 @@ impl Trakt {
         if self.connecting.swap(true, Ordering::SeqCst) {
             return;
         }
-        let (host, auth, connecting) = (host.clone(), Arc::clone(&self.auth), Arc::clone(&self.connecting));
+        let (host, auth, connecting) = (
+            host.clone(),
+            Arc::clone(&self.auth),
+            Arc::clone(&self.connecting),
+        );
         std::thread::spawn(move || {
             let result = device_flow(&client, &host, &auth);
             // The code stays on screen until now: connected, or it didn't work out.
@@ -309,7 +376,11 @@ const CODE_TOAST: &str = "code";
 /// waits for it to be approved. Returns the Trakt username.
 fn device_flow(client: &Client, host: &Host, auth: &Mutex<Option<Auth>>) -> Result<String, String> {
     let code = client.device_code()?;
-    let prompt = format!("Go to {} and enter {}", code.url.trim_start_matches("https://"), code.user_code);
+    let prompt = format!(
+        "Go to {} and enter {}",
+        code.url.trim_start_matches("https://"),
+        code.user_code
+    );
     host.status(true, &prompt);
     host.toast_kept(CODE_TOAST, &prompt, code.expires_in as f64);
     let deadline = now() + code.expires_in;
@@ -360,15 +431,33 @@ impl Plugin for Trakt {
     }
 
     fn playback(&mut self, host: &Host, playback: &Playback) {
-        let enabled = self.settings.get("scrobble").and_then(Value::as_bool).unwrap_or(true);
-        let Some(media) = playback.media.as_ref().filter(|_| enabled && playback.kind == "video") else { return };
-        let (Some(client), Some(body)) = (self.client(), scrobble_body(media, progress(playback))) else { return };
-        let Some(mut auth) = self.fresh_auth(host, &client) else { return };
+        let enabled = self
+            .settings
+            .get("scrobble")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let Some(media) = playback
+            .media
+            .as_ref()
+            .filter(|_| enabled && playback.kind == "video")
+        else {
+            return;
+        };
+        let (Some(client), Some(body)) = (self.client(), scrobble_body(media, progress(playback)))
+        else {
+            return;
+        };
+        let Some(mut auth) = self.fresh_auth(host, &client) else {
+            return;
+        };
         let path = endpoint(playback.state);
         for attempt in 0..2 {
             match client.call("POST", path, Some(&body), Some(&auth.access)) {
                 Ok((201, _)) => {
-                    host.log(LogLevel::Info, format!("{path}: {} at {:.0}%", media.title, progress(playback)));
+                    host.log(
+                        LogLevel::Info,
+                        format!("{path}: {} at {:.0}%", media.title, progress(playback)),
+                    );
                     return;
                 }
                 // Already sent recently: fine.
@@ -378,7 +467,10 @@ impl Plugin for Trakt {
                     None => return,
                 },
                 Ok((404, _)) => {
-                    host.log(LogLevel::Warn, format!("Trakt doesn't know {} ({:?})", media.title, media));
+                    host.log(
+                        LogLevel::Warn,
+                        format!("Trakt doesn't know {} ({:?})", media.title, media),
+                    );
                     return;
                 }
                 Ok((status, v)) => {
@@ -406,12 +498,26 @@ mod tests {
     use super::*;
 
     fn episode() -> Media {
-        Media { kind: "episode".into(), title: "Frieren".into(), year: Some(2023), anilist: Some(154587), season: Some(1), episode: Some(3), ..Media::default() }
+        Media {
+            kind: "episode".into(),
+            title: "Frieren".into(),
+            year: Some(2023),
+            anilist: Some(154587),
+            season: Some(1),
+            episode: Some(3),
+            ..Media::default()
+        }
     }
 
     #[test]
     fn builds_scrobbles() {
-        let film = Media { kind: "movie".into(), title: "Paprika".into(), year: Some(2006), tmdb: Some(4977), ..Media::default() };
+        let film = Media {
+            kind: "movie".into(),
+            title: "Paprika".into(),
+            year: Some(2006),
+            tmdb: Some(4977),
+            ..Media::default()
+        };
         assert_eq!(
             scrobble_body(&film, 12.5).unwrap(),
             json!({ "movie": { "title": "Paprika", "year": 2006, "ids": { "tmdb": 4977 } }, "progress": 12.5 })
@@ -421,8 +527,22 @@ mod tests {
             scrobble_body(&episode(), 90.0).unwrap(),
             json!({ "show": { "title": "Frieren", "year": 2023, "ids": {} }, "episode": { "season": 1, "number": 3 }, "progress": 90.0 })
         );
-        assert!(scrobble_body(&Media { episode: None, ..episode() }, 1.0).is_none(), "an episode needs its number");
-        let p = Playback { position: Some(300.0), duration: Some(1200.0), ..Playback::default() };
+        assert!(
+            scrobble_body(
+                &Media {
+                    episode: None,
+                    ..episode()
+                },
+                1.0
+            )
+            .is_none(),
+            "an episode needs its number"
+        );
+        let p = Playback {
+            position: Some(300.0),
+            duration: Some(1200.0),
+            ..Playback::default()
+        };
         assert_eq!(progress(&p), 25.0);
         assert_eq!(progress(&Playback::default()), 0.0);
         assert_eq!(endpoint(PlaybackState::Stopped), "/scrobble/stop");
@@ -434,17 +554,31 @@ mod tests {
     fn public_apps_send_no_secret() {
         let (base, log) = fake_trakt();
         let host = Host::new(std::io::sink());
-        let mut trakt = Trakt { base, ..Trakt::new() };
+        let mut trakt = Trakt {
+            base,
+            ..Trakt::new()
+        };
         let mut settings = Settings::new();
         settings.insert("client_id".into(), json!("public-id"));
         trakt.hello(&host, &settings);
         let client = trakt.client().expect("an ID is enough");
         assert_eq!(client.id, "public-id", "the setting wins");
-        assert_eq!(Trakt::new().client().unwrap().id, CLIENT_ID, "Flex's own app otherwise");
+        assert_eq!(
+            Trakt::new().client().unwrap().id,
+            CLIENT_ID,
+            "Flex's own app otherwise"
+        );
         device_flow(&client, &host, &trakt.auth).unwrap();
         let log = log.lock().unwrap();
-        let token = log.iter().find(|(p, _, _)| p == "/oauth/device/token").unwrap();
-        assert_eq!(token.2, json!({ "code": "dev1", "client_id": "public-id" }), "no client_secret");
+        let token = log
+            .iter()
+            .find(|(p, _, _)| p == "/oauth/device/token")
+            .unwrap();
+        assert_eq!(
+            token.2,
+            json!({ "code": "dev1", "client_id": "public-id" }),
+            "no client_secret"
+        );
     }
 
     /// Requests the fake Trakt got: (path, Authorization header, body).
@@ -460,7 +594,11 @@ mod tests {
                 let mut reader = BufReader::new(conn.try_clone().unwrap());
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
-                let path = line.split_whitespace().nth(1).unwrap_or_default().to_owned();
+                let path = line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
                 let (mut length, mut auth) = (0, String::new());
                 loop {
                     let mut h = String::new();
@@ -478,22 +616,46 @@ mod tests {
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
                 let body: Value = flex_plugin::serde_json::from_slice(&body).unwrap_or(Value::Null);
-                let tries = seen.lock().unwrap().iter().filter(|(p, _, _)| *p == path).count();
-                seen.lock().unwrap().push((path.clone(), auth.clone(), body));
+                let tries = seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(p, _, _)| *p == path)
+                    .count();
+                seen.lock()
+                    .unwrap()
+                    .push((path.clone(), auth.clone(), body));
                 let (status, answer) = match path.as_str() {
-                    "/oauth/device/code" => (200, json!({ "device_code": "dev1", "user_code": "ABCD1234", "verification_url": "https://trakt.tv/activate", "expires_in": 600, "interval": 1 })),
+                    "/oauth/device/code" => (
+                        200,
+                        json!({ "device_code": "dev1", "user_code": "ABCD1234", "verification_url": "https://trakt.tv/activate", "expires_in": 600, "interval": 1 }),
+                    ),
                     "/oauth/device/token" if tries == 0 => (400, Value::Null),
-                    "/oauth/device/token" => (200, json!({ "access_token": "a1", "refresh_token": "r1", "expires_in": 7_776_000, "created_at": now() })),
-                    "/oauth/token" => (200, json!({ "access_token": "a2", "refresh_token": "r2", "expires_in": 7_776_000, "created_at": now() })),
+                    "/oauth/device/token" => (
+                        200,
+                        json!({ "access_token": "a1", "refresh_token": "r1", "expires_in": 7_776_000, "created_at": now() }),
+                    ),
+                    "/oauth/token" => (
+                        200,
+                        json!({ "access_token": "a2", "refresh_token": "r2", "expires_in": 7_776_000, "created_at": now() }),
+                    ),
                     "/users/settings" => (200, json!({ "user": { "username": "cat" } })),
                     "/scrobble/start" if auth == "Bearer a1" => (401, Value::Null),
                     p if p.starts_with("/scrobble/") => (201, json!({})),
                     _ => (404, Value::Null),
                 };
-                let text = if answer.is_null() { String::new() } else { answer.to_string() };
+                let text = if answer.is_null() {
+                    String::new()
+                } else {
+                    answer.to_string()
+                };
                 let reason = if status < 300 { "OK" } else { "Nope" };
                 let mut out = conn;
-                let _ = write!(out, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}", text.len());
+                let _ = write!(
+                    out,
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                );
             }
         });
         (base, log)
@@ -513,7 +675,10 @@ mod tests {
             }
         }
         let host = Host::new(Sink(Arc::clone(&messages)));
-        let mut trakt = Trakt { base, ..Trakt::new() };
+        let mut trakt = Trakt {
+            base,
+            ..Trakt::new()
+        };
         let mut settings = Settings::new();
         settings.insert("client_id".into(), json!("id1"));
         trakt.hello(&host, &settings);
@@ -528,25 +693,65 @@ mod tests {
             out.contains(r#"{"type":"toast","text":"Go to trakt.tv/activate and enter ABCD1234","seconds":600.0,"key":"code"}"#),
             "the code stays up as long as it's valid: {out}"
         );
-        assert!(out.contains(r#""access_token":"a1""#), "saved in Flex's settings: {out}");
+        assert!(
+            out.contains(r#""access_token":"a1""#),
+            "saved in Flex's settings: {out}"
+        );
 
         // Playing: a1 is refused, so the sign-in is renewed and the scrobble retried.
-        let playing = Playback { state: PlaybackState::Playing, kind: "video".into(), position: Some(60.0), duration: Some(1440.0), media: Some(episode()), ..Playback::default() };
+        let playing = Playback {
+            state: PlaybackState::Playing,
+            kind: "video".into(),
+            position: Some(60.0),
+            duration: Some(1440.0),
+            media: Some(episode()),
+            ..Playback::default()
+        };
         trakt.playback(&host, &playing);
         assert_eq!(trakt.auth().unwrap().access, "a2");
-        let starts: Vec<_> = log.lock().unwrap().iter().filter(|(p, _, _)| p == "/scrobble/start").map(|(_, a, b)| (a.clone(), b.clone())).collect();
+        let starts: Vec<_> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _, _)| p == "/scrobble/start")
+            .map(|(_, a, b)| (a.clone(), b.clone()))
+            .collect();
         assert_eq!(starts.len(), 2);
         assert_eq!(starts[1].0, "Bearer a2");
         assert_eq!(starts[1].1["episode"], json!({ "season": 1, "number": 3 }));
         assert_eq!(starts[1].1["progress"], json!(4.17));
 
         // Music and unmatched files aren't sent; switching scrobbling off stops it.
-        trakt.playback(&host, &Playback { kind: "music".into(), media: Some(episode()), ..playing.clone() });
-        trakt.playback(&host, &Playback { media: None, ..playing.clone() });
+        trakt.playback(
+            &host,
+            &Playback {
+                kind: "music".into(),
+                media: Some(episode()),
+                ..playing.clone()
+            },
+        );
+        trakt.playback(
+            &host,
+            &Playback {
+                media: None,
+                ..playing.clone()
+            },
+        );
         settings.insert("scrobble".into(), json!(false));
         trakt.settings(&host, &settings);
-        trakt.playback(&host, &Playback { state: PlaybackState::Stopped, ..playing.clone() });
-        let scrobbles = log.lock().unwrap().iter().filter(|(p, _, _)| p.starts_with("/scrobble/")).count();
+        trakt.playback(
+            &host,
+            &Playback {
+                state: PlaybackState::Stopped,
+                ..playing.clone()
+            },
+        );
+        let scrobbles = log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _, _)| p.starts_with("/scrobble/"))
+            .count();
         assert_eq!(scrobbles, 2, "nothing more sent");
     }
 }

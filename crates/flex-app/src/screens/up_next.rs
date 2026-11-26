@@ -17,13 +17,20 @@ pub struct UpNext {
 
 impl UpNext {
     pub fn new(finished: String, next: PlayRequest) -> Self {
-        Self { finished, next, focus: 0 }
+        Self {
+            finished,
+            next,
+            focus: 0,
+        }
     }
 }
 
 impl Screen for UpNext {
     fn handle(&mut self, _sh: &mut Shared, press: Press) -> Nav {
-        let play = Nav::Play { req: self.next.clone(), replace: true };
+        let play = Nav::Play {
+            req: self.next.clone(),
+            replace: true,
+        };
         match press.action {
             Action::Left => self.focus = 0,
             Action::Right => self.focus = 1,
@@ -44,10 +51,21 @@ impl Screen for UpNext {
         let mut y = safe.top() + 180.0;
         let mut line = |text: &str, text_style: TextStyle, color, gap: f32| {
             let clip = painter.with_clip_rect(safe);
-            clip.text(pos2(safe.left(), y), Align2::LEFT_TOP, text, text_style.resolve(style), color);
+            clip.text(
+                pos2(safe.left(), y),
+                Align2::LEFT_TOP,
+                text,
+                text_style.resolve(style),
+                color,
+            );
             y += gap;
         };
-        line(&format!("Finished: {}", self.finished), TextStyle::Small, theme::dim(), 90.0);
+        line(
+            &format!("Finished: {}", self.finished),
+            TextStyle::Small,
+            theme::dim(),
+            90.0,
+        );
         line("Up next", TextStyle::Body, theme::highlight(), 48.0);
         line(&self.next.title, TextStyle::Heading, theme::text(), 110.0);
 

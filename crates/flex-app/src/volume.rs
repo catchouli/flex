@@ -10,7 +10,8 @@ pub fn change(up: bool) -> Result<Option<u8>, String> {
 #[cfg(windows)]
 mod imp {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput, VK_VOLUME_DOWN, VK_VOLUME_UP,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
+        SendInput, VK_VOLUME_DOWN, VK_VOLUME_UP,
     };
 
     /// Presses the volume key, as a keyboard's would: Windows changes the volume (2% a
@@ -19,12 +20,32 @@ mod imp {
         let vk = if up { VK_VOLUME_UP } else { VK_VOLUME_DOWN };
         let key = |flags| INPUT {
             r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: KEYEVENTF_EXTENDEDKEY | flags, time: 0, dwExtraInfo: 0 } },
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_EXTENDEDKEY | flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
         };
         // Three presses: one is too small a step to notice from the sofa.
-        let inputs: Vec<INPUT> = (0..3).flat_map(|_| [key(0), key(KEYEVENTF_KEYUP)]).collect();
-        let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
-        if sent as usize == inputs.len() { Ok(None) } else { Err("Windows didn't take the volume key".into()) }
+        let inputs: Vec<INPUT> = (0..3)
+            .flat_map(|_| [key(0), key(KEYEVENTF_KEYUP)])
+            .collect();
+        let sent = unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_ptr(),
+                size_of::<INPUT>() as i32,
+            )
+        };
+        if sent as usize == inputs.len() {
+            Ok(None)
+        } else {
+            Err("Windows didn't take the volume key".into())
+        }
     }
 }
 
@@ -41,7 +62,10 @@ mod imp {
              set volume output volume v\n\
              return v"
         );
-        let out = Command::new("osascript").args(["-e", &script]).output().map_err(|e| format!("osascript: {e}"))?;
+        let out = Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .map_err(|e| format!("osascript: {e}"))?;
         if !out.status.success() {
             return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
         }
@@ -56,11 +80,23 @@ mod imp {
     /// PipeWire's `wpctl`, else PulseAudio's `pactl` (PipeWire answers that too).
     pub fn change(up: bool) -> Result<Option<u8>, String> {
         let sign = if up { "+" } else { "-" };
-        let wpctl = Command::new("wpctl").args(["set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", &format!("5%{sign}")]).status();
+        let wpctl = Command::new("wpctl")
+            .args([
+                "set-volume",
+                "-l",
+                "1.0",
+                "@DEFAULT_AUDIO_SINK@",
+                &format!("5%{sign}"),
+            ])
+            .status();
         if wpctl.is_ok_and(|s| s.success()) {
-            return Ok(level(Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"])));
+            return Ok(level(
+                Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]),
+            ));
         }
-        let pactl = Command::new("pactl").args(["set-sink-volume", "@DEFAULT_SINK@", &format!("{sign}5%")]).status();
+        let pactl = Command::new("pactl")
+            .args(["set-sink-volume", "@DEFAULT_SINK@", &format!("{sign}5%")])
+            .status();
         match pactl {
             Ok(s) if s.success() => Ok(None),
             _ => Err("couldn't change the volume (needs wpctl or pactl)".into()),

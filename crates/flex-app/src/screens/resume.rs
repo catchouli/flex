@@ -17,11 +17,21 @@ pub struct ResumePrompt {
 
 impl ResumePrompt {
     pub fn new(req: PlayRequest, position: f64) -> Self {
-        Self { req, position, focus: 0 }
+        Self {
+            req,
+            position,
+            focus: 0,
+        }
     }
 
     fn play(&self, start: f64) -> Nav {
-        Nav::Play { req: PlayRequest { start: Some(start), ..self.req.clone() }, replace: true }
+        Nav::Play {
+            req: PlayRequest {
+                start: Some(start),
+                ..self.req.clone()
+            },
+            replace: true,
+        }
     }
 }
 
@@ -31,7 +41,9 @@ impl Screen for ResumePrompt {
             Action::Left | Action::Up => self.focus = 0,
             Action::Right | Action::Down => self.focus = 1,
             Action::Back | Action::Stop if !press.repeat => return Nav::Pop,
-            _ if press.is_activate() => return self.play(if self.focus == 0 { self.position } else { 0.0 }),
+            _ if press.is_activate() => {
+                return self.play(if self.focus == 0 { self.position } else { 0.0 });
+            }
             _ => {}
         }
         Nav::None
@@ -45,7 +57,13 @@ impl Screen for ResumePrompt {
 
         let clip = painter.with_clip_rect(safe);
         let top = safe.top() + 220.0;
-        clip.text(pos2(safe.left(), top), Align2::LEFT_TOP, &self.req.title, TextStyle::Heading.resolve(style), theme::text());
+        clip.text(
+            pos2(safe.left(), top),
+            Align2::LEFT_TOP,
+            &self.req.title,
+            TextStyle::Heading.resolve(style),
+            theme::text(),
+        );
 
         let size = vec2(480.0, 76.0);
         let resume = Rect::from_min_size(pos2(safe.left(), top + 120.0), size);
@@ -57,7 +75,13 @@ impl Screen for ResumePrompt {
             }
         }
         widgets::button(painter, resume, &label, self.focus == 0, style);
-        widgets::button(painter, restart, "Start from beginning", self.focus == 1, style);
+        widgets::button(
+            painter,
+            restart,
+            "Start from beginning",
+            self.focus == 1,
+            style,
+        );
         Nav::None
     }
 

@@ -34,7 +34,9 @@ fn build(commands: Sender<Command>, ctx: &egui::Context) -> anyhow::Result<tray_
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let image = image::load_from_memory(include_bytes!("../../../assets/icon-256.png"))?.thumbnail(64, 64).to_rgba8();
+    let image = image::load_from_memory(include_bytes!("../../../assets/icon-256.png"))?
+        .thumbnail(64, 64)
+        .to_rgba8();
     let icon = tray_icon::Icon::from_rgba(image.to_vec(), image.width(), image.height())?;
 
     let menu = Menu::new();
@@ -58,7 +60,12 @@ fn build(commands: Sender<Command>, ctx: &egui::Context) -> anyhow::Result<tray_
     }));
     let (tx, c) = (commands, ctx.clone());
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+        if let TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } = event
+        {
             send(&tx, &c, Command::Show);
         }
     }));

@@ -4,23 +4,23 @@
 pub mod browse;
 pub mod details;
 pub mod history;
-pub mod music;
 pub mod home;
 pub mod inspector;
 pub mod library;
 pub mod match_online;
+pub mod music;
 pub mod options;
-pub mod picker;
 pub mod person;
+pub mod picker;
 pub mod plex_import;
 pub mod plugins;
-pub mod text_entry;
 pub mod resume;
 pub mod screenshots;
 pub mod search;
 pub mod settings;
 pub mod shows;
 pub mod sync;
+pub mod text_entry;
 pub mod themes;
 pub mod up_next;
 pub mod youtube;
@@ -36,10 +36,16 @@ pub enum Nav {
     Pop,
     Replace(Box<dyn Screen>),
     /// Start playback; `replace` swaps out the current screen instead of stacking on it.
-    Play { req: PlayRequest, replace: bool },
+    Play {
+        req: PlayRequest,
+        replace: bool,
+    },
     /// Open `screen`, then play on top of it, so Back from the player lands there
     /// (e.g. the show's page when starting from Continue Watching).
-    PlayOver { screen: Box<dyn Screen>, req: PlayRequest },
+    PlayOver {
+        screen: Box<dyn Screen>,
+        req: PlayRequest,
+    },
     /// Move input focus up to the top bar.
     FocusTopBar,
 }
@@ -54,7 +60,10 @@ impl Nav {
     }
 
     pub fn play(req: Option<PlayRequest>) -> Self {
-        req.map_or(Self::None, |req| Self::Play { req, replace: false })
+        req.map_or(Self::None, |req| Self::Play {
+            req,
+            replace: false,
+        })
     }
 }
 

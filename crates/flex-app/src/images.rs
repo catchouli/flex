@@ -52,7 +52,10 @@ struct Job {
 
 enum Entry {
     Loading,
-    Ready { texture: TextureHandle, last_used: u64 },
+    Ready {
+        texture: TextureHandle,
+        last_used: u64,
+    },
     Failed,
 }
 
@@ -77,7 +80,13 @@ fn load(job: &Job, agent: &ureq::Agent) -> anyhow::Result<ColorImage> {
         Ok(bytes) => bytes,
         Err(e) if job.url.is_empty() => return Err(e.into()),
         Err(_) => {
-            let bytes = agent.get(&job.url).call()?.body_mut().with_config().limit(20_000_000).read_to_vec()?;
+            let bytes = agent
+                .get(&job.url)
+                .call()?
+                .body_mut()
+                .with_config()
+                .limit(20_000_000)
+                .read_to_vec()?;
             if let Some(dir) = job.file.parent() {
                 std::fs::create_dir_all(dir)?;
             }
@@ -95,7 +104,10 @@ fn load(job: &Job, agent: &ureq::Agent) -> anyhow::Result<ColorImage> {
         image
     };
     let rgba = image.to_rgba8();
-    Ok(ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))
+    Ok(ColorImage::from_rgba_unmultiplied(
+        [rgba.width() as usize, rgba.height() as usize],
+        rgba.as_raw(),
+    ))
 }
 
 impl Images {
@@ -117,7 +129,9 @@ impl Images {
                         Ok(job) => job,
                         Err(_) => return, // app closing
                     };
-                    let image = load(&job, &agent).map_err(|e| log::debug!("image {}: {e:#}", job.url)).ok();
+                    let image = load(&job, &agent)
+                        .map_err(|e| log::debug!("image {}: {e:#}", job.url))
+                        .ok();
                     if result_tx.send((job.key, image)).is_err() {
                         return;
                     }
@@ -125,7 +139,14 @@ impl Images {
                 }
             });
         }
-        Self { ctx: ctx.clone(), dir, jobs, results, entries: HashMap::new(), frame: 0 }
+        Self {
+            ctx: ctx.clone(),
+            dir,
+            jobs,
+            results,
+            entries: HashMap::new(),
+            frame: 0,
+        }
     }
 
     /// The image as a texture if it's ready; otherwise starts loading it and returns None.
@@ -144,14 +165,29 @@ impl Images {
         let (url, file) = if let Some(local) = path.strip_prefix("file:") {
             (String::new(), PathBuf::from(local))
         } else if path.starts_with("http") {
-            let ext = path.rsplit('.').next().filter(|e| e.len() <= 4).unwrap_or("img");
-            (path.to_owned(), self.dir.join("web").join(format!("{}.{ext}", hashed(path))))
+            let ext = path
+                .rsplit('.')
+                .next()
+                .filter(|e| e.len() <= 4)
+                .unwrap_or("img");
+            (
+                path.to_owned(),
+                self.dir.join("web").join(format!("{}.{ext}", hashed(path))),
+            )
         } else {
             let name = path.trim_start_matches('/');
-            (format!("{TMDB_IMAGES}/{tmdb_size}/{name}"), self.dir.join(tmdb_size).join(name))
+            (
+                format!("{TMDB_IMAGES}/{tmdb_size}/{name}"),
+                self.dir.join(tmdb_size).join(name),
+            )
         };
         self.entries.insert(key.clone(), Entry::Loading);
-        let _ = self.jobs.send(Job { key, url, file, max_side });
+        let _ = self.jobs.send(Job {
+            key,
+            url,
+            file,
+            max_side,
+        });
         None
     }
 
@@ -169,7 +205,11 @@ impl Images {
             };
             self.entries.insert(key, entry);
         }
-        let ready = self.entries.values().filter(|e| matches!(e, Entry::Ready { .. })).count();
+        let ready = self
+            .entries
+            .values()
+            .filter(|e| matches!(e, Entry::Ready { .. }))
+            .count();
         if ready > MAX_TEXTURES {
             let mut by_age: Vec<(u64, String)> = self
                 .entries
@@ -194,12 +234,19 @@ pub fn paint_cover(painter: &egui::Painter, rect: egui::Rect, texture: &TextureH
     // UV sub-rectangle that matches the rect's aspect ratio.
     let uv = if img_aspect > rect_aspect {
         let visible = rect_aspect / img_aspect;
-        egui::Rect::from_min_max(egui::pos2((1.0 - visible) / 2.0, 0.0), egui::pos2((1.0 + visible) / 2.0, 1.0))
+        egui::Rect::from_min_max(
+            egui::pos2((1.0 - visible) / 2.0, 0.0),
+            egui::pos2((1.0 + visible) / 2.0, 1.0),
+        )
     } else {
         let visible = img_aspect / rect_aspect;
-        egui::Rect::from_min_max(egui::pos2(0.0, (1.0 - visible) / 2.0), egui::pos2(1.0, (1.0 + visible) / 2.0))
+        egui::Rect::from_min_max(
+            egui::pos2(0.0, (1.0 - visible) / 2.0),
+            egui::pos2(1.0, (1.0 + visible) / 2.0),
+        )
     };
-    let shape = egui::epaint::RectShape::filled(rect, egui::CornerRadius::same(8), egui::Color32::WHITE)
-        .with_texture(texture.id(), uv);
+    let shape =
+        egui::epaint::RectShape::filled(rect, egui::CornerRadius::same(8), egui::Color32::WHITE)
+            .with_texture(texture.id(), uv);
     painter.add(shape);
 }

@@ -24,11 +24,11 @@ use crate::ambient::Margins;
 use crate::input::{Action, Press};
 use crate::mpv::{self, GetProcAddress, Mpv, Renderer};
 use crate::picture::Picture;
-use crate::shared::TrackMemory;
-use flex_core::language;
 use crate::screens::{Nav, Screen, up_next::UpNext, youtube::RelatedVideos};
+use crate::shared::TrackMemory;
 use crate::shared::{PlayRequest, Shared, SkipMode};
 use crate::theme;
+use flex_core::language;
 
 const OSD_SECS: f64 = 3.0;
 /// How often the playback position is saved while playing.
@@ -112,7 +112,13 @@ struct YouTubePlay {
 }
 
 impl Player {
-    pub fn open(ctx: &egui::Context, proc_address: GetProcAddress, req: PlayRequest, picture: Picture, tracks_memory: TrackMemory) -> Result<Self> {
+    pub fn open(
+        ctx: &egui::Context,
+        proc_address: GetProcAddress,
+        req: PlayRequest,
+        picture: Picture,
+        tracks_memory: TrackMemory,
+    ) -> Result<Self> {
         let extra = std::env::var(OPTS_ENV).unwrap_or_default();
         let picture_options = picture.mpv_options();
         // The test options last, so they win.
@@ -127,7 +133,12 @@ impl Player {
             mpv.set_string("start", &format!("{start:.1}"))?;
         }
         log::info!("playing {}", req.path.display());
-        let youtube = req.youtube_id().map(|id| YouTubePlay { id: id.to_owned(), loaded: false, segments: None, last_pos: None });
+        let youtube = req.youtube_id().map(|id| YouTubePlay {
+            id: id.to_owned(),
+            loaded: false,
+            segments: None,
+            last_pos: None,
+        });
         if youtube.is_none() {
             mpv.load(&req.path)?;
         }
@@ -195,7 +206,12 @@ impl Player {
         if let Some(position) = self.recorded
             && !self.logged
         {
-            sh.add_history(&self.req, self.session_start, Some(position), self.became_watched);
+            sh.add_history(
+                &self.req,
+                self.session_start,
+                Some(position),
+                self.became_watched,
+            );
             self.logged = true;
         }
     }
@@ -224,7 +240,12 @@ impl Player {
             let chapters: Vec<(f64, String)> = (0..count)
                 .filter_map(|i| {
                     let time = self.mpv.get_f64(&format!("chapter-list/{i}/time"))?;
-                    Some((time, self.mpv.get_string(&format!("chapter-list/{i}/title")).unwrap_or_default()))
+                    Some((
+                        time,
+                        self.mpv
+                            .get_string(&format!("chapter-list/{i}/title"))
+                            .unwrap_or_default(),
+                    ))
                 })
                 .collect();
             let skips = skip::find(&chapters, self.duration);
@@ -235,7 +256,9 @@ impl Player {
         }
         let mode = sh.skip_mode();
         let current = match (&self.skips, self.mpv.get_f64("time-pos")) {
-            (Some(skips), Some(pos)) if mode != SkipMode::Off => skip::at(skips, pos).map(|(i, s)| (i, *s)),
+            (Some(skips), Some(pos)) if mode != SkipMode::Off => {
+                skip::at(skips, pos).map(|(i, s)| (i, *s))
+            }
             _ => None,
         };
         self.skip_prompt = None;
@@ -268,11 +291,19 @@ impl Player {
             Action::Stop if !press.repeat => return Nav::Pop,
             // Like YouTube: 0 is the start, 1 is 10% through, ... 9 is 90%.
             Action::Number(n) if !press.repeat => {
-                self.command(&["seek", &(u32::from(n.min(9)) * 10).to_string(), "absolute-percent"]);
+                self.command(&[
+                    "seek",
+                    &(u32::from(n.min(9)) * 10).to_string(),
+                    "absolute-percent",
+                ]);
             }
             Action::Left | Action::Right => {
                 let step = if press.repeat { 30 } else { 10 };
-                let step = if press.action == Action::Left { -step } else { step };
+                let step = if press.action == Action::Left {
+                    -step
+                } else {
+                    step
+                };
                 self.command(&["seek", &step.to_string(), "relative"]);
             }
             Action::Up if !press.repeat => {
@@ -328,10 +359,18 @@ impl Player {
     /// The current subtitle or audio choice (`kind` "sub" or "audio") as stored: "off" or
     /// title + SUB_SEP + language.
     fn current_choice(&self, kind: &str) -> String {
-        if self.mpv.get_i64(&format!("current-tracks/{kind}/id")).is_none() {
+        if self
+            .mpv
+            .get_i64(&format!("current-tracks/{kind}/id"))
+            .is_none()
+        {
             return "off".to_owned();
         }
-        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/{kind}/{p}")).unwrap_or_default();
+        let prop = |p: &str| {
+            self.mpv
+                .get_string(&format!("current-tracks/{kind}/{p}"))
+                .unwrap_or_default()
+        };
         format!("{}{SUB_SEP}{}", prop("title"), prop("lang"))
     }
 
@@ -340,7 +379,11 @@ impl Player {
         let count = self.mpv.get_i64("track-list/count").unwrap_or(0);
         (0..count)
             .filter_map(|i| {
-                let prop = |p: &str| self.mpv.get_string(&format!("track-list/{i}/{p}")).unwrap_or_default();
+                let prop = |p: &str| {
+                    self.mpv
+                        .get_string(&format!("track-list/{i}/{p}"))
+                        .unwrap_or_default()
+                };
                 if prop("type") != kind {
                     return None;
                 }
@@ -348,7 +391,10 @@ impl Player {
                     id: self.mpv.get_i64(&format!("track-list/{i}/id"))?,
                     lang: prop("lang"),
                     title: prop("title"),
-                    default: self.mpv.get_flag(&format!("track-list/{i}/default")).unwrap_or(false),
+                    default: self
+                        .mpv
+                        .get_flag(&format!("track-list/{i}/default"))
+                        .unwrap_or(false),
                 })
             })
             .collect()
@@ -379,7 +425,12 @@ impl Player {
     /// Picks the subtitle track that best matches the remembered choice (this show's, else
     /// the last one anywhere), if any does.
     fn apply_saved_sub(&self, sh: &Shared) {
-        let saved = self.tracks_memory.sub_key.as_deref().and_then(|key| sh.setting(key)).or_else(|| sh.setting(SUBTITLE_SETTING));
+        let saved = self
+            .tracks_memory
+            .sub_key
+            .as_deref()
+            .and_then(|key| sh.setting(key))
+            .or_else(|| sh.setting(SUBTITLE_SETTING));
         let Some(saved) = saved else { return };
         if saved == "off" {
             let _ = self.mpv.set_string("sid", "no");
@@ -408,7 +459,11 @@ impl Player {
 
     fn stats_lines(&self) -> Vec<String> {
         let f = |p: &str| self.mpv.get_f64(p);
-        let i = |p: &str| self.mpv.get_i64(p).map_or("-".to_owned(), |v| v.to_string());
+        let i = |p: &str| {
+            self.mpv
+                .get_i64(p)
+                .map_or("-".to_owned(), |v| v.to_string())
+        };
         let s = |p: &str| self.mpv.get_string(p).unwrap_or_else(|| "-".to_owned());
         let mut lines = vec![
             format!("Video: {} {}x{}", s("video-codec"), i("width"), i("height")),
@@ -418,9 +473,21 @@ impl Player {
                 f("container-fps").unwrap_or(0.0),
                 f("display-fps").unwrap_or(0.0)
             ),
-            format!("Sync: {} · speed {:.4}", s("video-sync"), f("speed").unwrap_or(1.0) * f("audio-speed-correction").unwrap_or(1.0)),
-            format!("Dropped: {} by output · {} by decoder", i("frame-drop-count"), i("decoder-frame-drop-count")),
-            format!("Late frames: {} · mistimed: {}", i("vo-delayed-frame-count"), i("mistimed-frame-count")),
+            format!(
+                "Sync: {} · speed {:.4}",
+                s("video-sync"),
+                f("speed").unwrap_or(1.0) * f("audio-speed-correction").unwrap_or(1.0)
+            ),
+            format!(
+                "Dropped: {} by output · {} by decoder",
+                i("frame-drop-count"),
+                i("decoder-frame-drop-count")
+            ),
+            format!(
+                "Late frames: {} · mistimed: {}",
+                i("vo-delayed-frame-count"),
+                i("mistimed-frame-count")
+            ),
         ];
         if let Some(picture) = self.picture.describe() {
             // SVP adds a VapourSynth filter once it has noticed the video.
@@ -441,20 +508,36 @@ impl Player {
         let mut lines = self.stats_lines();
         if let Some(light) = light {
             let [r, g, b] = light.zones[0];
-            lines.push(format!("Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%", light.brightness * 100.0));
+            lines.push(format!(
+                "Ambient light: #{r:02x}{g:02x}{b:02x} at {:.0}%",
+                light.brightness * 100.0
+            ));
         }
         let rect = Rect::from_min_size(safe.min, vec2(860.0, 32.0 + 36.0 * lines.len() as f32));
         theme::paint_overlay(painter, rect, 10.0);
         for (n, line) in lines.iter().enumerate() {
             let pos = rect.min + vec2(20.0, 16.0 + 36.0 * n as f32);
-            painter.text(pos, Align2::LEFT_TOP, line, mono.clone(), theme::overlay_text());
+            painter.text(
+                pos,
+                Align2::LEFT_TOP,
+                line,
+                mono.clone(),
+                theme::overlay_text(),
+            );
         }
         if let Some(light) = light {
             // The colour as the strip shows it (colour scaled by brightness), turned from
             // LED values back into screen ones.
-            let srgb = |c: u8| (flex_core::ambient::linear_to_srgb(f32::from(c) / 255.0 * light.brightness) * 255.0).round() as u8;
+            let srgb = |c: u8| {
+                (flex_core::ambient::linear_to_srgb(f32::from(c) / 255.0 * light.brightness)
+                    * 255.0)
+                    .round() as u8
+            };
             let [r, g, b] = light.zones[0].map(srgb);
-            let swatch = Rect::from_min_size(rect.right_top() + vec2(-80.0, rect.height() - 52.0), vec2(56.0, 36.0));
+            let swatch = Rect::from_min_size(
+                rect.right_top() + vec2(-80.0, rect.height() - 52.0),
+                vec2(56.0, 36.0),
+            );
             painter.rect_filled(swatch, CornerRadius::same(6), Color32::from_rgb(r, g, b));
         }
     }
@@ -464,7 +547,11 @@ impl Player {
             Track::Sub => ("sub", "Subtitles"),
             Track::Audio => ("audio", "Audio"),
         };
-        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/{kind}/{p}")).filter(|s| !s.is_empty());
+        let prop = |p: &str| {
+            self.mpv
+                .get_string(&format!("current-tracks/{kind}/{p}"))
+                .filter(|s| !s.is_empty())
+        };
         let Some(id) = self.mpv.get_i64(&format!("current-tracks/{kind}/id")) else {
             return format!("{name}: Off");
         };
@@ -486,13 +573,21 @@ impl Player {
 
     /// "Audio 2/3: Japanese · Dolby TrueHD 7.1 · Title" for the current audio track `id`.
     fn audio_label(&self, id: i64) -> String {
-        let prop = |p: &str| self.mpv.get_string(&format!("current-tracks/audio/{p}")).unwrap_or_default();
+        let prop = |p: &str| {
+            self.mpv
+                .get_string(&format!("current-tracks/audio/{p}"))
+                .unwrap_or_default()
+        };
         let current = flex_core::audio::AudioTrack {
             lang: prop("lang"),
             title: prop("title"),
             codec: prop("codec"),
             profile: prop("codec-profile"),
-            channels: self.mpv.get_i64("current-tracks/audio/demux-channel-count").and_then(|c| u32::try_from(c).ok()).unwrap_or(0),
+            channels: self
+                .mpv
+                .get_i64("current-tracks/audio/demux-channel-count")
+                .and_then(|c| u32::try_from(c).ok())
+                .unwrap_or(0),
             layout: prop("demux-channels"),
             default: false,
         };
@@ -509,7 +604,10 @@ impl Player {
         label += &format;
         // The title, unless it only repeats the language or format.
         let title = current.title.trim();
-        let repeats = [lang.as_deref(), Some(format.as_str())].into_iter().flatten().any(|x| x.eq_ignore_ascii_case(title));
+        let repeats = [lang.as_deref(), Some(format.as_str())]
+            .into_iter()
+            .flatten()
+            .any(|x| x.eq_ignore_ascii_case(title));
         if !title.is_empty() && !repeats {
             label += &format!(" · {title}");
         }
@@ -550,10 +648,17 @@ impl Player {
             yt.segments = sh.youtube.segments(&yt.id).map(<[Segment]>::to_vec);
         }
         if let (Some(segments), Some(pos)) = (&yt.segments, self.mpv.get_f64("time-pos")) {
-            let skip = yt.last_pos.and_then(|before| sponsorblock::entered(segments, before, pos));
+            let skip = yt
+                .last_pos
+                .and_then(|before| sponsorblock::entered(segments, before, pos));
             if let Some(segment) = skip {
-                let _ = self.mpv.command(&["seek", &format!("{:.3}", segment.end), "absolute"]);
-                sh.toast(format!("Skipped: {}", sponsorblock::category_name(&segment.category)));
+                let _ = self
+                    .mpv
+                    .command(&["seek", &format!("{:.3}", segment.end), "absolute"]);
+                sh.toast(format!(
+                    "Skipped: {}",
+                    sponsorblock::category_name(&segment.category)
+                ));
                 yt.last_pos = Some(segment.end);
             } else {
                 yt.last_pos = Some(pos);
@@ -651,9 +756,18 @@ impl Player {
         let renderer = self.renderer.clone();
         // Ambient light: sample the picture (without the black bars) right after it's drawn.
         let sampler = sh.plugins.wants_light().then(|| sh.ambient.sampler.clone());
-        let margin = |k: &str| self.mpv.get_i64(&format!("osd-dimensions/{k}")).unwrap_or(0) as i32;
+        let margin = |k: &str| {
+            self.mpv
+                .get_i64(&format!("osd-dimensions/{k}"))
+                .unwrap_or(0) as i32
+        };
         let margins = if sampler.is_some() {
-            Margins { left: margin("ml"), right: margin("mr"), top: margin("mt"), bottom: margin("mb") }
+            Margins {
+                left: margin("ml"),
+                right: margin("mr"),
+                top: margin("mt"),
+                bottom: margin("mb"),
+            }
         } else {
             Margins::default()
         };
@@ -664,19 +778,41 @@ impl Player {
             renderer.render(fbo, w as i32, h as i32, target.is_none());
             if let Some(sampler) = &sampler {
                 let mut sampler = sampler.lock().unwrap_or_else(|e| e.into_inner());
-                unsafe { sampler.capture(painter.gl(), target, w as i32, h as i32, margins, target.is_none()) };
+                unsafe {
+                    sampler.capture(
+                        painter.gl(),
+                        target,
+                        w as i32,
+                        h as i32,
+                        margins,
+                        target.is_none(),
+                    )
+                };
             }
             // mpv doesn't restore GL state; egui resets the rest after callbacks.
             unsafe { painter.gl().bind_framebuffer(glow::FRAMEBUFFER, target) };
         });
-        ui.painter().add(egui::PaintCallback { rect: screen, callback: Arc::new(callback) });
+        ui.painter().add(egui::PaintCallback {
+            rect: screen,
+            callback: Arc::new(callback),
+        });
 
         let painter = ui.painter();
         let safe = theme::safe_rect(&ctx);
         if !self.loaded {
             let asking = self.youtube.as_ref().is_some_and(|yt| !yt.loaded);
-            let text = if asking { "Asking YouTube…" } else { "Loading…" };
-            painter.text(screen.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(ui.style()), theme::overlay_text());
+            let text = if asking {
+                "Asking YouTube…"
+            } else {
+                "Loading…"
+            };
+            painter.text(
+                screen.center(),
+                Align2::CENTER_CENTER,
+                text,
+                TextStyle::Heading.resolve(ui.style()),
+                theme::overlay_text(),
+            );
         }
 
         self.update_skips(sh);
@@ -684,11 +820,20 @@ impl Player {
         if let Some(part) = self.skip_prompt {
             // Bottom right, above where the OSD panel goes.
             let size = vec2(330.0, 72.0);
-            let rect = Rect::from_min_size(pos2(safe.right() - size.x, safe.bottom() - 180.0 - size.y), size);
+            let rect = Rect::from_min_size(
+                pos2(safe.right() - size.x, safe.bottom() - 180.0 - size.y),
+                size,
+            );
             if crate::widgets::hit(ui, rect) == crate::widgets::Hit::Click {
                 self.skip();
             }
-            crate::widgets::button(painter, rect, &format!("{}  ⏭", part.kind.label()), true, ui.style());
+            crate::widgets::button(
+                painter,
+                rect,
+                &format!("{}  ⏭", part.kind.label()),
+                true,
+                ui.style(),
+            );
             self.skip_button = Some(rect);
         }
         if self.show_stats {
@@ -720,7 +865,11 @@ impl Player {
                     galley.size() + vec2(48.0, 24.0),
                 );
                 theme::paint_overlay(painter, rect, 10.0);
-                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::overlay_text());
+                painter.galley(
+                    rect.center() - galley.size() / 2.0,
+                    galley,
+                    theme::overlay_text(),
+                );
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(until - now));
             } else {
                 self.message = None;
@@ -731,15 +880,25 @@ impl Player {
 
     fn draw_osd(&mut self, ui: &egui::Ui, safe: Rect, now: f64, paused: bool) {
         let duration = self.mpv.get_f64("duration").unwrap_or(0.0);
-        let panel = Rect::from_min_max(pos2(safe.left(), safe.bottom() - 150.0), safe.right_bottom());
+        let panel = Rect::from_min_max(
+            pos2(safe.left(), safe.bottom() - 150.0),
+            safe.right_bottom(),
+        );
         self.osd_panel = Some(panel);
         let inner = panel.shrink2(vec2(32.0, 24.0));
-        let bar = Rect::from_min_size(pos2(inner.left(), inner.bottom() - 26.0), vec2(inner.width() - 300.0, 10.0));
+        let bar = Rect::from_min_size(
+            pos2(inner.left(), inner.bottom() - 26.0),
+            vec2(inner.width() - 300.0, 10.0),
+        );
 
         // Seek bar: pressing seeks to the mouse, dragging follows it (on keyframes, so it
         // keeps up), and letting go seeks there exactly.
         let grab = bar.expand2(vec2(0.0, BAR_GRAB));
-        let response = ui.interact(grab, egui::Id::new("flex-seek-bar"), egui::Sense::click_and_drag());
+        let response = ui.interact(
+            grab,
+            egui::Id::new("flex-seek-bar"),
+            egui::Sense::click_and_drag(),
+        );
         let at = |x: f32| duration * ((x - bar.left()) / bar.width()).clamp(0.0, 1.0) as f64;
         if duration > 0.0
             && response.is_pointer_button_down_on()
@@ -757,12 +916,18 @@ impl Player {
             ui.ctx().request_repaint();
         } else if let Some((target, _)) = self.drag.take() {
             // Where it was let go: the last move can arrive in the same frame as the release.
-            let target = ui.input(|i| i.pointer.latest_pos()).map_or(target, |p| at(p.x));
+            let target = ui
+                .input(|i| i.pointer.latest_pos())
+                .map_or(target, |p| at(p.x));
             self.command(&["seek", &format!("{target:.3}"), "absolute+exact"]);
             self.osd_until = now + OSD_SECS;
         }
         // Until mpv catches up, show where the bar is being dragged to.
-        let pos = self.drag.map(|(t, _)| t).or_else(|| self.mpv.get_f64("time-pos")).unwrap_or(0.0);
+        let pos = self
+            .drag
+            .map(|(t, _)| t)
+            .or_else(|| self.mpv.get_f64("time-pos"))
+            .unwrap_or(0.0);
 
         let painter = ui.painter();
         theme::paint_overlay(painter, panel, 14.0);
@@ -775,19 +940,47 @@ impl Player {
             }
             title_pos.x += 44.0;
         }
-        painter.text(title_pos, Align2::LEFT_TOP, &self.req.title, TextStyle::Body.resolve(ui.style()), theme::overlay_text());
-        let time = format!("{} / {}", theme::format_time(pos), theme::format_time(duration));
-        painter.text(inner.right_bottom(), Align2::RIGHT_BOTTOM, &time, TextStyle::Body.resolve(ui.style()), theme::overlay_text());
+        painter.text(
+            title_pos,
+            Align2::LEFT_TOP,
+            &self.req.title,
+            TextStyle::Body.resolve(ui.style()),
+            theme::overlay_text(),
+        );
+        let time = format!(
+            "{} / {}",
+            theme::format_time(pos),
+            theme::format_time(duration)
+        );
+        painter.text(
+            inner.right_bottom(),
+            Align2::RIGHT_BOTTOM,
+            &time,
+            TextStyle::Body.resolve(ui.style()),
+            theme::overlay_text(),
+        );
 
-        painter.rect_filled(bar, CornerRadius::same(5), theme::overlay_text().gamma_multiply(0.22));
+        painter.rect_filled(
+            bar,
+            CornerRadius::same(5),
+            theme::overlay_text().gamma_multiply(0.22),
+        );
         if duration > 0.0 {
             let mut done = bar;
             done.set_width(bar.width() * (pos / duration).clamp(0.0, 1.0) as f32);
             painter.rect_filled(done, CornerRadius::same(5), theme::progress());
             // YouTube: where SponsorBlock's segments are, in their categories' colours.
-            for segment in self.youtube.as_ref().and_then(|yt| yt.segments.as_deref()).unwrap_or_default() {
+            for segment in self
+                .youtube
+                .as_ref()
+                .and_then(|yt| yt.segments.as_deref())
+                .unwrap_or_default()
+            {
                 let x = |t: f64| bar.left() + bar.width() * (t / duration).clamp(0.0, 1.0) as f32;
-                let mark = Rect::from_min_max(pos2(x(segment.start), bar.top()), pos2(x(segment.end).max(x(segment.start) + 3.0), bar.bottom()));
+                let mark = Rect::from_min_max(
+                    pos2(x(segment.start), bar.top()),
+                    pos2(x(segment.end).max(x(segment.start) + 3.0), bar.bottom()),
+                );
                 let [r, g, b] = sponsorblock::category_colour(&segment.category);
                 painter.rect_filled(mark, CornerRadius::same(2), Color32::from_rgb(r, g, b));
             }
@@ -797,11 +990,22 @@ impl Player {
             // The time under the mouse, above the bar.
             if let Some(p) = response.hover_pos().filter(|_| self.drag.is_none()) {
                 let font = TextStyle::Body.resolve(ui.style());
-                let galley = painter.layout_no_wrap(theme::format_time(at(p.x)), font, theme::overlay_text());
+                let galley = painter.layout_no_wrap(
+                    theme::format_time(at(p.x)),
+                    font,
+                    theme::overlay_text(),
+                );
                 let x = p.x.clamp(bar.left(), bar.right());
-                let label = Rect::from_center_size(pos2(x, panel.top() - 32.0), galley.size() + vec2(24.0, 12.0));
+                let label = Rect::from_center_size(
+                    pos2(x, panel.top() - 32.0),
+                    galley.size() + vec2(24.0, 12.0),
+                );
                 theme::paint_overlay(painter, label, 8.0);
-                painter.galley(label.center() - galley.size() / 2.0, galley, theme::overlay_text());
+                painter.galley(
+                    label.center() - galley.size() / 2.0,
+                    galley,
+                    theme::overlay_text(),
+                );
             }
         }
     }
@@ -847,7 +1051,11 @@ impl Screen for Player {
     }
 
     fn playback(&self) -> Option<Playback> {
-        let state = if self.paused() { PlaybackState::Paused } else { PlaybackState::Playing };
+        let state = if self.paused() {
+            PlaybackState::Paused
+        } else {
+            PlaybackState::Playing
+        };
         Some(Playback {
             state,
             title: self.req.title.clone(),
@@ -859,11 +1067,13 @@ impl Screen for Player {
     }
 
     fn playing_file(&self) -> Option<(i64, i64)> {
-        (self.req.library_id >= 0 && self.req.file_id >= 0).then_some((self.req.library_id, self.req.file_id))
+        (self.req.library_id >= 0 && self.req.file_id >= 0)
+            .then_some((self.req.library_id, self.req.file_id))
     }
 
     fn on_controls(&self, pos: egui::Pos2) -> bool {
-        self.osd_panel.is_some_and(|panel| panel.contains(pos)) || self.skip_button.is_some_and(|b| b.contains(pos))
+        self.osd_panel.is_some_and(|panel| panel.contains(pos))
+            || self.skip_button.is_some_and(|b| b.contains(pos))
     }
 
     fn on_leave(&mut self, sh: &mut Shared) {
@@ -883,7 +1093,10 @@ mod tests {
     #[test]
     fn only_a_stop_well_before_the_end_is_early() {
         assert!(!ended_early(1439.9, 1440.0));
-        assert!(!ended_early(1420.0, 1440.0), "durations can be a little off");
+        assert!(
+            !ended_early(1420.0, 1440.0),
+            "durations can be a little off"
+        );
         assert!(ended_early(900.0, 1440.0));
         assert!(!ended_early(7180.0, 7200.0), "2% slack on a film");
         assert!(ended_early(7000.0, 7200.0));

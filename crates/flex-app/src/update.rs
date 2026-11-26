@@ -30,7 +30,10 @@ const TICK: Duration = Duration::from_secs(15);
 
 /// The version to compare releases against.
 pub fn current_version() -> Version {
-    std::env::var(PRETEND_ENV).ok().and_then(|v| Version::parse(&v)).unwrap_or_else(Version::current)
+    std::env::var(PRETEND_ENV)
+        .ok()
+        .and_then(|v| Version::parse(&v))
+        .unwrap_or_else(Version::current)
 }
 
 /// Whether this copy was put here by the installer (its uninstaller sits next to it), so
@@ -57,9 +60,18 @@ pub enum Progress {
     Idle,
     /// Only shown for "Update now".
     Checking,
-    Downloading { version: Version, done: u64, total: u64 },
-    Ready { version: Version, installer: PathBuf },
-    Installing { version: Version },
+    Downloading {
+        version: Version,
+        done: u64,
+        total: u64,
+    },
+    Ready {
+        version: Version,
+        installer: PathBuf,
+    },
+    Installing {
+        version: Version,
+    },
     /// After "Update now": nothing newer, or it failed. Shown once, then back to idle.
     UpToDate,
     Failed(String),
@@ -107,7 +119,10 @@ impl Updater {
         }
         self.now = true;
         self.start(ctx);
-        let downloading = matches!(self.progress(), Progress::Downloading { .. } | Progress::Ready { .. });
+        let downloading = matches!(
+            self.progress(),
+            Progress::Downloading { .. } | Progress::Ready { .. }
+        );
         if !downloading {
             self.set_progress(Progress::Checking);
             if let Some(wake) = &self.wake {
@@ -118,7 +133,11 @@ impl Updater {
     }
 
     pub fn progress(&self) -> Progress {
-        self.shared.progress.lock().map(|p| p.clone()).unwrap_or_default()
+        self.shared
+            .progress
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_default()
     }
 
     fn set_progress(&self, progress: Progress) {
@@ -162,12 +181,18 @@ impl Updater {
         self.launched = true;
         let log = download_dir().join("install.log");
         let mut command = std::process::Command::new(installer);
-        command.args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]).arg(format!("/LOG={}", log.display()));
+        command
+            .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+            .arg(format!("/LOG={}", log.display()));
         if hidden {
             // Passed on to Flex when the installer starts it again (see flex.iss).
             command.arg("/flexargs=--tray");
         }
-        log::info!("updating: running {} (log: {})", installer.display(), log.display());
+        log::info!(
+            "updating: running {} (log: {})",
+            installer.display(),
+            log.display()
+        );
         if let Err(e) = command.spawn() {
             self.launched = false;
             self.now = false;
@@ -189,7 +214,10 @@ fn check_loop(shared: &Shared, wake: &Receiver<()>, ctx: &egui::Context) {
             Err(RecvTimeoutError::Disconnected) => return,
         };
         // Once one is downloaded there's nothing more to do (it's installed next).
-        if matches!(*shared.progress.lock().unwrap_or_else(|e| e.into_inner()), Progress::Ready { .. }) {
+        if matches!(
+            *shared.progress.lock().unwrap_or_else(|e| e.into_inner()),
+            Progress::Ready { .. }
+        ) {
             continue;
         }
         if !asked {
@@ -209,10 +237,18 @@ fn check_loop(shared: &Shared, wake: &Receiver<()>, ctx: &egui::Context) {
         next = Instant::now() + CHECK_EVERY;
         match fetch(current, &set) {
             Ok(Some((version, installer))) => set(Progress::Ready { version, installer }),
-            Ok(None) => set(if asked { Progress::UpToDate } else { Progress::Idle }),
+            Ok(None) => set(if asked {
+                Progress::UpToDate
+            } else {
+                Progress::Idle
+            }),
             Err(e) => {
                 log::warn!("update check failed: {e:#}");
-                set(if asked { Progress::Failed(format!("{e:#}")) } else { Progress::Idle });
+                set(if asked {
+                    Progress::Failed(format!("{e:#}"))
+                } else {
+                    Progress::Idle
+                });
             }
         }
     }
@@ -224,9 +260,17 @@ fn fetch(current: Version, set: &dyn Fn(Progress)) -> Result<Option<(Version, Pa
         log::debug!("no update: {current} is the latest");
         return Ok(None);
     };
-    log::info!("update found: Flex {} ({} bytes)", installer.version, installer.size);
+    log::info!(
+        "update found: Flex {} ({} bytes)",
+        installer.version,
+        installer.size
+    );
     let (version, total) = (installer.version, installer.size);
-    set(Progress::Downloading { version, done: 0, total });
+    set(Progress::Downloading {
+        version,
+        done: 0,
+        total,
+    });
     let dir = download_dir();
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     // Installers for older updates aren't needed any more.
@@ -242,7 +286,11 @@ fn fetch(current: Version, set: &dyn Fn(Progress)) -> Result<Option<(Version, Pa
         let percent = done * 100 / total.max(1);
         if percent != shown {
             shown = percent;
-            set(Progress::Downloading { version, done, total });
+            set(Progress::Downloading {
+                version,
+                done,
+                total,
+            });
         }
     })?;
     log::info!("update ready: {}", dest.display());

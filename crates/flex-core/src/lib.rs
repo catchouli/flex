@@ -33,7 +33,11 @@ pub use tree::Tree;
 pub fn single_instance_lock() -> std::io::Result<Option<std::fs::File>> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
-    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("flex.lock"))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("flex.lock"))?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),

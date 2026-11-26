@@ -99,7 +99,10 @@ pub fn channels_label(channels: u32, layout: &str) -> Option<String> {
     // "5.1(side)", "7.1(wide)", "2.1"
     let numeric = layout.split('(').next().unwrap_or("");
     let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
-    if numeric.split_once('.').is_some_and(|(front, lfe)| digits(front) && digits(lfe)) {
+    if numeric
+        .split_once('.')
+        .is_some_and(|(front, lfe)| digits(front) && digits(lfe))
+    {
         return Some(numeric.to_owned());
     }
     Some(match channels {
@@ -128,7 +131,11 @@ pub fn summary(tracks: &[AudioTrack], max: usize) -> String {
         }
     }
     let more = parts.len().saturating_sub(max);
-    let mut out: Vec<String> = parts.into_iter().take(max).map(|(d, n)| if n > 1 { format!("{d} ×{n}") } else { d }).collect();
+    let mut out: Vec<String> = parts
+        .into_iter()
+        .take(max)
+        .map(|(d, n)| if n > 1 { format!("{d} ×{n}") } else { d })
+        .collect();
     if more > 0 {
         out.push(format!("+{more} more"));
     }
@@ -140,17 +147,38 @@ mod tests {
     use super::*;
 
     fn track(codec: &str, profile: &str, channels: u32, layout: &str) -> AudioTrack {
-        AudioTrack { codec: codec.into(), profile: profile.into(), channels, layout: layout.into(), ..Default::default() }
+        AudioTrack {
+            codec: codec.into(),
+            profile: profile.into(),
+            channels,
+            layout: layout.into(),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn names_formats() {
-        assert_eq!(track("truehd", "Dolby TrueHD + Dolby Atmos", 8, "7.1").format(), "Dolby TrueHD Atmos 7.1");
-        assert_eq!(track("truehd", "", 6, "5.1(side)").format(), "Dolby TrueHD 5.1");
-        assert_eq!(track("eac3", "Dolby Digital Plus + Dolby Atmos", 6, "5.1(side)").format(), "Dolby Digital Plus Atmos 5.1");
+        assert_eq!(
+            track("truehd", "Dolby TrueHD + Dolby Atmos", 8, "7.1").format(),
+            "Dolby TrueHD Atmos 7.1"
+        );
+        assert_eq!(
+            track("truehd", "", 6, "5.1(side)").format(),
+            "Dolby TrueHD 5.1"
+        );
+        assert_eq!(
+            track("eac3", "Dolby Digital Plus + Dolby Atmos", 6, "5.1(side)").format(),
+            "Dolby Digital Plus Atmos 5.1"
+        );
         assert_eq!(track("ac3", "", 6, "").format(), "Dolby Digital 5.1");
-        assert_eq!(track("dts", "DTS-HD MA", 8, "7.1").format(), "DTS-HD MA 7.1");
-        assert_eq!(track("dts", "DTS-HD MA + DTS:X", 8, "7.1").format(), "DTS:X 7.1");
+        assert_eq!(
+            track("dts", "DTS-HD MA", 8, "7.1").format(),
+            "DTS-HD MA 7.1"
+        );
+        assert_eq!(
+            track("dts", "DTS-HD MA + DTS:X", 8, "7.1").format(),
+            "DTS:X 7.1"
+        );
         assert_eq!(track("dts", "DTS-ES", 7, "6.1").format(), "DTS-ES 6.1");
         assert_eq!(track("dts", "DTS", 6, "5.1(side)").format(), "DTS 5.1");
         assert_eq!(track("aac", "LC", 2, "stereo").format(), "AAC stereo");
@@ -163,12 +191,31 @@ mod tests {
 
     #[test]
     fn describes_and_summarises() {
-        let en = AudioTrack { lang: "eng".into(), ..track("truehd", "", 8, "7.1") };
-        let ja = AudioTrack { lang: "jpn".into(), ..track("aac", "", 2, "") };
-        let commentary = AudioTrack { lang: "en".into(), title: "Director's Commentary".into(), ..track("ac3", "", 2, "") };
+        let en = AudioTrack {
+            lang: "eng".into(),
+            ..track("truehd", "", 8, "7.1")
+        };
+        let ja = AudioTrack {
+            lang: "jpn".into(),
+            ..track("aac", "", 2, "")
+        };
+        let commentary = AudioTrack {
+            lang: "en".into(),
+            title: "Director's Commentary".into(),
+            ..track("ac3", "", 2, "")
+        };
         assert_eq!(en.describe(), "English · Dolby TrueHD 7.1");
-        assert_eq!(commentary.describe(), "English · Dolby Digital stereo (commentary)");
-        assert_eq!(summary(&[en.clone(), ja.clone(), ja.clone()], 4), "English · Dolby TrueHD 7.1   ·   Japanese · AAC stereo ×2");
-        assert_eq!(summary(&[en, ja, commentary], 1), "English · Dolby TrueHD 7.1   ·   +2 more");
+        assert_eq!(
+            commentary.describe(),
+            "English · Dolby Digital stereo (commentary)"
+        );
+        assert_eq!(
+            summary(&[en.clone(), ja.clone(), ja.clone()], 4),
+            "English · Dolby TrueHD 7.1   ·   Japanese · AAC stereo ×2"
+        );
+        assert_eq!(
+            summary(&[en, ja, commentary], 1),
+            "English · Dolby TrueHD 7.1   ·   +2 more"
+        );
     }
 }

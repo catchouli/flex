@@ -21,7 +21,11 @@ struct Entry {
 }
 
 fn dir_entry(path: PathBuf, note: &str) -> Entry {
-    Entry { path, note: note.to_owned(), is_dir: true }
+    Entry {
+        path,
+        note: note.to_owned(),
+        is_dir: true,
+    }
 }
 
 /// What the picker is choosing.
@@ -50,18 +54,31 @@ fn list_dir(dir: &Path, purpose: Purpose) -> std::io::Result<Vec<Entry>> {
             continue;
         }
         let file_type = item.file_type()?;
-        let is_dir = if file_type.is_symlink() { item.path().is_dir() } else { file_type.is_dir() };
+        let is_dir = if file_type.is_symlink() {
+            item.path().is_dir()
+        } else {
+            file_type.is_dir()
+        };
         if is_dir {
             dirs.push(dir_entry(item.path(), ""));
         } else if (purpose == Purpose::PlexDatabase && name.ends_with(".db"))
-            || (purpose == Purpose::YouTubeImport && [".csv", ".json", ".db", ".opml", ".xml"].iter().any(|e| name.to_ascii_lowercase().ends_with(e)))
+            || (purpose == Purpose::YouTubeImport
+                && [".csv", ".json", ".db", ".opml", ".xml"]
+                    .iter()
+                    .any(|e| name.to_ascii_lowercase().ends_with(e)))
         {
             let size = item.metadata().map_or(0, |m| m.len());
             let note = format!("{} MB", size / 1_000_000);
-            files.push(Entry { path: item.path(), note, is_dir: false });
+            files.push(Entry {
+                path: item.path(),
+                note,
+                is_dir: false,
+            });
         }
     }
-    let by_name = |a: &Entry, b: &Entry| flex_core::natural::natural_cmp(&a.path.to_string_lossy(), &b.path.to_string_lossy());
+    let by_name = |a: &Entry, b: &Entry| {
+        flex_core::natural::natural_cmp(&a.path.to_string_lossy(), &b.path.to_string_lossy())
+    };
     dirs.sort_by(by_name);
     files.sort_by(by_name);
     dirs.extend(files);
@@ -106,7 +123,10 @@ fn roots() -> Vec<Entry> {
 }
 
 fn name_of(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// Folder picker. Each level is browsed in place; Back goes up a level, and from the top
@@ -171,7 +191,13 @@ impl FolderPicker {
     /// Row 0 is "Use this folder" when choosing a folder (a library's, the sync folder or
     /// the crash reports folder).
     fn offset(&self) -> usize {
-        usize::from(self.dir.is_some() && matches!(self.purpose, Purpose::Library | Purpose::SyncFolder | Purpose::CrashFolder))
+        usize::from(
+            self.dir.is_some()
+                && matches!(
+                    self.purpose,
+                    Purpose::Library | Purpose::SyncFolder | Purpose::CrashFolder
+                ),
+        )
     }
 }
 
@@ -200,7 +226,9 @@ impl Screen for FolderPicker {
                 sh.toast(format!("Syncing through {}", dir.display()));
                 Nav::Pop
             }
-            ListInput::Activate(0) if self.offset() == 1 && self.purpose == Purpose::CrashFolder => {
+            ListInput::Activate(0)
+                if self.offset() == 1 && self.purpose == Purpose::CrashFolder =>
+            {
                 let dir = self.dir.clone().unwrap_or_default();
                 sh.set_crash_dir(Some(&dir));
                 sh.toast(format!("Crash reports will go in {}", dir.display()));
@@ -214,7 +242,9 @@ impl Screen for FolderPicker {
                 if !entry.is_dir && self.purpose == Purpose::YouTubeImport {
                     return match sh.import_subscriptions(&entry.path) {
                         Ok(added) => {
-                            sh.toast(format!("Imported {added} new channels; fetching their videos…"));
+                            sh.toast(format!(
+                                "Imported {added} new channels; fetching their videos…"
+                            ));
                             Nav::Pop
                         }
                         Err(e) => {
@@ -240,11 +270,23 @@ impl Screen for FolderPicker {
         let (title, prompt) = match self.purpose {
             Purpose::Library => ("Add library", "Choose a drive or folder"),
             Purpose::PlexDatabase => ("Import from Plex", "Find com.plexapp.plugins.library.db"),
-            Purpose::YouTubeImport => ("Import subscriptions", "Find subscriptions.csv (Google Takeout), or a FreeTube, NewPipe or OPML export"),
-            Purpose::SyncFolder => ("Sync folder", "Choose a folder every device can reach, e.g. an empty folder on the array"),
-            Purpose::CrashFolder => ("Crash reports folder", "Choose where crash reports (log + minidump) go"),
+            Purpose::YouTubeImport => (
+                "Import subscriptions",
+                "Find subscriptions.csv (Google Takeout), or a FreeTube, NewPipe or OPML export",
+            ),
+            Purpose::SyncFolder => (
+                "Sync folder",
+                "Choose a folder every device can reach, e.g. an empty folder on the array",
+            ),
+            Purpose::CrashFolder => (
+                "Crash reports folder",
+                "Choose where crash reports (log + minidump) go",
+            ),
         };
-        let location = self.dir.as_ref().map_or(prompt.to_owned(), |d| d.display().to_string());
+        let location = self
+            .dir
+            .as_ref()
+            .map_or(prompt.to_owned(), |d| d.display().to_string());
         let subtitle = self.error.clone().unwrap_or(location);
         let body = widgets::header(ui.painter(), rect, title, &subtitle, ui.style());
         if self.pending.is_some() {
@@ -261,7 +303,11 @@ impl Screen for FolderPicker {
             rows.push(Row::new(Icon::Add, label));
         }
         rows.extend(self.dirs.iter().map(|e| {
-            let name = if self.dir.is_none() { e.path.display().to_string() } else { name_of(&e.path) };
+            let name = if self.dir.is_none() {
+                e.path.display().to_string()
+            } else {
+                name_of(&e.path)
+            };
             Row::new(if e.is_dir { Icon::Folder } else { Icon::Add }, name).detail(e.note.as_str())
         }));
         if rows.is_empty() {
@@ -284,7 +330,10 @@ pub struct KindPicker {
 
 impl KindPicker {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, list: ListState::default() }
+        Self {
+            root,
+            list: ListState::default(),
+        }
     }
 }
 
@@ -321,8 +370,10 @@ impl Screen for KindPicker {
     fn ui(&mut self, ui: &mut Ui, _sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         let subtitle = format!("What's in {}?", self.root.display());
         let body = widgets::header(ui.painter(), rect, "Library type", &subtitle, ui.style());
-        let rows: Vec<Row> =
-            LibraryKind::ALL.iter().map(|k| Row::new(Icon::None, k.label()).detail(kind_hint(*k))).collect();
+        let rows: Vec<Row> = LibraryKind::ALL
+            .iter()
+            .map(|k| Row::new(Icon::None, k.label()).detail(kind_hint(*k)))
+            .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }

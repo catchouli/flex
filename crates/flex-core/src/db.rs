@@ -223,7 +223,7 @@ const MIGRATIONS: &[&str] = &[
         size    INTEGER NOT NULL,
         mtime   INTEGER NOT NULL,
         tracks  TEXT NOT NULL
-    );"
+    );",
 ];
 
 /// Now, in SQL (Unix seconds).
@@ -365,7 +365,12 @@ impl Db {
     }
 
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
@@ -377,7 +382,12 @@ impl Db {
     }
 
     /// A file's audio tracks, if looked up while it had this size and mtime.
-    pub fn audio_tracks(&self, file_id: i64, size: u64, mtime: i64) -> Result<Option<Vec<crate::audio::AudioTrack>>> {
+    pub fn audio_tracks(
+        &self,
+        file_id: i64,
+        size: u64,
+        mtime: i64,
+    ) -> Result<Option<Vec<crate::audio::AudioTrack>>> {
         let json: Option<String> = self
             .conn
             .query_row(
@@ -389,7 +399,13 @@ impl Db {
         Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
     }
 
-    pub fn set_audio_tracks(&self, file_id: i64, size: u64, mtime: i64, tracks: &[crate::audio::AudioTrack]) -> Result<()> {
+    pub fn set_audio_tracks(
+        &self,
+        file_id: i64,
+        size: u64,
+        mtime: i64,
+        tracks: &[crate::audio::AudioTrack],
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO media_audio (file_id, size, mtime, tracks) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(file_id) DO UPDATE SET size = ?2, mtime = ?3, tracks = ?4",
@@ -427,10 +443,16 @@ impl Db {
     }
 
     pub fn group_matches(&self, library_id: i64) -> Result<Vec<GroupMatch>> {
-        let mut stmt =
-            self.conn.prepare("SELECT group_key, show_id, season, manual FROM group_matches WHERE library_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT group_key, show_id, season, manual FROM group_matches WHERE library_id = ?1",
+        )?;
         let rows = stmt.query_map([library_id], |r| {
-            Ok(GroupMatch { group_key: r.get(0)?, show_id: r.get(1)?, season: r.get(2)?, manual: r.get(3)? })
+            Ok(GroupMatch {
+                group_key: r.get(0)?,
+                show_id: r.get(1)?,
+                season: r.get(2)?,
+                manual: r.get(3)?,
+            })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -440,33 +462,43 @@ impl Db {
     /// for vanished groups are dropped unless set by hand, and shows left with no groups
     /// are removed.
     pub fn sync_groups(&mut self, library_id: i64, groups: &[crate::catalog::Group]) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             // group key -> (show id, manual)
             let existing: HashMap<String, (i64, bool)> = {
-                let mut stmt =
-                    tx.prepare("SELECT group_key, show_id, manual FROM group_matches WHERE library_id = ?1")?;
-                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+                let mut stmt = tx.prepare(
+                    "SELECT group_key, show_id, manual FROM group_matches WHERE library_id = ?1",
+                )?;
+                let rows =
+                    stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
             // show id -> (norm, matched online)
             let show_info: HashMap<i64, (String, bool)> = {
-                let mut stmt = tx.prepare("SELECT id, norm, state != 'local' FROM shows WHERE library_id = ?1")?;
-                let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+                let mut stmt = tx.prepare(
+                    "SELECT id, norm, state != 'local' FROM shows WHERE library_id = ?1",
+                )?;
+                let rows =
+                    stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
             let mut by_norm: HashMap<String, i64> = {
-                let mut stmt = tx.prepare("SELECT norm, id FROM shows WHERE library_id = ?1 ORDER BY id")?;
+                let mut stmt =
+                    tx.prepare("SELECT norm, id FROM shows WHERE library_id = ?1 ORDER BY id")?;
                 let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
-            let mut insert_show =
-                tx.prepare("INSERT INTO shows (library_id, title, norm, year) VALUES (?1, ?2, ?3, ?4)")?;
+            let mut insert_show = tx.prepare(
+                "INSERT INTO shows (library_id, title, norm, year) VALUES (?1, ?2, ?3, ?4)",
+            )?;
             let mut insert_match = tx.prepare(
                 "INSERT INTO group_matches (library_id, group_key, show_id) VALUES (?1, ?2, ?3)
                  ON CONFLICT(library_id, group_key) DO UPDATE SET show_id = ?3",
             )?;
-            let current: std::collections::HashSet<&str> = groups.iter().map(|g| g.key.as_str()).collect();
+            let current: std::collections::HashSet<&str> =
+                groups.iter().map(|g| g.key.as_str()).collect();
             for g in groups {
                 // Keep manual choices, automatic ones whose show still has this title, and
                 // ones in a show already matched online (where differently named folders
@@ -474,9 +506,11 @@ impl Db {
                 match existing.get(&g.key) {
                     Some((_, true)) => continue,
                     Some((show, false))
-                        if show_info.get(show).is_some_and(|(norm, matched)| *matched || *norm == g.norm) =>
+                        if show_info
+                            .get(show)
+                            .is_some_and(|(norm, matched)| *matched || *norm == g.norm) =>
                     {
-                        continue
+                        continue;
                     }
                     _ => {}
                 }
@@ -491,7 +525,8 @@ impl Db {
                 };
                 insert_match.execute(params![library_id, g.key, show_id])?;
             }
-            let mut delete_match = tx.prepare("DELETE FROM group_matches WHERE library_id = ?1 AND group_key = ?2")?;
+            let mut delete_match =
+                tx.prepare("DELETE FROM group_matches WHERE library_id = ?1 AND group_key = ?2")?;
             for (key, (_, manual)) in &existing {
                 if !manual && !current.contains(key.as_str()) {
                     delete_match.execute(params![library_id, key])?;
@@ -524,7 +559,13 @@ impl Db {
     }
 
     /// Assigns a group by hand (to `show_id`, optionally with a season). Never undone by scans.
-    pub fn set_group_match(&self, library_id: i64, group_key: &str, show_id: i64, season: Option<i32>) -> Result<()> {
+    pub fn set_group_match(
+        &self,
+        library_id: i64,
+        group_key: &str,
+        show_id: i64,
+        season: Option<i32>,
+    ) -> Result<()> {
         self.conn.execute(
             &format!(
                 "INSERT INTO group_matches (library_id, group_key, show_id, season, manual, changed_at) VALUES (?1, ?2, ?3, ?4, 1, {SQL_NOW})
@@ -538,10 +579,21 @@ impl Db {
     /// Stores what was found online for a show. `state` is "matched", or "manual" when
     /// chosen by hand. If another show in the library already has this entry, this show's
     /// folders join it instead (e.g. a romaji-named folder and an English-named one).
-    pub fn set_show_metadata(&mut self, show_id: i64, found: &crate::metadata::Candidate, state: &str) -> Result<()> {
+    pub fn set_show_metadata(
+        &mut self,
+        show_id: i64,
+        found: &crate::metadata::Candidate,
+        state: &str,
+    ) -> Result<()> {
         let provider_id = found.provider_id();
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let library_id: i64 = tx.query_row("SELECT library_id FROM shows WHERE id = ?1", [show_id], |r| r.get(0))?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let library_id: i64 = tx.query_row(
+            "SELECT library_id FROM shows WHERE id = ?1",
+            [show_id],
+            |r| r.get(0),
+        )?;
         let existing: Option<i64> = tx
             .query_row(
                 "SELECT id FROM shows WHERE library_id = ?1 AND provider = 'tmdb' AND provider_id = ?2 AND id != ?3",
@@ -551,13 +603,18 @@ impl Db {
             .optional()?;
         match existing {
             Some(into) => {
-                tx.execute("UPDATE group_matches SET show_id = ?1 WHERE show_id = ?2", params![into, show_id])?;
+                tx.execute(
+                    "UPDATE group_matches SET show_id = ?1 WHERE show_id = ?2",
+                    params![into, show_id],
+                )?;
                 tx.execute("DELETE FROM shows WHERE id = ?1", [show_id])?;
                 // Chosen by hand: the show it joined counts as matched by hand too, so
                 // Rematch keeps it and the choice syncs.
                 if state == "manual" {
                     tx.execute(
-                        &format!("UPDATE shows SET state = 'manual', manual_at = {SQL_NOW} WHERE id = ?1"),
+                        &format!(
+                            "UPDATE shows SET state = 'manual', manual_at = {SQL_NOW} WHERE id = ?1"
+                        ),
                         [into],
                     )?;
                 }
@@ -581,13 +638,18 @@ impl Db {
     /// including shows matched by hand and the folders in them), so the next organise +
     /// match starts afresh.
     pub fn reset_matching(&mut self, library_id: i64) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM group_matches WHERE library_id = ?1 AND manual = 0
              AND show_id NOT IN (SELECT id FROM shows WHERE library_id = ?1 AND state = 'manual')",
             [library_id],
         )?;
-        tx.execute("UPDATE shows SET state = 'local' WHERE library_id = ?1 AND state = 'unmatched'", [library_id])?;
+        tx.execute(
+            "UPDATE shows SET state = 'local' WHERE library_id = ?1 AND state = 'unmatched'",
+            [library_id],
+        )?;
         Self::delete_empty_shows(&tx, library_id)?;
         tx.commit()?;
         Ok(())
@@ -597,20 +659,33 @@ impl Db {
     /// cast was saved without person ids or original language not yet saved: (show id,
     /// provider id, title, whole details needed). When only those are needed, episodes
     /// needn't be fetched again.
-    pub fn shows_needing_details(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String, bool)>> {
+    pub fn shows_needing_details(
+        &self,
+        library_id: i64,
+        max_age: i64,
+    ) -> Result<Vec<(i64, String, String, bool)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, provider_id, title, details_at IS NULL OR details_at < strftime('%s', 'now') - ?2 AS stale
              FROM shows
              WHERE library_id = ?1 AND provider_id IS NOT NULL
              AND (stale OR cast_ids IS NULL OR original_language IS NULL)",
         )?;
-        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        let rows = stmt.query_map(params![library_id, max_age], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Stores fetched details (and TMDB cast) for a show.
-    pub fn save_details(&mut self, show_id: i64, provider_id: &str, d: &crate::metadata::Details) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    pub fn save_details(
+        &mut self,
+        show_id: i64,
+        provider_id: &str,
+        d: &crate::metadata::Details,
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let genres = (!d.genres.is_empty()).then(|| d.genres.join(", "));
         tx.execute(
             "UPDATE shows SET overview = ?2, release_date = ?3, runtime = ?4, genres = ?5, backdrop = ?6,
@@ -619,7 +694,10 @@ impl Db {
             params![show_id, d.overview, d.release_date, d.runtime, genres, d.backdrop_path, d.poster_path, d.original_language],
         )?;
         Self::replace_credits(&tx, provider_id, "cast", &d.cast)?;
-        tx.execute("DELETE FROM tv_seasons WHERE provider_id = ?1", [provider_id])?;
+        tx.execute(
+            "DELETE FROM tv_seasons WHERE provider_id = ?1",
+            [provider_id],
+        )?;
         for s in &d.seasons {
             tx.execute(
                 "INSERT INTO tv_seasons (provider_id, season, episode_count) VALUES (?1, ?2, ?3)",
@@ -630,8 +708,16 @@ impl Db {
         Ok(())
     }
 
-    fn replace_credits(conn: &Connection, provider_id: &str, kind: &str, cast: &[crate::metadata::CastMember]) -> Result<()> {
-        conn.execute("DELETE FROM credits WHERE provider_id = ?1 AND kind = ?2", params![provider_id, kind])?;
+    fn replace_credits(
+        conn: &Connection,
+        provider_id: &str,
+        kind: &str,
+        cast: &[crate::metadata::CastMember],
+    ) -> Result<()> {
+        conn.execute(
+            "DELETE FROM credits WHERE provider_id = ?1 AND kind = ?2",
+            params![provider_id, kind],
+        )?;
         for (i, c) in cast.iter().enumerate() {
             conn.execute(
                 "INSERT INTO credits (provider_id, kind, ord, name, role, image, person) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -643,33 +729,52 @@ impl Db {
 
     /// Matched shows whose voice cast hasn't been looked up (or not for `max_age` seconds):
     /// (show id, provider id, title).
-    pub fn shows_needing_voice_cast(&self, library_id: i64, max_age: i64) -> Result<Vec<(i64, String, String)>> {
+    pub fn shows_needing_voice_cast(
+        &self,
+        library_id: i64,
+        max_age: i64,
+    ) -> Result<Vec<(i64, String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, provider_id, title FROM shows
              WHERE library_id = ?1 AND provider_id IS NOT NULL
              AND (voice_at IS NULL OR voice_at < strftime('%s', 'now') - ?2)",
         )?;
-        let rows = stmt.query_map(params![library_id, max_age], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let rows = stmt.query_map(params![library_id, max_age], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Stores what AniList had for a show (voice cast, other titles) and notes that it was
     /// looked up.
-    pub fn save_anilist(&self, show_id: i64, provider_id: &str, info: &crate::metadata::AniListInfo) -> Result<()> {
+    pub fn save_anilist(
+        &self,
+        show_id: i64,
+        provider_id: &str,
+        info: &crate::metadata::AniListInfo,
+    ) -> Result<()> {
         if !info.cast.is_empty() {
             Self::replace_credits(&self.conn, provider_id, "voice", &info.cast)?;
         }
         for t in &info.titles {
-            self.conn.execute("INSERT OR IGNORE INTO alt_titles (provider_id, title) VALUES (?1, ?2)", params![provider_id, t])?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO alt_titles (provider_id, title) VALUES (?1, ?2)",
+                params![provider_id, t],
+            )?;
         }
-        self.conn.execute("UPDATE shows SET voice_at = strftime('%s', 'now') WHERE id = ?1", [show_id])?;
+        self.conn.execute(
+            "UPDATE shows SET voice_at = strftime('%s', 'now') WHERE id = ?1",
+            [show_id],
+        )?;
         Ok(())
     }
 
     /// Other titles by provider id.
     pub fn alt_titles(&self) -> Result<HashMap<String, Vec<String>>> {
         let mut out: HashMap<String, Vec<String>> = HashMap::new();
-        let mut stmt = self.conn.prepare("SELECT provider_id, title FROM alt_titles")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT provider_id, title FROM alt_titles")?;
         for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
             let (pid, title) = row?;
             out.entry(pid).or_default().push(title);
@@ -689,13 +794,17 @@ impl Db {
 
     /// Entries removed from Continue Watching: key → when.
     pub fn continue_hidden(&self) -> Result<HashMap<String, i64>> {
-        let mut stmt = self.conn.prepare("SELECT key, hidden_at FROM continue_hidden")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, hidden_at FROM continue_hidden")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn watchlist(&self) -> Result<Vec<(String, i64, i64)>> {
-        let mut stmt = self.conn.prepare("SELECT key, library_id, added_at FROM watchlist ORDER BY added_at DESC")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, library_id, added_at FROM watchlist ORDER BY added_at DESC")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -706,9 +815,13 @@ impl Db {
                 "INSERT OR IGNORE INTO watchlist (key, library_id, added_at) VALUES (?1, ?2, strftime('%s', 'now'))",
                 params![key, library_id],
             )?;
-            self.conn.execute("DELETE FROM sync_removed WHERE kind = 'watchlist' AND key = ?1", [key])?;
+            self.conn.execute(
+                "DELETE FROM sync_removed WHERE kind = 'watchlist' AND key = ?1",
+                [key],
+            )?;
         } else {
-            self.conn.execute("DELETE FROM watchlist WHERE key = ?1", [key])?;
+            self.conn
+                .execute("DELETE FROM watchlist WHERE key = ?1", [key])?;
             self.removed("watchlist", key)?;
         }
         Ok(())
@@ -724,7 +837,11 @@ impl Db {
     }
 
     /// Credits of one kind ("cast" or "voice"), in billing order.
-    pub fn credits(&self, provider_id: &str, kind: &str) -> Result<Vec<crate::metadata::CastMember>> {
+    pub fn credits(
+        &self,
+        provider_id: &str,
+        kind: &str,
+    ) -> Result<Vec<crate::metadata::CastMember>> {
         let mut stmt =
             self.conn.prepare("SELECT name, role, image, person FROM credits WHERE provider_id = ?1 AND kind = ?2 ORDER BY ord")?;
         let rows = stmt.query_map(params![provider_id, kind], |r| {
@@ -745,7 +862,9 @@ impl Db {
             "SELECT provider_id, COALESCE(role, '') FROM credits
              WHERE person = ?1 OR name = ?2 COLLATE NOCASE ORDER BY provider_id, kind, ord",
         )?;
-        let rows = stmt.query_map(params![person, name], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map(params![person, name], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
         let mut out: Vec<(String, String)> = Vec::new();
         for row in rows {
             let (pid, role) = row?;
@@ -779,8 +898,14 @@ impl Db {
         Ok(())
     }
 
-    pub fn save_episodes(&mut self, provider_id: &str, episodes: &[crate::metadata::EpisodeInfo]) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    pub fn save_episodes(
+        &mut self,
+        provider_id: &str,
+        episodes: &[crate::metadata::EpisodeInfo],
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for e in episodes {
             tx.execute(
                 "INSERT OR REPLACE INTO tv_episodes (provider_id, season, episode, title, overview, still, air_date, runtime)
@@ -795,11 +920,19 @@ impl Db {
     /// All series metadata, by provider id.
     pub fn series_meta(&self) -> Result<HashMap<String, SeriesMeta>> {
         let mut out: HashMap<String, SeriesMeta> = HashMap::new();
-        let mut stmt = self.conn.prepare("SELECT provider_id, season, episode_count FROM tv_seasons")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT provider_id, season, episode_count FROM tv_seasons")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?)))?;
         for row in rows {
             let (pid, number, episode_count) = row?;
-            out.entry(pid).or_default().seasons.push(crate::metadata::SeasonInfo { number, episode_count });
+            out.entry(pid)
+                .or_default()
+                .seasons
+                .push(crate::metadata::SeasonInfo {
+                    number,
+                    episode_count,
+                });
         }
         let mut stmt =
             self.conn.prepare("SELECT provider_id, season, episode, title, overview, still, air_date, runtime FROM tv_episodes")?;
@@ -824,7 +957,10 @@ impl Db {
     }
 
     pub fn set_show_state(&self, show_id: i64, state: &str) -> Result<()> {
-        self.conn.execute("UPDATE shows SET state = ?2 WHERE id = ?1", params![show_id, state])?;
+        self.conn.execute(
+            "UPDATE shows SET state = ?2 WHERE id = ?1",
+            params![show_id, state],
+        )?;
         Ok(())
     }
 
@@ -838,23 +974,39 @@ impl Db {
     }
 
     pub fn libraries(&self) -> Result<Vec<Library>> {
-        let mut stmt = self.conn.prepare("SELECT id, name, root, kind FROM libraries ORDER BY name COLLATE NOCASE")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, root, kind FROM libraries ORDER BY name COLLATE NOCASE")?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })?;
         let mut libs = Vec::new();
         for row in rows {
             let (id, name, root, kind) = row?;
             let kind = LibraryKind::parse(&kind).unwrap_or(LibraryKind::Tv);
-            libs.push(Library { id, name, root: PathBuf::from(root), kind });
+            libs.push(Library {
+                id,
+                name,
+                root: PathBuf::from(root),
+                kind,
+            });
         }
         Ok(libs)
     }
 
     pub fn add_library(&self, name: &str, root: &Path, kind: LibraryKind) -> Result<i64> {
         let root = root.to_string_lossy();
-        let exists: Option<i64> =
-            self.conn.query_row("SELECT id FROM libraries WHERE root = ?1", [&root], |r| r.get(0)).optional()?;
+        let exists: Option<i64> = self
+            .conn
+            .query_row("SELECT id FROM libraries WHERE root = ?1", [&root], |r| {
+                r.get(0)
+            })
+            .optional()?;
         if exists.is_some() {
             bail!("{root} is already a library");
         }
@@ -866,23 +1018,32 @@ impl Db {
     }
 
     pub fn rename_library(&self, id: i64, name: &str) -> Result<()> {
-        self.conn.execute("UPDATE libraries SET name = ?1 WHERE id = ?2", params![name, id])?;
+        self.conn.execute(
+            "UPDATE libraries SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
         Ok(())
     }
 
     pub fn set_library_kind(&self, id: i64, kind: LibraryKind) -> Result<()> {
-        self.conn.execute("UPDATE libraries SET kind = ?1 WHERE id = ?2", params![kind.as_str(), id])?;
+        self.conn.execute(
+            "UPDATE libraries SET kind = ?1 WHERE id = ?2",
+            params![kind.as_str(), id],
+        )?;
         Ok(())
     }
 
     pub fn remove_library(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM libraries WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM libraries WHERE id = ?1", [id])?;
         Ok(())
     }
 
     /// Cached folder parses for a library: dir -> (fingerprint, JSON data).
     pub fn parse_cache(&self, library_id: i64) -> Result<HashMap<String, (String, String)>> {
-        let mut stmt = self.conn.prepare("SELECT dir, fingerprint, data FROM parse_cache WHERE library_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT dir, fingerprint, data FROM parse_cache WHERE library_id = ?1")?;
         let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -891,21 +1052,41 @@ impl Db {
     /// no longer exist.
     /// Every album of a library that's been looked up, by album key.
     pub fn music_matches(&self, library_id: i64) -> Result<HashMap<String, MusicMatch>> {
-        let mut stmt = self.conn.prepare("SELECT album_key, data, manual, checked_at FROM music_matches WHERE library_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT album_key, data, manual, checked_at FROM music_matches WHERE library_id = ?1",
+        )?;
         let rows = stmt.query_map([library_id], |r| {
             let data: Option<String> = r.get(1)?;
-            Ok((r.get::<_, String>(0)?, data, r.get::<_, bool>(2)?, r.get::<_, i64>(3)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                data,
+                r.get::<_, bool>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
         })?;
         let mut out = HashMap::new();
         for row in rows {
             let (key, data, manual, checked_at) = row?;
             let release_group = data.and_then(|d| serde_json::from_str(&d).ok());
-            out.insert(key, MusicMatch { release_group, manual, checked_at });
+            out.insert(
+                key,
+                MusicMatch {
+                    release_group,
+                    manual,
+                    checked_at,
+                },
+            );
         }
         Ok(out)
     }
 
-    pub fn set_music_match(&self, library_id: i64, album_key: &str, release_group: Option<&crate::musicbrainz::ReleaseGroup>, manual: bool) -> Result<()> {
+    pub fn set_music_match(
+        &self,
+        library_id: i64,
+        album_key: &str,
+        release_group: Option<&crate::musicbrainz::ReleaseGroup>,
+        manual: bool,
+    ) -> Result<()> {
         let data = release_group.map(serde_json::to_string).transpose()?;
         self.conn.execute(
             "INSERT OR REPLACE INTO music_matches (library_id, album_key, data, manual, checked_at)
@@ -916,9 +1097,16 @@ impl Db {
     }
 
     /// Artist info fetched within `max_age_secs`, by MusicBrainz id.
-    pub fn music_artists(&self, max_age_secs: i64) -> Result<HashMap<String, crate::musicbrainz::ArtistInfo>> {
-        let mut stmt = self.conn.prepare("SELECT artist, data FROM music_artists WHERE fetched_at >= strftime('%s', 'now') - ?1")?;
-        let rows = stmt.query_map([max_age_secs], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    pub fn music_artists(
+        &self,
+        max_age_secs: i64,
+    ) -> Result<HashMap<String, crate::musicbrainz::ArtistInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT artist, data FROM music_artists WHERE fetched_at >= strftime('%s', 'now') - ?1",
+        )?;
+        let rows = stmt.query_map([max_age_secs], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
         let mut out = HashMap::new();
         for row in rows {
             let (id, data) = row?;
@@ -929,7 +1117,11 @@ impl Db {
         Ok(out)
     }
 
-    pub fn set_music_artist(&self, artist: &str, info: &crate::musicbrainz::ArtistInfo) -> Result<()> {
+    pub fn set_music_artist(
+        &self,
+        artist: &str,
+        info: &crate::musicbrainz::ArtistInfo,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO music_artists (artist, fetched_at, data) VALUES (?1, strftime('%s', 'now'), ?2)",
             params![artist, serde_json::to_string(info)?],
@@ -937,8 +1129,15 @@ impl Db {
         Ok(())
     }
 
-    pub fn save_parse_cache(&mut self, library_id: i64, fresh: &[(String, String, String)], gone: &[String]) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    pub fn save_parse_cache(
+        &mut self,
+        library_id: i64,
+        fresh: &[(String, String, String)],
+        gone: &[String],
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut upsert = tx.prepare(
                 "INSERT INTO parse_cache (library_id, dir, fingerprint, data) VALUES (?1, ?2, ?3, ?4)
@@ -947,7 +1146,8 @@ impl Db {
             for (dir, fingerprint, data) in fresh {
                 upsert.execute(params![library_id, dir, fingerprint, data])?;
             }
-            let mut delete = tx.prepare("DELETE FROM parse_cache WHERE library_id = ?1 AND dir = ?2")?;
+            let mut delete =
+                tx.prepare("DELETE FROM parse_cache WHERE library_id = ?1 AND dir = ?2")?;
             for dir in gone {
                 delete.execute(params![library_id, dir])?;
             }
@@ -990,7 +1190,13 @@ impl Db {
     }
 
     /// Records a viewing session. A session already recorded at that time is left alone.
-    pub fn add_history(&self, file_id: i64, played_at: i64, position: Option<f64>, completed: bool) -> Result<()> {
+    pub fn add_history(
+        &self,
+        file_id: i64,
+        played_at: i64,
+        position: Option<f64>,
+        completed: bool,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO play_history (file_id, played_at, position, completed) VALUES (?1, ?2, ?3, ?4)",
             params![file_id, played_at, position, completed],
@@ -1006,7 +1212,13 @@ impl Db {
              WHERE f.library_id = ?1 ORDER BY h.played_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![library_id, limit as i64], |r| {
-            Ok(HistoryEntry { file_id: r.get(0)?, played_at: r.get(1)?, position: r.get(2)?, completed: r.get(3)?, source: r.get(4)? })
+            Ok(HistoryEntry {
+                file_id: r.get(0)?,
+                played_at: r.get(1)?,
+                position: r.get(2)?,
+                completed: r.get(3)?,
+                source: r.get(4)?,
+            })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -1014,20 +1226,35 @@ impl Db {
     /// Applies a Plex import: merges watch state into files and adds history (importing
     /// twice doesn't duplicate anything).
     pub fn import_plex(&mut self, plan: &crate::plex::ImportPlan) -> Result<ImportSummary> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut summary = ImportSummary::default();
         {
-            let mut read = tx.prepare("SELECT position, duration, watched, last_played FROM media_files WHERE id = ?1")?;
+            let mut read = tx.prepare(
+                "SELECT position, duration, watched, last_played FROM media_files WHERE id = ?1",
+            )?;
             let mut write = tx.prepare(
                 "UPDATE media_files SET position = ?2, duration = ?3, watched = ?4, last_played = ?5 WHERE id = ?1",
             )?;
             for (id, item) in &plan.progress {
                 let existing = read.query_row([id], |r| {
-                    Ok(Progress { position: r.get(0)?, duration: r.get(1)?, watched: r.get(2)?, last_played: r.get(3)? })
+                    Ok(Progress {
+                        position: r.get(0)?,
+                        duration: r.get(1)?,
+                        watched: r.get(2)?,
+                        last_played: r.get(3)?,
+                    })
                 })?;
                 let merged = crate::plex::merge(existing, item);
                 if merged != existing {
-                    write.execute(params![id, merged.position, merged.duration, merged.watched, merged.last_played])?;
+                    write.execute(params![
+                        id,
+                        merged.position,
+                        merged.duration,
+                        merged.watched,
+                        merged.last_played
+                    ])?;
                     summary.files_updated += 1;
                 }
             }
@@ -1051,7 +1278,9 @@ impl Db {
 
     /// Marks files watched or unwatched, clearing any resume position.
     pub fn set_watched(&mut self, file_ids: &[i64], watched: bool) -> Result<()> {
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare(&format!("UPDATE media_files SET watched = ?2, position = NULL, state_at = {SQL_NOW} WHERE id = ?1"))?;
             for id in file_ids {
@@ -1069,12 +1298,18 @@ impl Db {
         let files = self
             .files(library_id)?
             .into_iter()
-            .map(|f| ScannedFile { rel_path: f.rel_path, size: f.size, mtime: f.mtime })
+            .map(|f| ScannedFile {
+                rel_path: f.rel_path,
+                size: f.size,
+                mtime: f.mtime,
+            })
             .collect();
         let dirs = if full {
             HashMap::new()
         } else {
-            let mut stmt = self.conn.prepare("SELECT rel_path, mtime FROM scan_dirs WHERE library_id = ?1")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT rel_path, mtime FROM scan_dirs WHERE library_id = ?1")?;
             let rows = stmt.query_map([library_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
@@ -1083,27 +1318,38 @@ impl Db {
 
     pub fn apply_scan(&mut self, library_id: i64, scan: &ScanResult) -> Result<ScanSummary> {
         let files = &scan.files;
-        let tx = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM scan_dirs WHERE library_id = ?1", [library_id])?;
         {
-            let mut insert = tx.prepare("INSERT INTO scan_dirs (library_id, rel_path, mtime) VALUES (?1, ?2, ?3)")?;
+            let mut insert = tx.prepare(
+                "INSERT INTO scan_dirs (library_id, rel_path, mtime) VALUES (?1, ?2, ?3)",
+            )?;
             for (rel, mtime) in &scan.dirs {
                 insert.execute(params![library_id, rel, mtime])?;
             }
         }
         let mut existing: HashMap<String, (i64, bool)> = {
-            let mut stmt = tx.prepare("SELECT id, rel_path, missing FROM media_files WHERE library_id = ?1")?;
-            let rows = stmt.query_map([library_id], |r| Ok((r.get::<_, String>(1)?, (r.get(0)?, r.get(2)?))))?;
+            let mut stmt =
+                tx.prepare("SELECT id, rel_path, missing FROM media_files WHERE library_id = ?1")?;
+            let rows = stmt.query_map([library_id], |r| {
+                Ok((r.get::<_, String>(1)?, (r.get(0)?, r.get(2)?)))
+            })?;
             rows.collect::<rusqlite::Result<_>>()?
         };
-        let mut summary = ScanSummary { total: files.len(), ..Default::default() };
+        let mut summary = ScanSummary {
+            total: files.len(),
+            ..Default::default()
+        };
         {
             let mut insert = tx.prepare(
                 "INSERT INTO media_files (library_id, rel_path, size, mtime, added_at)
                  VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))",
             )?;
-            let mut update =
-                tx.prepare("UPDATE media_files SET size = ?2, mtime = ?3, missing = 0 WHERE id = ?1")?;
+            let mut update = tx.prepare(
+                "UPDATE media_files SET size = ?2, mtime = ?3, missing = 0 WHERE id = ?1",
+            )?;
             for f in files {
                 match existing.remove(&f.rel_path) {
                     Some((id, was_missing)) => {
@@ -1116,7 +1362,8 @@ impl Db {
                     }
                 }
             }
-            let mut mark_missing = tx.prepare("UPDATE media_files SET missing = 1 WHERE id = ?1")?;
+            let mut mark_missing =
+                tx.prepare("UPDATE media_files SET missing = 1 WHERE id = ?1")?;
             for (id, was_missing) in existing.into_values() {
                 if !was_missing {
                     mark_missing.execute([id])?;
@@ -1137,14 +1384,28 @@ mod music_tests {
     #[test]
     fn stores_music_matches_and_artists() {
         let db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Music", Path::new("/m"), LibraryKind::Music).unwrap();
-        let rg = ReleaseGroup { id: "rg".into(), title: "T".into(), kind: Some("Album".into()), secondary: vec![], year: Some(2005), artists: vec![("A".into(), "a1".into())] };
-        db.set_music_match(lib, "dir\u{1f}t", Some(&rg), false).unwrap();
+        let lib = db
+            .add_library("Music", Path::new("/m"), LibraryKind::Music)
+            .unwrap();
+        let rg = ReleaseGroup {
+            id: "rg".into(),
+            title: "T".into(),
+            kind: Some("Album".into()),
+            secondary: vec![],
+            year: Some(2005),
+            artists: vec![("A".into(), "a1".into())],
+        };
+        db.set_music_match(lib, "dir\u{1f}t", Some(&rg), false)
+            .unwrap();
         db.set_music_match(lib, "other\u{1f}", None, false).unwrap();
         let matches = db.music_matches(lib).unwrap();
         assert_eq!(matches["dir\u{1f}t"].release_group.as_ref(), Some(&rg));
         assert_eq!(matches["other\u{1f}"].release_group, None);
-        let info = ArtistInfo { name: "A".into(), image: None, discography: vec![rg] };
+        let info = ArtistInfo {
+            name: "A".into(),
+            image: None,
+            discography: vec![rg],
+        };
         db.set_music_artist("a1", &info).unwrap();
         assert_eq!(db.music_artists(3600).unwrap()["a1"], info);
     }
@@ -1155,11 +1416,19 @@ mod tests {
     use super::*;
 
     fn file(p: &str) -> ScannedFile {
-        ScannedFile { rel_path: p.into(), size: 1, mtime: 0 }
+        ScannedFile {
+            rel_path: p.into(),
+            size: 1,
+            mtime: 0,
+        }
     }
 
     fn found(files: &[ScannedFile]) -> ScanResult {
-        ScanResult { files: files.to_vec(), dirs: vec![("".into(), 5), ("a".into(), 7)], ..Default::default() }
+        ScanResult {
+            files: files.to_vec(),
+            dirs: vec![("".into(), 5), ("a".into(), 7)],
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -1175,8 +1444,18 @@ mod tests {
             file_ids: vec![],
         };
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
-        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B")]).unwrap();
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
+        db.sync_groups(
+            lib,
+            &[
+                group("A1", "Show A"),
+                group("A2", "Show A"),
+                group("B", "Show B"),
+            ],
+        )
+        .unwrap();
         let shows = db.shows(lib).unwrap();
         assert_eq!(shows.len(), 2, "same title shares a show");
 
@@ -1186,8 +1465,21 @@ mod tests {
         assert_eq!(db.shows(lib).unwrap().len(), 1);
 
         // A rescan neither undoes the manual move nor recreates Show B.
-        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B")]).unwrap();
-        let m = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "B").unwrap();
+        db.sync_groups(
+            lib,
+            &[
+                group("A1", "Show A"),
+                group("A2", "Show A"),
+                group("B", "Show B"),
+            ],
+        )
+        .unwrap();
+        let m = db
+            .group_matches(lib)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.group_key == "B")
+            .unwrap();
         assert_eq!((m.show_id, m.season, m.manual), (a, Some(3), true));
         assert_eq!(db.shows(lib).unwrap().len(), 1);
 
@@ -1207,22 +1499,55 @@ mod tests {
         let shows = db.shows(lib).unwrap();
         let a = shows[0].id;
         db.set_show_metadata(a, &found, "matched").unwrap();
-        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B"), group("C", "Other")])
-            .unwrap();
-        let other = db.shows(lib).unwrap().into_iter().find(|s| s.title == "Other").unwrap().id;
+        db.sync_groups(
+            lib,
+            &[
+                group("A1", "Show A"),
+                group("A2", "Show A"),
+                group("B", "Show B"),
+                group("C", "Other"),
+            ],
+        )
+        .unwrap();
+        let other = db
+            .shows(lib)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.title == "Other")
+            .unwrap()
+            .id;
         db.set_show_metadata(other, &found, "matched").unwrap();
         assert!(db.shows(lib).unwrap().iter().all(|s| s.id != other));
-        let c = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "C").unwrap();
+        let c = db
+            .group_matches(lib)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.group_key == "C")
+            .unwrap();
         assert_eq!(c.show_id, a);
         // ...and stays merged on the next sync instead of being split off and re-matched.
-        db.sync_groups(lib, &[group("A1", "Show A"), group("A2", "Show A"), group("B", "Show B"), group("C", "Other")])
+        db.sync_groups(
+            lib,
+            &[
+                group("A1", "Show A"),
+                group("A2", "Show A"),
+                group("B", "Show B"),
+                group("C", "Other"),
+            ],
+        )
+        .unwrap();
+        let c = db
+            .group_matches(lib)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.group_key == "C")
             .unwrap();
-        let c = db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == "C").unwrap();
         assert_eq!(c.show_id, a);
         assert!(db.shows(lib).unwrap().iter().all(|s| s.title != "Other"));
 
         // A vanished automatic group is dropped.
-        db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")]).unwrap();
+        db.sync_groups(lib, &[group("A1", "Show A"), group("B", "Show B")])
+            .unwrap();
         assert_eq!(db.group_matches(lib).unwrap().len(), 2, "A2 and C dropped");
     }
 
@@ -1256,43 +1581,105 @@ mod tests {
     #[test]
     fn rematch_keeps_shows_matched_by_hand() {
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
-        let groups = [test_group("A1", "Show A"), test_group("A2", "Show A"), test_group("B", "Show B")];
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
+        let groups = [
+            test_group("A1", "Show A"),
+            test_group("A2", "Show A"),
+            test_group("B", "Show B"),
+        ];
         db.sync_groups(lib, &groups).unwrap();
-        let a = db.shows(lib).unwrap().into_iter().find(|s| s.title == "Show A").unwrap().id;
-        db.set_show_metadata(a, &tv_candidate(7, "The Real Show A"), "manual").unwrap();
+        let a = db
+            .shows(lib)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.title == "Show A")
+            .unwrap()
+            .id;
+        db.set_show_metadata(a, &tv_candidate(7, "The Real Show A"), "manual")
+            .unwrap();
 
         db.reset_matching(lib).unwrap();
         db.sync_groups(lib, &groups).unwrap();
         let shows = db.shows(lib).unwrap();
-        let show = shows.iter().find(|s| s.id == a).expect("the hand-matched show survives");
-        assert_eq!((show.state.as_str(), show.provider_id.as_deref()), ("manual", Some("tv:7")));
-        let in_a: Vec<_> = db.group_matches(lib).unwrap().into_iter().filter(|m| m.show_id == a).map(|m| m.group_key).collect();
+        let show = shows
+            .iter()
+            .find(|s| s.id == a)
+            .expect("the hand-matched show survives");
+        assert_eq!(
+            (show.state.as_str(), show.provider_id.as_deref()),
+            ("manual", Some("tv:7"))
+        );
+        let in_a: Vec<_> = db
+            .group_matches(lib)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.show_id == a)
+            .map(|m| m.group_key)
+            .collect();
         assert_eq!(in_a, ["A1", "A2"]);
     }
 
     #[test]
     fn a_hand_match_onto_an_existing_show_counts_as_manual() {
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
-        let groups = [test_group("A", "Shingeki no Kyojin"), test_group("B", "Attack on Titan")];
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
+        let groups = [
+            test_group("A", "Shingeki no Kyojin"),
+            test_group("B", "Attack on Titan"),
+        ];
         db.sync_groups(lib, &groups).unwrap();
         let shows = db.shows(lib).unwrap();
-        let (a, b) = (shows.iter().find(|s| s.title == "Shingeki no Kyojin").unwrap().id, shows.iter().find(|s| s.title == "Attack on Titan").unwrap().id);
-        db.set_show_metadata(b, &tv_candidate(1429, "Attack on Titan"), "matched").unwrap();
-        db.set_show_metadata(a, &tv_candidate(1429, "Attack on Titan"), "manual").unwrap();
-        assert_eq!(db.shows(lib).unwrap().iter().find(|s| s.id == b).unwrap().state, "manual");
+        let (a, b) = (
+            shows
+                .iter()
+                .find(|s| s.title == "Shingeki no Kyojin")
+                .unwrap()
+                .id,
+            shows
+                .iter()
+                .find(|s| s.title == "Attack on Titan")
+                .unwrap()
+                .id,
+        );
+        db.set_show_metadata(b, &tv_candidate(1429, "Attack on Titan"), "matched")
+            .unwrap();
+        db.set_show_metadata(a, &tv_candidate(1429, "Attack on Titan"), "manual")
+            .unwrap();
+        assert_eq!(
+            db.shows(lib)
+                .unwrap()
+                .iter()
+                .find(|s| s.id == b)
+                .unwrap()
+                .state,
+            "manual"
+        );
 
         db.reset_matching(lib).unwrap();
         db.sync_groups(lib, &groups).unwrap();
-        assert!(db.group_matches(lib).unwrap().iter().all(|m| m.show_id == b), "both folders stay in the matched show");
+        assert!(
+            db.group_matches(lib)
+                .unwrap()
+                .iter()
+                .all(|m| m.show_id == b),
+            "both folders stay in the matched show"
+        );
     }
 
     #[test]
     fn rematch_keeps_a_split() {
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("TV", Path::new("/t"), LibraryKind::Tv).unwrap();
-        let groups = [test_group("Office US", "The Office"), test_group("Office UK", "The Office")];
+        let lib = db
+            .add_library("TV", Path::new("/t"), LibraryKind::Tv)
+            .unwrap();
+        let groups = [
+            test_group("Office US", "The Office"),
+            test_group("Office UK", "The Office"),
+        ];
         db.sync_groups(lib, &groups).unwrap();
         let original = db.shows(lib).unwrap()[0].id;
         // As Shared::split_group does it.
@@ -1302,18 +1689,36 @@ mod tests {
 
         db.reset_matching(lib).unwrap();
         db.sync_groups(lib, &groups).unwrap();
-        let show_of = |key: &str| db.group_matches(lib).unwrap().into_iter().find(|m| m.group_key == key).unwrap().show_id;
-        assert_eq!((show_of("Office US"), show_of("Office UK")), (original, split));
+        let show_of = |key: &str| {
+            db.group_matches(lib)
+                .unwrap()
+                .into_iter()
+                .find(|m| m.group_key == key)
+                .unwrap()
+                .show_id
+        };
+        assert_eq!(
+            (show_of("Office US"), show_of("Office UK")),
+            (original, split)
+        );
     }
 
     #[test]
     fn plex_import_is_idempotent() {
         use crate::plex::{ImportPlan, PlexItem};
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
         db.apply_scan(lib, &found(&[file("a/1.mkv")])).unwrap();
         let id = db.files(lib).unwrap()[0].id;
-        let item = PlexItem { file: String::new(), watched: true, offset_secs: None, duration_secs: Some(1400.0), last_viewed: Some(500) };
+        let item = PlexItem {
+            file: String::new(),
+            watched: true,
+            offset_secs: None,
+            duration_secs: Some(1400.0),
+            last_viewed: Some(500),
+        };
         let plan = ImportPlan {
             progress: vec![(id, item)],
             history: vec![(id, 400), (id, 500)],
@@ -1321,14 +1726,23 @@ mod tests {
             ..Default::default()
         };
         let first = db.import_plex(&plan).unwrap();
-        assert_eq!((first.files_updated, first.history_added, first.dates_added), (1, 2, 1));
+        assert_eq!(
+            (first.files_updated, first.history_added, first.dates_added),
+            (1, 2, 1)
+        );
         let again = db.import_plex(&plan).unwrap();
-        assert_eq!((again.files_updated, again.history_added, again.dates_added), (0, 0, 0));
+        assert_eq!(
+            (again.files_updated, again.history_added, again.dates_added),
+            (0, 0, 0)
+        );
         assert_eq!(db.files(lib).unwrap()[0].added_at, 300);
         assert!(db.files(lib).unwrap()[0].progress.watched);
         db.add_history(id, 600, Some(42.0), false).unwrap();
         let h = db.history(lib, 10).unwrap();
-        assert_eq!(h.iter().map(|e| e.played_at).collect::<Vec<_>>(), [600, 500, 400]);
+        assert_eq!(
+            h.iter().map(|e| e.played_at).collect::<Vec<_>>(),
+            [600, 500, 400]
+        );
         assert_eq!(h[1].source, "plex");
     }
 
@@ -1336,7 +1750,9 @@ mod tests {
     fn original_language_is_filled_in_once() {
         use crate::metadata::{Candidate, Details, Kind};
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
         let show = db.create_show(lib, "Show", None).unwrap();
         let found = Candidate {
             kind: Kind::Tv,
@@ -1352,41 +1768,90 @@ mod tests {
         };
         db.set_show_metadata(show, &found, "matched").unwrap();
         // Details fetched before the language was saved: only the language is missing.
-        db.save_details(show, "tv:1", &Details { original_language: Some("ja".into()), ..Default::default() }).unwrap();
-        db.conn.execute("UPDATE shows SET original_language = NULL", []).unwrap();
-        assert_eq!(db.shows_needing_details(lib, 3600).unwrap(), [(show, "tv:1".to_owned(), "Show".to_owned(), false)]);
+        db.save_details(
+            show,
+            "tv:1",
+            &Details {
+                original_language: Some("ja".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        db.conn
+            .execute("UPDATE shows SET original_language = NULL", [])
+            .unwrap();
+        assert_eq!(
+            db.shows_needing_details(lib, 3600).unwrap(),
+            [(show, "tv:1".to_owned(), "Show".to_owned(), false)]
+        );
         // TMDB not saying counts as done.
         db.save_details(show, "tv:1", &Details::default()).unwrap();
         assert!(db.shows_needing_details(lib, 3600).unwrap().is_empty());
-        assert_eq!(db.shows(lib).unwrap()[0].original_language.as_deref(), Some(""));
+        assert_eq!(
+            db.shows(lib).unwrap()[0].original_language.as_deref(),
+            Some("")
+        );
     }
 
     #[test]
     fn details_and_episodes_roundtrip() {
         use crate::metadata::{CastMember, Details, EpisodeInfo, SeasonInfo};
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/a"), LibraryKind::Anime).unwrap();
+        let lib = db
+            .add_library("Anime", Path::new("/a"), LibraryKind::Anime)
+            .unwrap();
         let show = db.create_show(lib, "Show", None).unwrap();
         let details = Details {
             overview: "About".into(),
             runtime: Some(24),
             genres: vec!["Animation".into(), "Comedy".into()],
-            cast: vec![CastMember { name: "A".into(), role: "B".into(), image: None, person: Some("tmdb:7".into()) }],
-            seasons: vec![SeasonInfo { number: 1, episode_count: 12 }, SeasonInfo { number: 2, episode_count: 12 }],
+            cast: vec![CastMember {
+                name: "A".into(),
+                role: "B".into(),
+                image: None,
+                person: Some("tmdb:7".into()),
+            }],
+            seasons: vec![
+                SeasonInfo {
+                    number: 1,
+                    episode_count: 12,
+                },
+                SeasonInfo {
+                    number: 2,
+                    episode_count: 12,
+                },
+            ],
             original_language: Some("ja".into()),
             ..Default::default()
         };
         db.save_details(show, "tv:1", &details).unwrap();
-        let s = db.shows(lib).unwrap().into_iter().find(|s| s.id == show).unwrap();
-        assert_eq!((s.genres.as_deref(), s.runtime), (Some("Animation, Comedy"), Some(24)));
+        let s = db
+            .shows(lib)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == show)
+            .unwrap();
+        assert_eq!(
+            (s.genres.as_deref(), s.runtime),
+            (Some("Animation, Comedy"), Some(24))
+        );
         assert_eq!(s.original_language.as_deref(), Some("ja"));
         assert!(s.details_at.is_some());
-        assert_eq!(db.credits("tv:1", "cast").unwrap()[0].person.as_deref(), Some("tmdb:7"));
+        assert_eq!(
+            db.credits("tv:1", "cast").unwrap()[0].person.as_deref(),
+            Some("tmdb:7")
+        );
         assert_eq!(db.shows_needing_details(lib, 3600).unwrap().len(), 0);
         // Found by id, or by name (case aside).
-        assert_eq!(db.appearances(Some("tmdb:7"), "x").unwrap(), [("tv:1".to_owned(), "B".to_owned())]);
+        assert_eq!(
+            db.appearances(Some("tmdb:7"), "x").unwrap(),
+            [("tv:1".to_owned(), "B".to_owned())]
+        );
         assert_eq!(db.appearances(None, "a").unwrap().len(), 1);
-        let info = crate::metadata::Person { name: "A".into(), ..Default::default() };
+        let info = crate::metadata::Person {
+            name: "A".into(),
+            ..Default::default()
+        };
         db.save_person("tmdb:7", &info).unwrap();
         assert_eq!(db.person("tmdb:7", 60).unwrap().unwrap().name, "A");
         let ep = |season, episode, title: &str| EpisodeInfo {
@@ -1398,10 +1863,14 @@ mod tests {
             air_date: None,
             runtime: None,
         };
-        db.save_episodes("tv:1", &[ep(2, 1, "Second season start")]).unwrap();
+        db.save_episodes("tv:1", &[ep(2, 1, "Second season start")])
+            .unwrap();
         let meta = db.series_meta().unwrap();
         // Absolute episode 13 is season 2 episode 1.
-        assert_eq!(meta["tv:1"].episode(1, 13).unwrap().title, "Second season start");
+        assert_eq!(
+            meta["tv:1"].episode(1, 13).unwrap().title,
+            "Second season start"
+        );
     }
 
     #[test]
@@ -1416,35 +1885,78 @@ mod tests {
     #[test]
     fn scan_diffing() {
         let mut db = Db::open_in_memory().unwrap();
-        let lib = db.add_library("Anime", Path::new("/media/anime"), LibraryKind::Anime).unwrap();
-        assert!(db.add_library("Dup", Path::new("/media/anime"), LibraryKind::Tv).is_err());
+        let lib = db
+            .add_library("Anime", Path::new("/media/anime"), LibraryKind::Anime)
+            .unwrap();
+        assert!(
+            db.add_library("Dup", Path::new("/media/anime"), LibraryKind::Tv)
+                .is_err()
+        );
 
-        let s = db.apply_scan(lib, &found(&[file("a/1.mkv"), file("a/2.mkv")])).unwrap();
+        let s = db
+            .apply_scan(lib, &found(&[file("a/1.mkv"), file("a/2.mkv")]))
+            .unwrap();
         assert_eq!((s.added, s.removed, s.total), (2, 0, 2));
 
-        let s = db.apply_scan(lib, &found(&[file("a/2.mkv"), file("a/3.mkv")])).unwrap();
+        let s = db
+            .apply_scan(lib, &found(&[file("a/2.mkv"), file("a/3.mkv")]))
+            .unwrap();
         assert_eq!((s.added, s.removed), (1, 1));
         let previous = db.previous_scan(lib, false).unwrap();
         let mut files: Vec<_> = previous.files.iter().map(|f| f.rel_path.as_str()).collect();
         files.sort();
-        assert_eq!(files, ["a/2.mkv", "a/3.mkv"], "missing files aren't carried over");
-        assert_eq!(previous.dirs, HashMap::from([("".into(), 5), ("a".into(), 7)]));
+        assert_eq!(
+            files,
+            ["a/2.mkv", "a/3.mkv"],
+            "missing files aren't carried over"
+        );
+        assert_eq!(
+            previous.dirs,
+            HashMap::from([("".into(), 5), ("a".into(), 7)])
+        );
         assert!(db.previous_scan(lib, true).unwrap().dirs.is_empty());
-        let mut names: Vec<_> = db.files(lib).unwrap().into_iter().map(|f| f.rel_path).collect();
+        let mut names: Vec<_> = db
+            .files(lib)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.rel_path)
+            .collect();
         names.sort();
         assert_eq!(names, ["a/2.mkv", "a/3.mkv"]);
 
         // A file coming back keeps its row (and so its watch history).
-        let s = db.apply_scan(lib, &found(&[file("a/1.mkv"), file("a/2.mkv"), file("a/3.mkv")])).unwrap();
+        let s = db
+            .apply_scan(
+                lib,
+                &found(&[file("a/1.mkv"), file("a/2.mkv"), file("a/3.mkv")]),
+            )
+            .unwrap();
         assert_eq!((s.added, s.removed), (1, 0));
 
         let id = db.files(lib).unwrap()[0].id;
-        let p = Progress { position: Some(42.0), duration: Some(100.0), watched: false, last_played: Some(7) };
+        let p = Progress {
+            position: Some(42.0),
+            duration: Some(100.0),
+            watched: false,
+            last_played: Some(7),
+        };
         db.set_progress(id, &p).unwrap();
-        let stored = db.files(lib).unwrap().into_iter().find(|f| f.id == id).unwrap().progress;
+        let stored = db
+            .files(lib)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.id == id)
+            .unwrap()
+            .progress;
         assert_eq!(stored, p);
         db.set_watched(&[id], true).unwrap();
-        let stored = db.files(lib).unwrap().into_iter().find(|f| f.id == id).unwrap().progress;
+        let stored = db
+            .files(lib)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.id == id)
+            .unwrap()
+            .progress;
         assert_eq!((stored.watched, stored.position), (true, None));
 
         db.remove_library(lib).unwrap();

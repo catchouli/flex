@@ -62,19 +62,36 @@ impl Screen for Themes {
     }
 
     fn ui(&mut self, ui: &mut Ui, _sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let body = widgets::header(ui.painter(), rect, "Themes", "How Flex looks. Add your own in the themes folder.", ui.style());
+        let body = widgets::header(
+            ui.painter(),
+            rect,
+            "Themes",
+            "How Flex looks. Add your own in the themes folder.",
+            ui.style(),
+        );
         let current = theme::current().id.clone();
         let mut rows: Vec<Row> = self
             .themes
             .iter()
             .map(|t| {
-                let name = if t.id == current { format!("{}  ✓", t.name) } else { t.name.clone() };
-                let detail = if t.dir.is_some() { format!("{} · custom", t.description) } else { t.description.clone() };
+                let name = if t.id == current {
+                    format!("{}  ✓", t.name)
+                } else {
+                    t.name.clone()
+                };
+                let detail = if t.dir.is_some() {
+                    format!("{} · custom", t.description)
+                } else {
+                    t.description.clone()
+                };
                 Row::new(Icon::None, name).detail(detail)
             })
             .collect();
         rows.push(Row::new(Icon::Refresh, "Look for new themes"));
-        rows.push(Row::new(Icon::Folder, "Open themes folder").detail(theme::themes_dir().display().to_string()));
+        rows.push(
+            Row::new(Icon::Folder, "Open themes folder")
+                .detail(theme::themes_dir().display().to_string()),
+        );
         widgets::list(ui, body, &rows, &mut self.list, focused);
         Nav::None
     }

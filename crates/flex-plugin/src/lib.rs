@@ -53,7 +53,11 @@ pub type Settings = serde_json::Map<String, serde_json::Value>;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
     /// First message after starting.
-    Hello { api: u32, flex_version: String, settings: Settings },
+    Hello {
+        api: u32,
+        flex_version: String,
+        settings: Settings,
+    },
     /// The user changed a setting (all settings are sent).
     Settings { settings: Settings },
     /// Colours from the screen, for plugins subscribed to `light`.
@@ -191,23 +195,33 @@ impl Host {
     }
 
     pub fn new(out: impl Write + Send + 'static) -> Self {
-        Self { out: Arc::new(Mutex::new(Box::new(out))) }
+        Self {
+            out: Arc::new(Mutex::new(Box::new(out))),
+        }
     }
 
     /// Errors (Flex has gone away) are ignored: the plugin will get EOF on stdin.
     pub fn send(&self, msg: &PluginMessage) {
-        let Ok(mut line) = serde_json::to_vec(msg) else { return };
+        let Ok(mut line) = serde_json::to_vec(msg) else {
+            return;
+        };
         line.push(b'\n');
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
         let _ = out.write_all(&line).and_then(|()| out.flush());
     }
 
     pub fn status(&self, ok: bool, text: impl Into<String>) {
-        self.send(&PluginMessage::Status { ok, text: text.into() });
+        self.send(&PluginMessage::Status {
+            ok,
+            text: text.into(),
+        });
     }
 
     pub fn choices(&self, key: impl Into<String>, options: Vec<Choice>) {
-        self.send(&PluginMessage::Choices { key: key.into(), options });
+        self.send(&PluginMessage::Choices {
+            key: key.into(),
+            options,
+        });
     }
 
     pub fn set(&self, settings: Settings) {
@@ -215,21 +229,36 @@ impl Host {
     }
 
     pub fn toast(&self, text: impl Into<String>) {
-        self.send(&PluginMessage::Toast { text: text.into(), seconds: None, key: None });
+        self.send(&PluginMessage::Toast {
+            text: text.into(),
+            seconds: None,
+            key: None,
+        });
     }
 
     /// A toast that stays up for `seconds` (or until replaced or cleared with the same key).
     pub fn toast_kept(&self, key: impl Into<String>, text: impl Into<String>, seconds: f64) {
-        self.send(&PluginMessage::Toast { text: text.into(), seconds: Some(seconds), key: Some(key.into()) });
+        self.send(&PluginMessage::Toast {
+            text: text.into(),
+            seconds: Some(seconds),
+            key: Some(key.into()),
+        });
     }
 
     /// Removes a toast shown with [`Host::toast_kept`].
     pub fn clear_toast(&self, key: impl Into<String>) {
-        self.send(&PluginMessage::Toast { text: String::new(), seconds: None, key: Some(key.into()) });
+        self.send(&PluginMessage::Toast {
+            text: String::new(),
+            seconds: None,
+            key: Some(key.into()),
+        });
     }
 
     pub fn log(&self, level: LogLevel, text: impl Into<String>) {
-        self.send(&PluginMessage::Log { level, text: text.into() });
+        self.send(&PluginMessage::Log {
+            level,
+            text: text.into(),
+        });
     }
 }
 
@@ -250,7 +279,11 @@ pub trait Plugin {
 /// Reads messages from stdin and hands them to `plugin` until Flex says to shut down or
 /// closes stdin.
 pub fn run(plugin: &mut impl Plugin) {
-    run_with(plugin, std::io::BufReader::new(std::io::stdin()), &Host::stdout());
+    run_with(
+        plugin,
+        std::io::BufReader::new(std::io::stdin()),
+        &Host::stdout(),
+    );
 }
 
 /// [`run`] with any input and output (for tests).
@@ -296,7 +329,9 @@ impl Inbox {
     fn push(&self, msg: HostMessage) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let queue = &mut state.0;
-        if matches!(msg, HostMessage::Light(_)) && matches!(queue.back(), Some(HostMessage::Light(_))) {
+        if matches!(msg, HostMessage::Light(_))
+            && matches!(queue.back(), Some(HostMessage::Light(_)))
+        {
             queue.pop_back();
         }
         queue.push_back(msg);
@@ -329,36 +364,82 @@ mod tests {
 
     #[test]
     fn messages_look_like_the_docs() {
-        let light = HostMessage::Light(Light { zones: vec![[255, 140, 60]], brightness: 0.5 });
-        assert_eq!(serde_json::to_string(&light).unwrap(), r#"{"type":"light","zones":[[255,140,60]],"brightness":0.5}"#);
-        let status: PluginMessage = serde_json::from_str(r#"{"type":"status","ok":true,"text":"hi"}"#).unwrap();
-        assert_eq!(status, PluginMessage::Status { ok: true, text: "hi".into() });
+        let light = HostMessage::Light(Light {
+            zones: vec![[255, 140, 60]],
+            brightness: 0.5,
+        });
+        assert_eq!(
+            serde_json::to_string(&light).unwrap(),
+            r#"{"type":"light","zones":[[255,140,60]],"brightness":0.5}"#
+        );
+        let status: PluginMessage =
+            serde_json::from_str(r#"{"type":"status","ok":true,"text":"hi"}"#).unwrap();
+        assert_eq!(
+            status,
+            PluginMessage::Status {
+                ok: true,
+                text: "hi".into()
+            }
+        );
     }
 
     #[test]
     fn toasts_can_stay_and_be_cleared() {
         let plain: PluginMessage = serde_json::from_str(r#"{"type":"toast","text":"hi"}"#).unwrap();
-        assert_eq!(plain, PluginMessage::Toast { text: "hi".into(), seconds: None, key: None });
-        let kept = PluginMessage::Toast { text: "Enter ABCD".into(), seconds: Some(600.0), key: Some("code".into()) };
-        assert_eq!(serde_json::to_string(&kept).unwrap(), r#"{"type":"toast","text":"Enter ABCD","seconds":600.0,"key":"code"}"#);
+        assert_eq!(
+            plain,
+            PluginMessage::Toast {
+                text: "hi".into(),
+                seconds: None,
+                key: None
+            }
+        );
+        let kept = PluginMessage::Toast {
+            text: "Enter ABCD".into(),
+            seconds: Some(600.0),
+            key: Some("code".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&kept).unwrap(),
+            r#"{"type":"toast","text":"Enter ABCD","seconds":600.0,"key":"code"}"#
+        );
     }
 
     #[test]
     fn playback_details_are_optional() {
         // As older versions of Flex sent it.
-        let old: HostMessage = serde_json::from_str(r#"{"type":"playback","state":"paused","title":"T","kind":"video"}"#).unwrap();
-        let HostMessage::Playback(p) = old else { panic!("not playback") };
-        assert_eq!((p.state, p.position, p.media), (PlaybackState::Paused, None, None));
+        let old: HostMessage = serde_json::from_str(
+            r#"{"type":"playback","state":"paused","title":"T","kind":"video"}"#,
+        )
+        .unwrap();
+        let HostMessage::Playback(p) = old else {
+            panic!("not playback")
+        };
+        assert_eq!(
+            (p.state, p.position, p.media),
+            (PlaybackState::Paused, None, None)
+        );
         let full = HostMessage::Playback(Playback {
             state: PlaybackState::Stopped,
             title: "Frieren · S1E3".into(),
             kind: "video".into(),
             position: Some(1300.0),
             duration: Some(1420.0),
-            media: Some(Media { kind: "episode".into(), title: "Frieren".into(), year: Some(2023), anilist: Some(154587), season: Some(1), episode: Some(3), ..Media::default() }),
+            media: Some(Media {
+                kind: "episode".into(),
+                title: "Frieren".into(),
+                year: Some(2023),
+                anilist: Some(154587),
+                season: Some(1),
+                episode: Some(3),
+                ..Media::default()
+            }),
         });
         let json = serde_json::to_string(&full).unwrap();
-        assert!(json.contains(r#""media":{"kind":"episode","title":"Frieren""#), "{json}");
+        assert!(
+            json.contains(r#""media":{"kind":"episode","title":"Frieren""#),
+            "{json}"
+        );
         assert_eq!(serde_json::from_str::<HostMessage>(&json).unwrap(), full);
     }
 
@@ -366,7 +447,8 @@ mod tests {
     fn unknown_messages_and_fields_are_ignored() {
         let msg: HostMessage = serde_json::from_str(r#"{"type":"something_new","x":1}"#).unwrap();
         assert_eq!(msg, HostMessage::Unknown);
-        let msg: HostMessage = serde_json::from_str(r#"{"type":"action","id":"scan","extra":true}"#).unwrap();
+        let msg: HostMessage =
+            serde_json::from_str(r#"{"type":"action","id":"scan","extra":true}"#).unwrap();
         assert_eq!(msg, HostMessage::Action { id: "scan".into() });
         let msg: PluginMessage = serde_json::from_str(r#"{"type":"later"}"#).unwrap();
         assert_eq!(msg, PluginMessage::Unknown);
@@ -375,7 +457,12 @@ mod tests {
     #[test]
     fn queued_light_updates_merge() {
         let inbox = Inbox::default();
-        let light = |b| HostMessage::Light(Light { zones: vec![[255, 0, 0]], brightness: b });
+        let light = |b| {
+            HostMessage::Light(Light {
+                zones: vec![[255, 0, 0]],
+                brightness: b,
+            })
+        };
         inbox.push(light(0.1));
         inbox.push(light(0.2));
         inbox.push(HostMessage::Action { id: "a".into() });
@@ -427,9 +514,16 @@ mod tests {
             }
         }
         let mut plugin = Recorder::default();
-        run_with(&mut plugin, std::io::Cursor::new(input), &Host::new(Shared(Arc::clone(&out))));
+        run_with(
+            &mut plugin,
+            std::io::Cursor::new(input),
+            &Host::new(Shared(Arc::clone(&out))),
+        );
         assert_eq!(plugin.0, ["hello 1", "action scan", "shutdown"]);
         let out = String::from_utf8(out.lock().unwrap().clone()).unwrap();
-        assert_eq!(out, "{\"type\":\"status\",\"ok\":true,\"text\":\"ready\"}\n");
+        assert_eq!(
+            out,
+            "{\"type\":\"status\",\"ok\":true,\"text\":\"ready\"}\n"
+        );
     }
 }

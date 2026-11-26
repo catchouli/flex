@@ -35,7 +35,11 @@ pub fn tools_dir() -> PathBuf {
 }
 
 fn exe(name: &str) -> String {
-    if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() }
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
 }
 
 /// `name` in `dir`, else on the PATH.
@@ -45,7 +49,9 @@ fn find(dir: &Path, name: &str) -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(&file)).find(|p| p.is_file())
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|d| d.join(&file))
+        .find(|p| p.is_file())
 }
 
 /// How many yt-dlp runs (each maybe with Deno) are going. Updates swap the programs in only
@@ -96,14 +102,18 @@ impl Tools {
     /// yt-dlp and Deno from the tools folder, else the PATH.
     pub fn find() -> Option<Self> {
         let dir = tools_dir();
-        Some(Self { yt_dlp: find(&dir, "yt-dlp")?, deno: find(&dir, "deno") })
+        Some(Self {
+            yt_dlp: find(&dir, "yt-dlp")?,
+            deno: find(&dir, "deno"),
+        })
     }
 
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.yt_dlp);
         cmd.args(["--no-config", "--no-playlist", "--no-warnings"]);
         if let Some(deno) = &self.deno {
-            cmd.arg("--js-runtimes").arg(format!("deno:{}", deno.display()));
+            cmd.arg("--js-runtimes")
+                .arg(format!("deno:{}", deno.display()));
         }
         #[cfg(windows)]
         {
@@ -116,7 +126,9 @@ impl Tools {
     pub fn yt_dlp_version(&self) -> Option<String> {
         let _in_use = InUse::new();
         let out = self.command().arg("--version").output().ok()?;
-        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
     /// Finds the streams for a video (a URL or an 11-character id), at most `max_height`
@@ -130,12 +142,21 @@ impl Tools {
         let _in_use = InUse::new();
         let out = self
             .command()
-            .args(["--dump-single-json", "--format", &format_choice(max_height, h264), &url])
+            .args([
+                "--dump-single-json",
+                "--format",
+                &format_choice(max_height, h264),
+                &url,
+            ])
             .output()
             .with_context(|| format!("running {}", self.yt_dlp.display()))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
-            let line = err.lines().rev().find(|l| l.starts_with("ERROR")).unwrap_or(err.trim());
+            let line = err
+                .lines()
+                .rev()
+                .find(|l| l.starts_with("ERROR"))
+                .unwrap_or(err.trim());
             bail!("yt-dlp: {}", line.trim_start_matches("ERROR: "));
         }
         parse(&out.stdout)
@@ -148,7 +169,11 @@ impl Tools {
 /// machines that struggle with VP9.
 fn format_choice(max_height: u32, h264: bool) -> String {
     let any = format!("bv*[vcodec!^=av01][height<={max_height}]+ba/b[height<={max_height}]/b");
-    if h264 { format!("bv*[vcodec^=avc1][height<={max_height}]+ba/{any}") } else { any }
+    if h264 {
+        format!("bv*[vcodec^=avc1][height<={max_height}]+ba/{any}")
+    } else {
+        any
+    }
 }
 
 /// A video ready to play.
@@ -185,7 +210,10 @@ impl Video {
         match proxy::global() {
             Ok(relay) => {
                 let video = relay.add(&self.video_url, self.video_size);
-                let audio = self.audio_url.as_deref().map(|a| relay.add(a, self.audio_size));
+                let audio = self
+                    .audio_url
+                    .as_deref()
+                    .map(|a| relay.add(a, self.audio_size));
                 join(&video, audio.as_deref())
             }
             Err(e) => {
@@ -246,10 +274,18 @@ fn parse(json: &[u8]) -> Result<Video> {
     let info: Info = serde_json::from_slice(json).context("reading yt-dlp's output")?;
     let has_video = |f: &&Format| f.vcodec.as_deref().is_some_and(|c| c != "none");
     let (video_url, video_size, audio, height) = match &info.requested_formats[..] {
-        [] => (info.url.context("yt-dlp gave no stream")?, info.filesize, None, info.height),
+        [] => (
+            info.url.context("yt-dlp gave no stream")?,
+            info.filesize,
+            None,
+            info.height,
+        ),
         formats => {
             let video = formats.iter().find(has_video).unwrap_or(&formats[0]);
-            let audio = formats.iter().find(|f| !std::ptr::eq(*f, video)).map(|f| (f.url.clone(), f.filesize));
+            let audio = formats
+                .iter()
+                .find(|f| !std::ptr::eq(*f, video))
+                .map(|f| (f.url.clone(), f.filesize));
             (video.url.clone(), video.filesize, audio, video.height)
         }
     };
@@ -265,28 +301,48 @@ fn parse(json: &[u8]) -> Result<Video> {
         video_size,
         audio_size,
         height,
-        chapters: info.chapters.unwrap_or_default().into_iter().map(|c| (c.start_time, c.title)).collect(),
+        chapters: info
+            .chapters
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| (c.start_time, c.title))
+            .collect(),
     })
 }
 
 /// The 11-character video id in a YouTube URL (watch, youtu.be, shorts, embed, live), or
 /// the string itself if it is one.
 pub fn video_id(s: &str) -> Option<String> {
-    let valid = |id: &str| id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    let valid = |id: &str| {
+        id.len() == 11
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    };
     let s = s.trim();
     if valid(s) {
         return Some(s.to_owned());
     }
     let rest = s.split_once("://").map_or(s, |(_, r)| r);
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-    let host = host.trim_start_matches("www.").trim_start_matches("m.").trim_start_matches("music.");
+    let host = host
+        .trim_start_matches("www.")
+        .trim_start_matches("m.")
+        .trim_start_matches("music.");
     let candidate = match host {
         "youtu.be" => path.split(['?', '&', '#', '/']).next(),
         "youtube.com" | "youtube-nocookie.com" => {
-            if let Some(query) = path.strip_prefix("watch").and_then(|p| p.split_once('?')).map(|(_, q)| q) {
+            if let Some(query) = path
+                .strip_prefix("watch")
+                .and_then(|p| p.split_once('?'))
+                .map(|(_, q)| q)
+            {
                 query.split(['&', '#']).find_map(|kv| kv.strip_prefix("v="))
             } else {
-                ["shorts/", "embed/", "live/", "v/"].iter().find_map(|p| path.strip_prefix(p)).and_then(|r| r.split(['?', '&', '#', '/']).next())
+                ["shorts/", "embed/", "live/", "v/"]
+                    .iter()
+                    .find_map(|p| path.strip_prefix(p))
+                    .and_then(|r| r.split(['?', '&', '#', '/']).next())
             }
         }
         _ => None,
@@ -314,7 +370,12 @@ mod tests {
         ] {
             assert_eq!(video_id(url).as_deref(), Some(id), "{url}");
         }
-        for not in ["https://example.com/watch?v=aqz-KE-bpKQ", "https://youtube.com/watch?v=short", "hello", "https://youtube.com/@channel"] {
+        for not in [
+            "https://example.com/watch?v=aqz-KE-bpKQ",
+            "https://youtube.com/watch?v=short",
+            "hello",
+            "https://youtube.com/@channel",
+        ] {
             assert_eq!(video_id(not), None, "{not}");
         }
     }
@@ -325,8 +386,14 @@ mod tests {
             "requested_formats":[{"url":"https://v/1?a=b,c;d","vcodec":"vp9","height":1080},{"url":"https://a/2","vcodec":"none"}],
             "chapters":[{"start_time":0.0,"title":"Intro"},{"start_time":5.0,"title":"Main"}]}"#;
         let v = parse(json).unwrap();
-        assert_eq!((v.video_url.as_str(), v.audio_url.as_deref(), v.height), ("https://v/1?a=b,c;d", Some("https://a/2"), Some(1080)));
-        assert_eq!(v.chapters, vec![(0.0, "Intro".to_owned()), (5.0, "Main".to_owned())]);
+        assert_eq!(
+            (v.video_url.as_str(), v.audio_url.as_deref(), v.height),
+            ("https://v/1?a=b,c;d", Some("https://a/2"), Some(1080))
+        );
+        assert_eq!(
+            v.chapters,
+            vec![(0.0, "Intro".to_owned()), (5.0, "Main".to_owned())]
+        );
         // Commas and semicolons in URLs are safe thanks to the length prefixes.
         assert_eq!(
             v.mpv_url(),
@@ -336,8 +403,16 @@ mod tests {
 
     #[test]
     fn parses_a_single_file() {
-        let v = parse(br#"{"id":"abc","title":"T","uploader":"U","url":"https://f","height":360}"#).unwrap();
-        assert_eq!((v.video_url.as_str(), v.audio_url.as_deref(), v.channel.as_str()), ("https://f", None, "U"));
+        let v = parse(br#"{"id":"abc","title":"T","uploader":"U","url":"https://f","height":360}"#)
+            .unwrap();
+        assert_eq!(
+            (
+                v.video_url.as_str(),
+                v.audio_url.as_deref(),
+                v.channel.as_str()
+            ),
+            ("https://f", None, "U")
+        );
         assert_eq!(v.mpv_url(), "https://f");
     }
 
@@ -346,7 +421,9 @@ mod tests {
     #[ignore]
     fn resolves_a_real_video() {
         let tools = Tools::find().expect("yt-dlp in the tools folder or on the PATH");
-        let v = tools.resolve("https://www.youtube.com/watch?v=aqz-KE-bpKQ", 1080, false).unwrap();
+        let v = tools
+            .resolve("https://www.youtube.com/watch?v=aqz-KE-bpKQ", 1080, false)
+            .unwrap();
         assert_eq!(v.id, "aqz-KE-bpKQ");
         assert!(v.title.contains("Big Buck Bunny"), "{}", v.title);
         assert!(v.audio_url.is_some() && v.height.is_some_and(|h| h <= 1080));

@@ -23,12 +23,27 @@ pub struct Tools {
 }
 
 fn find_tool(name: &str) -> Option<PathBuf> {
-    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
-    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(&exe)));
-    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    let exe = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(&exe)));
+    let path_dirs = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .unwrap_or_default();
     // Apps started from Finder don't get the shell's PATH.
-    let extra = [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
-    beside.into_iter().chain(path_dirs.into_iter().map(|d| d.join(&exe))).chain(extra.iter().map(|d| d.join(&exe))).find(|p| p.is_file())
+    let extra = [
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
+    beside
+        .into_iter()
+        .chain(path_dirs.into_iter().map(|d| d.join(&exe)))
+        .chain(extra.iter().map(|d| d.join(&exe)))
+        .find(|p| p.is_file())
 }
 
 /// A command that doesn't flash a console window on Windows.
@@ -60,12 +75,24 @@ impl Tools {
 
     /// What's in a file (cached per file id, size and mtime).
     pub async fn probe(&self, key: (i64, u64, i64), path: &Path) -> Result<Arc<MediaInfo>> {
-        if let Some(info) = self.probes.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        if let Some(info) = self
+            .probes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+        {
             return Ok(info.clone());
         }
         let ffprobe = self.ffprobe.as_ref().context("ffprobe isn't installed")?;
         let out = command(ffprobe)
-            .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
+            .args([
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+            ])
             .arg(path)
             .stdin(Stdio::null())
             .output()
@@ -76,7 +103,10 @@ impl Tools {
         }
         let raw: Probe = serde_json::from_slice(&out.stdout).context("reading ffprobe's output")?;
         let info = Arc::new(MediaInfo::from(raw));
-        self.probes.lock().unwrap_or_else(|e| e.into_inner()).insert(key, info.clone());
+        self.probes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, info.clone());
         Ok(info)
     }
 
@@ -92,7 +122,11 @@ impl Tools {
                 .stdin(Stdio::null())
                 .output()
                 .await
-                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("subtitles"))),
+                .is_ok_and(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .any(|l| l.split_whitespace().nth(1) == Some("subtitles"))
+                }),
             None => false,
         };
         *self.text_burn.get_or_init(|| can)
@@ -110,11 +144,33 @@ impl Tools {
 
     async fn detect_encoder(&self) -> Option<Encoder> {
         let ffmpeg = self.ffmpeg.as_ref()?;
-        for encoder in [Encoder::Nvenc, Encoder::Qsv, Encoder::Amf, Encoder::VideoToolbox, Encoder::X264] {
+        for encoder in [
+            Encoder::Nvenc,
+            Encoder::Qsv,
+            Encoder::Amf,
+            Encoder::VideoToolbox,
+            Encoder::X264,
+        ] {
             // Listed isn't enough (an NVENC build on a PC without NVIDIA): try a few frames.
             let ok = command(ffmpeg)
-                .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x240:r=24:d=0.5"])
-                .args(["-c:v", encoder.name(), "-pix_fmt", "yuv420p", "-f", "null", "-"])
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=320x240:r=24:d=0.5",
+                ])
+                .args([
+                    "-c:v",
+                    encoder.name(),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-f",
+                    "null",
+                    "-",
+                ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -152,11 +208,23 @@ impl Encoder {
     /// Good-looking 1080p at a size a home network handles easily.
     fn quality_args(self) -> &'static [&'static str] {
         match self {
-            Encoder::Nvenc => &["-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-maxrate", "20M", "-bufsize", "40M"],
+            Encoder::Nvenc => &[
+                "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-maxrate", "20M",
+                "-bufsize", "40M",
+            ],
             Encoder::Qsv => &["-preset", "medium", "-global_quality", "23"],
-            Encoder::Amf => &["-quality", "balanced", "-rc", "qvbr", "-qvbr_quality_level", "23"],
+            Encoder::Amf => &[
+                "-quality",
+                "balanced",
+                "-rc",
+                "qvbr",
+                "-qvbr_quality_level",
+                "23",
+            ],
             Encoder::VideoToolbox => &["-b:v", "8M", "-maxrate", "16M"],
-            Encoder::X264 => &["-preset", "veryfast", "-crf", "21", "-maxrate", "20M", "-bufsize", "40M"],
+            Encoder::X264 => &[
+                "-preset", "veryfast", "-crf", "21", "-maxrate", "20M", "-bufsize", "40M",
+            ],
         }
     }
 }
@@ -248,7 +316,16 @@ pub struct MediaInfo {
 /// A safe file name for an attached font: its index, then its own name with anything
 /// but letters, digits, dots and dashes replaced (so it can't be a path).
 fn font_file_name(attachment: usize, name: &str) -> String {
-    let safe: String = name.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     format!("{attachment}-{safe}")
 }
 
@@ -258,12 +335,19 @@ const IMAGE_SUBTITLES: [&str; 4] = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_su
 fn is_font(name: &str, mime: Option<&str>) -> bool {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     ["ttf", "otf", "ttc", "otc", "woff", "woff2"].contains(&ext.as_str())
-        || mime.is_some_and(|m| m.contains("font") || m.contains("truetype") || m.contains("opentype"))
+        || mime
+            .is_some_and(|m| m.contains("font") || m.contains("truetype") || m.contains("opentype"))
 }
 
 impl From<Probe> for MediaInfo {
     fn from(p: Probe) -> Self {
-        let tag = |s: &ProbeStream, k: &str| s.tags.get(k).or_else(|| s.tags.get(&k.to_uppercase())).cloned().filter(|v| !v.is_empty());
+        let tag = |s: &ProbeStream, k: &str| {
+            s.tags
+                .get(k)
+                .or_else(|| s.tags.get(&k.to_uppercase()))
+                .cloned()
+                .filter(|v| !v.is_empty())
+        };
         let flag = |s: &ProbeStream, k: &str| s.disposition.get(k).is_some_and(|v| *v != 0);
         let kind = |s: &ProbeStream, k: &str| s.codec_type.as_deref() == Some(k);
         let video = p
@@ -273,7 +357,15 @@ impl From<Probe> for MediaInfo {
             .map(|s| VideoInfo {
                 codec: s.codec_name.clone().unwrap_or_default(),
                 profile: s.profile.clone(),
-                bits: if s.pix_fmt.as_deref().is_some_and(|f| f.contains("10") || f.contains("12")) { 10 } else { 8 },
+                bits: if s
+                    .pix_fmt
+                    .as_deref()
+                    .is_some_and(|f| f.contains("10") || f.contains("12"))
+                {
+                    10
+                } else {
+                    8
+                },
                 width: s.width.unwrap_or_default(),
                 height: s.height.unwrap_or_default(),
             });
@@ -308,7 +400,10 @@ impl From<Probe> for MediaInfo {
             .map(|(index, s)| SubtitleInfo {
                 index,
                 codec: s.codec_name.clone().unwrap_or_default(),
-                image: s.codec_name.as_deref().is_some_and(|c| IMAGE_SUBTITLES.contains(&c)),
+                image: s
+                    .codec_name
+                    .as_deref()
+                    .is_some_and(|c| IMAGE_SUBTITLES.contains(&c)),
                 language: tag(s, "language"),
                 title: tag(s, "title"),
                 default: flag(s, "default"),
@@ -327,7 +422,10 @@ impl From<Probe> for MediaInfo {
             .collect();
         let format = p.format;
         Self {
-            container: format.as_ref().and_then(|f| f.format_name.clone()).unwrap_or_default(),
+            container: format
+                .as_ref()
+                .and_then(|f| f.format_name.clone())
+                .unwrap_or_default(),
             duration: format.and_then(|f| f.duration?.parse().ok()),
             video,
             audio,
@@ -393,7 +491,9 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
     // The main picture (not cover art), converted if asked: picture subtitles overlaid,
     // text subtitles drawn by libass, scaled down; then the chosen audio track.
     if req.video == VideoMode::H264 {
-        let picture_burn = req.burn.filter(|s| req.info.subtitles.get(*s).is_some_and(|s| s.image));
+        let picture_burn = req
+            .burn
+            .filter(|s| req.info.subtitles.get(*s).is_some_and(|s| s.image));
         let mut graph = match picture_burn {
             Some(s) => format!("[0:V:0][0:s:{s}]overlay=eof_action=pass"),
             None => "[0:V:0]null".to_owned(),
@@ -401,7 +501,10 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
         if let Some(t) = req.text_burn.as_ref().filter(|_| picture_burn.is_none()) {
             // Frames start at 0 after seeking; the subtitles use the file's own times.
             let shift = format!("{:.3}", req.start);
-            graph.push_str(&format!(",setpts=PTS+{shift}/TB,subtitles=f={}:fontsdir={},setpts=PTS-{shift}/TB", t.ass, t.fonts_dir));
+            graph.push_str(&format!(
+                ",setpts=PTS+{shift}/TB,subtitles=f={}:fontsdir={},setpts=PTS-{shift}/TB",
+                t.ass, t.fonts_dir
+            ));
             cmd.current_dir(&t.cwd);
         }
         let source_height = req.info.video.as_ref().map_or(0, |v| v.height);
@@ -427,7 +530,10 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
             }
         }
         VideoMode::H264 => {
-            let encoder = tools.encoder().await.context("no H.264 encoder works with this ffmpeg")?;
+            let encoder = tools
+                .encoder()
+                .await
+                .context("no H.264 encoder works with this ffmpeg")?;
             cmd.args(["-c:v", encoder.name()]);
             cmd.args(encoder.quality_args());
             // Smaller pictures need less: cap the bitrate (later options win).
@@ -443,7 +549,14 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
                 cmd.args(["-maxrate", rate, "-bufsize", buffer]);
             }
             // A keyframe every 2s: playback starts quickly and fragments stay small.
-            cmd.args(["-g", "48", "-force_key_frames", "expr:gte(t,n_forced*2)", "-profile:v", "high"]);
+            cmd.args([
+                "-g",
+                "48",
+                "-force_key_frames",
+                "expr:gte(t,n_forced*2)",
+                "-profile:v",
+                "high",
+            ]);
         }
     }
     match req.audio_mode {
@@ -461,7 +574,10 @@ pub async fn start_stream(tools: &Tools, req: StreamRequest<'_>) -> Result<tokio
         "mp4",
         "pipe:1",
     ]);
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     let mut child = cmd.spawn().context("starting ffmpeg")?;
     // Log what ffmpeg complains about (it's quiet unless something's wrong).
     if let Some(stderr) = child.stderr.take() {
@@ -489,15 +605,29 @@ impl Tools {
     /// `cache_dir`. Subtitles are spread through the whole file, so extracting them takes
     /// a while over a network share (~30s for a 1.3 GB episode); meanwhile the file grows
     /// as ffmpeg reads, and readers can follow it (see [`GrowingFile`]).
-    pub fn subtitles(self: &Arc<Self>, cache_dir: &Path, key: (i64, u64), path: &Path, index: usize) -> Result<GrowingFile> {
-        let out = cache_dir.join("subs").join(format!("{}-{}-{index}.ass", key.0, key.1));
+    pub fn subtitles(
+        self: &Arc<Self>,
+        cache_dir: &Path,
+        key: (i64, u64),
+        path: &Path,
+        index: usize,
+    ) -> Result<GrowingFile> {
+        let out = cache_dir
+            .join("subs")
+            .join(format!("{}-{}-{index}.ass", key.0, key.1));
         let done_marker = out.with_extension("ass.done");
         if done_marker.exists() {
-            return Ok(GrowingFile { path: out, done: None });
+            return Ok(GrowingFile {
+                path: out,
+                done: None,
+            });
         }
         let mut running = self.extracting.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(done) = running.get(&out) {
-            return Ok(GrowingFile { path: out, done: Some(done.clone()) });
+            return Ok(GrowingFile {
+                path: out,
+                done: Some(done.clone()),
+            });
         }
         let ffmpeg = self.ffmpeg.clone().context("ffmpeg isn't installed")?;
         std::fs::create_dir_all(out.parent().unwrap_or(cache_dir))?;
@@ -511,7 +641,18 @@ impl Tools {
             let result = command(&ffmpeg)
                 .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
                 .arg(&input)
-                .args(["-map", &format!("0:s:{index}"), "-c:s", "ass", "-vn", "-an", "-flush_packets", "1", "-f", "ass"])
+                .args([
+                    "-map",
+                    &format!("0:s:{index}"),
+                    "-c:s",
+                    "ass",
+                    "-vn",
+                    "-an",
+                    "-flush_packets",
+                    "1",
+                    "-f",
+                    "ass",
+                ])
                 .arg(&file)
                 .stdin(Stdio::null())
                 .output()
@@ -519,7 +660,11 @@ impl Tools {
             let outcome = match result {
                 Ok(o) if o.status.success() => {
                     let _ = std::fs::write(file.with_extension("ass.done"), b"");
-                    log::info!("web: extracted subtitles {} in {:?}", file.display(), started.elapsed());
+                    log::info!(
+                        "web: extracted subtitles {} in {:?}",
+                        file.display(),
+                        started.elapsed()
+                    );
                     Ok(())
                 }
                 Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_owned()),
@@ -529,24 +674,59 @@ impl Tools {
                 log::warn!("web: extracting subtitles from {}: {e}", input.display());
                 let _ = std::fs::remove_file(&file);
             }
-            tools.extracting.lock().unwrap_or_else(|e| e.into_inner()).remove(&file);
+            tools
+                .extracting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&file);
             let _ = tx.send(Some(outcome));
         });
-        Ok(GrowingFile { path: out, done: Some(rx) })
+        Ok(GrowingFile {
+            path: out,
+            done: Some(rx),
+        })
     }
 
     /// A text subtitle track from `from` seconds on, as ASS with the file's own times,
     /// written to stdout while ffmpeg reads (killed when dropped). Starts within a couple
     /// of seconds wherever `from` is, unlike a full extraction, which has to read
     /// everything before that point first.
-    pub fn subtitles_from(&self, path: &Path, index: usize, from: f64) -> Result<tokio::process::Child> {
+    pub fn subtitles_from(
+        &self,
+        path: &Path,
+        index: usize,
+        from: f64,
+    ) -> Result<tokio::process::Child> {
         let ffmpeg = self.ffmpeg.as_ref().context("ffmpeg isn't installed")?;
         command(ffmpeg)
             // A little earlier, for lines already showing at `from`.
-            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss", &format!("{:.3}", (from - 10.0).max(0.0)), "-copyts", "-i"])
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-ss",
+                &format!("{:.3}", (from - 10.0).max(0.0)),
+                "-copyts",
+                "-i",
+            ])
             .arg(path)
             // The ASS writer otherwise holds events back until it has seen the first one.
-            .args(["-map", &format!("0:s:{index}"), "-c:s", "ass", "-vn", "-an", "-flush_packets", "1", "-ignore_readorder", "1", "-f", "ass", "pipe:1"])
+            .args([
+                "-map",
+                &format!("0:s:{index}"),
+                "-c:s",
+                "ass",
+                "-vn",
+                "-an",
+                "-flush_packets",
+                "1",
+                "-ignore_readorder",
+                "1",
+                "-f",
+                "ass",
+                "pipe:1",
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -566,7 +746,9 @@ impl Tools {
         index: usize,
         fonts: &[(usize, String)],
     ) -> Result<Option<TextBurn>> {
-        if !self.can_burn_text().await || !self.subtitles(cache_dir, key, path, index)?.is_complete() {
+        if !self.can_burn_text().await
+            || !self.subtitles(cache_dir, key, path, index)?.is_complete()
+        {
             return Ok(None);
         }
         let fonts_dir = format!("fonts/{}-{}/burn", key.0, key.1);
@@ -583,7 +765,8 @@ impl Tools {
                 let mut cmd = command(ffmpeg);
                 cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
                 for (attachment, name) in fonts {
-                    cmd.arg(format!("-dump_attachment:t:{attachment}")).arg(dir.join(font_file_name(*attachment, name)));
+                    cmd.arg(format!("-dump_attachment:t:{attachment}"))
+                        .arg(dir.join(font_file_name(*attachment, name)));
                 }
                 let _ = cmd.arg("-i").arg(path).stdin(Stdio::null()).output().await;
             }
@@ -597,8 +780,18 @@ impl Tools {
     }
 
     /// A font attached to the file, cached in `cache_dir`.
-    pub async fn font(&self, cache_dir: &Path, key: (i64, u64), path: &Path, attachment: usize, name: &str) -> Result<PathBuf> {
-        let out = cache_dir.join("fonts").join(format!("{}-{}", key.0, key.1)).join(font_file_name(attachment, name));
+    pub async fn font(
+        &self,
+        cache_dir: &Path,
+        key: (i64, u64),
+        path: &Path,
+        attachment: usize,
+        name: &str,
+    ) -> Result<PathBuf> {
+        let out = cache_dir
+            .join("fonts")
+            .join(format!("{}-{}", key.0, key.1))
+            .join(font_file_name(attachment, name));
         let lock = self.lock(&out);
         let _guard = lock.lock().await;
         if out.exists() {
@@ -634,7 +827,18 @@ impl Tools {
         let ffprobe = self.ffprobe.as_ref()?;
         let from = (at - 20.0).max(0.0);
         let out = command(ffprobe)
-            .args(["-v", "error", "-select_streams", "V:0", "-skip_frame", "nokey", "-show_entries", "frame=pts_time,best_effort_timestamp_time", "-of", "csv=p=0"])
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "V:0",
+                "-skip_frame",
+                "nokey",
+                "-show_entries",
+                "frame=pts_time,best_effort_timestamp_time",
+                "-of",
+                "csv=p=0",
+            ])
             .args(["-read_intervals", &format!("{from:.3}%{:.3}", at + 0.05)])
             .arg(path)
             .stdin(Stdio::null())
@@ -667,17 +871,32 @@ pub fn cjk_fallback_font() -> Option<(PathBuf, &'static str)> {
         ]
     } else if cfg!(target_os = "macos") {
         &[
-            ("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "Hiragino Sans"),
-            ("/System/Library/Fonts/Hiragino Sans GB.ttc", "Hiragino Sans GB"),
+            (
+                "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                "Hiragino Sans",
+            ),
+            (
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "Hiragino Sans GB",
+            ),
             ("/System/Library/Fonts/PingFang.ttc", "PingFang SC"),
         ]
     } else {
         &[
-            ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK JP"),
-            ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans CJK JP"),
+            (
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "Noto Sans CJK JP",
+            ),
+            (
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                "Noto Sans CJK JP",
+            ),
         ]
     };
-    candidates.iter().map(|(p, family)| (PathBuf::from(p), *family)).find(|(p, _)| p.is_file())
+    candidates
+        .iter()
+        .map(|(p, family)| (PathBuf::from(p), *family))
+        .find(|(p, _)| p.is_file())
 }
 
 /// Reports when a writer finishes: None until then, then Ok or the error.
@@ -698,44 +917,53 @@ impl GrowingFile {
     /// The file's contents as they become available, ending when it's complete.
     pub fn stream(self) -> impl futures_util::Stream<Item = std::io::Result<bytes::Bytes>> {
         use tokio::io::AsyncReadExt;
-        futures_util::stream::unfold((self, None::<tokio::fs::File>, false), |(mut g, mut file, mut finished)| async move {
-            loop {
-                if file.is_none() {
-                    match tokio::fs::File::open(&g.path).await {
-                        Ok(f) => file = Some(f),
-                        // Not created yet: wait for the writer.
-                        Err(_) if !finished && g.done.is_some() => {}
-                        Err(e) => return (!finished).then_some((Err(e), (g, file, true))),
-                    }
-                }
-                if let Some(f) = file.as_mut() {
-                    let mut buf = vec![0; 64 * 1024];
-                    match f.read(&mut buf).await {
-                        Ok(0) => {}
-                        Ok(n) => {
-                            buf.truncate(n);
-                            return Some((Ok(bytes::Bytes::from(buf)), (g, file, finished)));
-                        }
-                        Err(e) => return Some((Err(e), (g, file, true))),
-                    }
-                }
-                // At the end of what's written so far.
-                if finished {
-                    return None;
-                }
-                let status = g.done.as_ref().map(|d| d.borrow().clone());
-                match status {
-                    // Complete (or the writer has finished): one more read picks up the rest.
-                    None | Some(Some(Ok(()))) => finished = true,
-                    Some(Some(Err(e))) => return Some((Err(std::io::Error::other(e)), (g, file, true))),
-                    Some(None) => {
-                        if let Some(done) = g.done.as_mut() {
-                            let _ = tokio::time::timeout(std::time::Duration::from_millis(250), done.changed()).await;
+        futures_util::stream::unfold(
+            (self, None::<tokio::fs::File>, false),
+            |(mut g, mut file, mut finished)| async move {
+                loop {
+                    if file.is_none() {
+                        match tokio::fs::File::open(&g.path).await {
+                            Ok(f) => file = Some(f),
+                            // Not created yet: wait for the writer.
+                            Err(_) if !finished && g.done.is_some() => {}
+                            Err(e) => return (!finished).then_some((Err(e), (g, file, true))),
                         }
                     }
+                    if let Some(f) = file.as_mut() {
+                        let mut buf = vec![0; 64 * 1024];
+                        match f.read(&mut buf).await {
+                            Ok(0) => {}
+                            Ok(n) => {
+                                buf.truncate(n);
+                                return Some((Ok(bytes::Bytes::from(buf)), (g, file, finished)));
+                            }
+                            Err(e) => return Some((Err(e), (g, file, true))),
+                        }
+                    }
+                    // At the end of what's written so far.
+                    if finished {
+                        return None;
+                    }
+                    let status = g.done.as_ref().map(|d| d.borrow().clone());
+                    match status {
+                        // Complete (or the writer has finished): one more read picks up the rest.
+                        None | Some(Some(Ok(()))) => finished = true,
+                        Some(Some(Err(e))) => {
+                            return Some((Err(std::io::Error::other(e)), (g, file, true)));
+                        }
+                        Some(None) => {
+                            if let Some(done) = g.done.as_mut() {
+                                let _ = tokio::time::timeout(
+                                    std::time::Duration::from_millis(250),
+                                    done.changed(),
+                                )
+                                .await;
+                            }
+                        }
+                    }
                 }
-            }
-        })
+            },
+        )
     }
 }
 
@@ -748,7 +976,10 @@ mod tests {
         assert_eq!(font_file_name(3, "Font Bold.ttf"), "3-Font_Bold.ttf");
         for name in ["../../Startup/x.bat", "C:\\Windows\\x.dll", "/etc/x", ".."] {
             let safe = font_file_name(0, name);
-            assert!(!safe.contains(['/', '\\', ':']) && safe.starts_with("0-"), "{safe}");
+            assert!(
+                !safe.contains(['/', '\\', ':']) && safe.starts_with("0-"),
+                "{safe}"
+            );
         }
     }
 }

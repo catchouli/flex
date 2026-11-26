@@ -10,8 +10,8 @@ use std::process::{Child, ChildStderr, ChildStdout, Stdio};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use super::{InUse, Tools};
 use super::feeds::Listed;
+use super::{InUse, Tools};
 
 /// A channel's uploads, newest first (without Shorts or live streams, which YouTube lists
 /// separately).
@@ -114,7 +114,11 @@ impl Listing {
         if let Some(mut stderr) = self.stderr.take() {
             let _ = stderr.read_to_string(&mut err);
         }
-        let line = err.lines().rev().find(|l| l.starts_with("ERROR")).unwrap_or(err.trim());
+        let line = err
+            .lines()
+            .rev()
+            .find(|l| l.starts_with("ERROR"))
+            .unwrap_or(err.trim());
         bail!("yt-dlp: {}", line.trim_start_matches("ERROR: "))
     }
 }
@@ -157,7 +161,13 @@ impl Tools {
             .with_context(|| format!("running {}", self.yt_dlp.display()))?;
         let stdout = child.stdout.take().context("yt-dlp's output")?;
         let stderr = child.stderr.take();
-        Ok(Listing { child, lines: BufReader::new(stdout).lines(), stderr, count: 0, _in_use: in_use })
+        Ok(Listing {
+            child,
+            lines: BufReader::new(stdout).lines(),
+            stderr,
+            count: 0,
+            _in_use: in_use,
+        })
     }
 
     /// The lengths of the latest videos (about 30) on each channel, in one run of yt-dlp:
@@ -169,7 +179,13 @@ impl Tools {
         let _in_use = InUse::new();
         let out = self
             .command()
-            .args(["--flat-playlist", "--dump-json", "--ignore-errors", "--playlist-items", "1:30"])
+            .args([
+                "--flat-playlist",
+                "--dump-json",
+                "--ignore-errors",
+                "--playlist-items",
+                "1:30",
+            ])
             .args(channel_ids.iter().map(|id| channel_videos_url(id)))
             .output()
             .with_context(|| format!("running {}", self.yt_dlp.display()))?;
@@ -182,7 +198,11 @@ impl Tools {
             .collect();
         if found.is_empty() && !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
-            let line = err.lines().rev().find(|l| l.starts_with("ERROR")).unwrap_or(err.trim());
+            let line = err
+                .lines()
+                .rev()
+                .find(|l| l.starts_with("ERROR"))
+                .unwrap_or(err.trim());
             bail!("yt-dlp: {}", line.trim_start_matches("ERROR: "));
         }
         Ok(found)
@@ -197,9 +217,22 @@ mod tests {
     fn reads_channel_videos() {
         let line = r#"{"title":"How Deep Is Your BASS","duration":193,"view_count":688000,"channel_url":null,"ie_key":"Youtube","id":"NdQbLw91KFk",
             "_type":"url","playlist_channel":"Davie504","playlist_channel_id":"UCgFvT6pUq9HLOvKBYERzXSQ","playlist_index":3,"timestamp":1603929600}"#;
-        let Some(Entry::Video(v)) = parse_line(line) else { panic!("a video") };
-        assert_eq!((v.id.as_str(), v.title.as_str(), v.duration, v.views), ("NdQbLw91KFk", "How Deep Is Your BASS", Some(193.0), Some(688_000)));
-        assert_eq!((v.channel.as_str(), v.channel_id.as_str()), ("Davie504", "UCgFvT6pUq9HLOvKBYERzXSQ"));
+        let Some(Entry::Video(v)) = parse_line(line) else {
+            panic!("a video")
+        };
+        assert_eq!(
+            (v.id.as_str(), v.title.as_str(), v.duration, v.views),
+            (
+                "NdQbLw91KFk",
+                "How Deep Is Your BASS",
+                Some(193.0),
+                Some(688_000)
+            )
+        );
+        assert_eq!(
+            (v.channel.as_str(), v.channel_id.as_str()),
+            ("Davie504", "UCgFvT6pUq9HLOvKBYERzXSQ")
+        );
         assert_eq!(v.published, Some(1_603_929_600));
     }
 
@@ -207,10 +240,22 @@ mod tests {
     fn reads_playlists() {
         let line = r#"{"title":"Anime on BASS","thumbnails":[{"url":"https://i.ytimg.com/vi/HbPnZsoLHyA/hqdefault.jpg?sqp=x","height":270,"width":480}],
             "channel":"Playlist","channel_id":"UCgFvT6pUq9HLOvKBYERzXSQ","ie_key":"YoutubeTab","id":"PL-k0k_f4UoimmXiNWbSpqMp-o_DVcNNVU"}"#;
-        let Some(Entry::Playlist(p)) = parse_line(line) else { panic!("a playlist") };
-        assert_eq!((p.id.as_str(), p.title.as_str()), ("PL-k0k_f4UoimmXiNWbSpqMp-o_DVcNNVU", "Anime on BASS"));
-        assert_eq!(p.thumbnail.as_deref(), Some("https://i.ytimg.com/vi/HbPnZsoLHyA/hqdefault.jpg?sqp=x"));
-        assert_eq!(parse_line(r#"{"id":"UCgFvT6pUq9HLOvKBYERzXSQ","ie_key":"YoutubeTab"}"#), None, "a channel");
+        let Some(Entry::Playlist(p)) = parse_line(line) else {
+            panic!("a playlist")
+        };
+        assert_eq!(
+            (p.id.as_str(), p.title.as_str()),
+            ("PL-k0k_f4UoimmXiNWbSpqMp-o_DVcNNVU", "Anime on BASS")
+        );
+        assert_eq!(
+            p.thumbnail.as_deref(),
+            Some("https://i.ytimg.com/vi/HbPnZsoLHyA/hqdefault.jpg?sqp=x")
+        );
+        assert_eq!(
+            parse_line(r#"{"id":"UCgFvT6pUq9HLOvKBYERzXSQ","ie_key":"YoutubeTab"}"#),
+            None,
+            "a channel"
+        );
         assert_eq!(parse_line("not json"), None);
     }
 
@@ -220,16 +265,41 @@ mod tests {
     fn listing_online() {
         let tools = Tools::find().expect("yt-dlp");
         let channel = "UCgFvT6pUq9HLOvKBYERzXSQ"; // Davie504: hundreds of videos
-        let videos: Vec<Entry> = tools.listing(&channel_videos_url(channel)).unwrap().take(100).collect();
+        let videos: Vec<Entry> = tools
+            .listing(&channel_videos_url(channel))
+            .unwrap()
+            .take(100)
+            .collect();
         assert_eq!(videos.len(), 100, "more than one page");
-        assert!(videos.iter().all(|e| matches!(e, Entry::Video(v) if v.published.is_some())), "dates");
-        let playlists: Vec<Entry> = tools.listing(&channel_playlists_url(channel)).unwrap().collect();
-        eprintln!("{} playlists, first {:?}", playlists.len(), playlists.first());
-        let Some(Entry::Playlist(p)) = playlists.first() else { panic!("a playlist") };
-        let in_it: Vec<Entry> = tools.listing(&playlist_url(&p.id)).unwrap().take(5).collect();
+        assert!(
+            videos
+                .iter()
+                .all(|e| matches!(e, Entry::Video(v) if v.published.is_some())),
+            "dates"
+        );
+        let playlists: Vec<Entry> = tools
+            .listing(&channel_playlists_url(channel))
+            .unwrap()
+            .collect();
+        eprintln!(
+            "{} playlists, first {:?}",
+            playlists.len(),
+            playlists.first()
+        );
+        let Some(Entry::Playlist(p)) = playlists.first() else {
+            panic!("a playlist")
+        };
+        let in_it: Vec<Entry> = tools
+            .listing(&playlist_url(&p.id))
+            .unwrap()
+            .take(5)
+            .collect();
         eprintln!("{:?}", in_it.first());
         assert!(matches!(in_it.first(), Some(Entry::Video(v)) if !v.channel.is_empty()));
         let durations = tools.latest_durations(&[channel.to_owned()]).unwrap();
-        assert!(durations.len() >= 20 && durations.iter().all(|(c, _, _)| c == channel), "{durations:?}");
+        assert!(
+            durations.len() >= 20 && durations.iter().all(|(c, _, _)| c == channel),
+            "{durations:?}"
+        );
     }
 }

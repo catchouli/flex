@@ -80,7 +80,10 @@ impl Installed {
     }
 
     pub fn load() -> Self {
-        std::fs::read(Self::file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        std::fs::read(Self::file())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
     }
 
     fn save(&self) -> Result<()> {
@@ -118,9 +121,14 @@ struct Asset {
 }
 
 fn latest_release(repo: &str) -> Result<Release> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into();
     agent
-        .get(&format!("https://api.github.com/repos/{repo}/releases/latest"))
+        .get(&format!(
+            "https://api.github.com/repos/{repo}/releases/latest"
+        ))
         .header("User-Agent", USER_AGENT)
         .header("Accept", "application/vnd.github+json")
         .call()
@@ -145,14 +153,21 @@ pub fn update(force: bool, now: i64) -> Result<Report> {
     let dir = tools_dir();
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let mut installed = Installed::load();
-    let missing = Tool::ALL.iter().any(|t| t.asset().is_some() && !t.path().is_file());
+    let missing = Tool::ALL
+        .iter()
+        .any(|t| t.asset().is_some() && !t.path().is_file());
     if !force && !missing && now - installed.checked_at < CHECK_EVERY_SECS {
         return Ok(Report::default());
     }
-    let mut report = Report { checked: true, ..Report::default() };
+    let mut report = Report {
+        checked: true,
+        ..Report::default()
+    };
     let mut first_error = None;
     for tool in Tool::ALL {
-        let Some(asset_name) = tool.asset() else { continue };
+        let Some(asset_name) = tool.asset() else {
+            continue;
+        };
         let result = (|| -> Result<()> {
             let release = latest_release(tool.repo())?;
             if tool.path().is_file() && installed.version(tool) == Some(release.tag_name.as_str()) {
@@ -162,7 +177,9 @@ pub fn update(force: bool, now: i64) -> Result<Report> {
                 .assets
                 .iter()
                 .find(|a| a.name == asset_name)
-                .with_context(|| format!("{} {} has no {asset_name}", tool.name(), release.tag_name))?;
+                .with_context(|| {
+                    format!("{} {} has no {asset_name}", tool.name(), release.tag_name)
+                })?;
             let sha256 = asset
                 .digest
                 .as_deref()
@@ -171,7 +188,14 @@ pub fn update(force: bool, now: i64) -> Result<Report> {
                 .to_ascii_lowercase();
             let download = dir.join(format!("{asset_name}.download"));
             log::info!("youtube: downloading {} {}", tool.name(), release.tag_name);
-            download_verified(&asset.browser_download_url, asset_name, asset.size, &sha256, &download, |_| {})?;
+            download_verified(
+                &asset.browser_download_url,
+                asset_name,
+                asset.size,
+                &sha256,
+                &download,
+                |_| {},
+            )?;
             install(tool, &download)?;
             let _ = std::fs::remove_file(&download);
             installed.set_version(tool, release.tag_name.clone());
@@ -200,7 +224,9 @@ fn install(tool: Tool, download: &Path) -> Result<()> {
         let file = std::fs::File::open(download)?;
         let mut zip = zip::ZipArchive::new(file).context("opening the zip")?;
         let wanted = super::exe(tool.name());
-        let mut entry = zip.by_name(&wanted).with_context(|| format!("no {wanted} in the zip"))?;
+        let mut entry = zip
+            .by_name(&wanted)
+            .with_context(|| format!("no {wanted} in the zip"))?;
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes)?;
         std::fs::write(&staged, bytes)?;
@@ -240,7 +266,10 @@ mod tests {
     fn swaps_only_when_unused() {
         let in_use = super::super::InUse::new();
         let mut swapped = false;
-        assert!(!super::super::when_unused(Duration::from_millis(600), || swapped = true), "gives up");
+        assert!(
+            !super::super::when_unused(Duration::from_millis(600), || swapped = true),
+            "gives up"
+        );
         assert!(!swapped);
         drop(in_use);
         assert!(super::super::when_unused(Duration::ZERO, || swapped = true));
@@ -271,7 +300,10 @@ mod tests {
         let report = update(false, 1000).unwrap();
         assert_eq!(report.updated.len(), 2, "{report:?}");
         let tools = super::super::Tools::find().unwrap();
-        assert!(tools.yt_dlp.starts_with(&dir) && tools.deno.as_ref().is_some_and(|d| d.starts_with(&dir)));
+        assert!(
+            tools.yt_dlp.starts_with(&dir)
+                && tools.deno.as_ref().is_some_and(|d| d.starts_with(&dir))
+        );
         assert!(tools.yt_dlp_version().is_some());
         // Up to date and checked recently: nothing to do.
         assert_eq!(update(false, 2000).unwrap(), Report::default());

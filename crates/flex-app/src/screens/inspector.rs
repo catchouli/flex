@@ -12,13 +12,21 @@ use crate::theme;
 use crate::widgets::{self, Icon, ListInput, ListState, Row};
 
 fn season_label(season: i32) -> String {
-    if season == 0 { "Specials".to_owned() } else { format!("Season {season}") }
+    if season == 0 {
+        "Specials".to_owned()
+    } else {
+        format!("Season {season}")
+    }
 }
 
 fn groups_of(sh: &Shared, library_id: i64, show_id: i64) -> Option<(String, Vec<PlacedGroup>)> {
     let entry = sh.lib(library_id)?.catalog()?.show(show_id)?;
     let mut groups = entry.groups.clone();
-    groups.sort_by(|a, b| a.season.cmp(&b.season).then_with(|| flex_core::natural::natural_cmp(&a.key, &b.key)));
+    groups.sort_by(|a, b| {
+        a.season
+            .cmp(&b.season)
+            .then_with(|| flex_core::natural::natural_cmp(&a.key, &b.key))
+    });
     Some((entry.show.title.clone(), groups))
 }
 
@@ -30,7 +38,11 @@ pub struct MatchInspector {
 
 impl MatchInspector {
     pub fn new(library_id: i64, show_id: i64) -> Self {
-        Self { library_id, show_id, list: ListState::default() }
+        Self {
+            library_id,
+            show_id,
+            list: ListState::default(),
+        }
     }
 }
 
@@ -39,26 +51,45 @@ impl Screen for MatchInspector {
         if press.is(Action::Back) {
             return Nav::Pop;
         }
-        let Some((_, groups)) = groups_of(sh, self.library_id, self.show_id) else { return Nav::Pop };
+        let Some((_, groups)) = groups_of(sh, self.library_id, self.show_id) else {
+            return Nav::Pop;
+        };
         match self.list.handle(press, groups.len()) {
             ListInput::AtTop => Nav::FocusTopBar,
-            ListInput::Activate(i) => Nav::push(GroupEditor::new(self.library_id, self.show_id, &groups[i])),
+            ListInput::Activate(i) => {
+                Nav::push(GroupEditor::new(self.library_id, self.show_id, &groups[i]))
+            }
             ListInput::None => Nav::None,
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
         // The show disappears if its last folder was moved away.
-        let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else { return Nav::Pop };
+        let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else {
+            return Nav::Pop;
+        };
         let subtitle = "Folders in this show. OK to change one; changes are kept on rescans.";
-        let body = widgets::header(ui.painter(), rect, &format!("{title}: folders & seasons"), subtitle, ui.style());
+        let body = widgets::header(
+            ui.painter(),
+            rect,
+            &format!("{title}: folders & seasons"),
+            subtitle,
+            ui.style(),
+        );
         let rows: Vec<Row> = groups
             .iter()
             .map(|g| {
                 let how = if g.manual { "set by hand" } else { "automatic" };
-                let videos = if g.files == 1 { "1 video".to_owned() } else { format!("{} videos", g.files) };
-                Row::new(Icon::Folder, format!("{}  ·  {}", season_label(g.season), g.key))
-                    .detail(format!("{videos} · {how}"))
+                let videos = if g.files == 1 {
+                    "1 video".to_owned()
+                } else {
+                    format!("{} videos", g.files)
+                };
+                Row::new(
+                    Icon::Folder,
+                    format!("{}  ·  {}", season_label(g.season), g.key),
+                )
+                .detail(format!("{videos} · {how}"))
             })
             .collect();
         widgets::list(ui, body, &rows, &mut self.list, focused);
@@ -79,7 +110,13 @@ pub struct GroupEditor {
 
 impl GroupEditor {
     fn new(library_id: i64, show_id: i64, group: &PlacedGroup) -> Self {
-        Self { library_id, show_id, key: group.key.clone(), season: group.season, list: ListState::default() }
+        Self {
+            library_id,
+            show_id,
+            key: group.key.clone(),
+            season: group.season,
+            list: ListState::default(),
+        }
     }
 }
 
@@ -105,10 +142,15 @@ impl Screen for GroupEditor {
         match self.list.handle(press, 3) {
             ListInput::Activate(0) => {
                 sh.place_group(self.library_id, &self.key, self.show_id, Some(self.season));
-                sh.toast(format!("Saved as {}", season_label(self.season).to_lowercase()));
+                sh.toast(format!(
+                    "Saved as {}",
+                    season_label(self.season).to_lowercase()
+                ));
                 Nav::Pop
             }
-            ListInput::Activate(1) => Nav::replace(ShowPicker::new(self.library_id, self.show_id, &self.key)),
+            ListInput::Activate(1) => {
+                Nav::replace(ShowPicker::new(self.library_id, self.show_id, &self.key))
+            }
             ListInput::Activate(_) => {
                 sh.split_group(self.library_id, &self.key);
                 sh.toast("Moved into its own show");
@@ -119,13 +161,22 @@ impl Screen for GroupEditor {
     }
 
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, rect: Rect, focused: bool) -> Nav {
-        let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else { return Nav::Pop };
+        let Some((title, groups)) = groups_of(sh, self.library_id, self.show_id) else {
+            return Nav::Pop;
+        };
         if !groups.iter().any(|g| g.key == self.key) {
             return Nav::Pop; // moved elsewhere
         }
-        let body = widgets::header(ui.painter(), rect, &self.key, &format!("In {title}"), ui.style());
+        let body = widgets::header(
+            ui.painter(),
+            rect,
+            &self.key,
+            &format!("In {title}"),
+            ui.style(),
+        );
         let rows = [
-            Row::new(Icon::None, format!("◀  {}  ▶", season_label(self.season))).detail("Left/Right to change, OK to save"),
+            Row::new(Icon::None, format!("◀  {}  ▶", season_label(self.season)))
+                .detail("Left/Right to change, OK to save"),
             Row::new(Icon::Folder, "Move to another show…"),
             Row::new(Icon::Add, "Make it a separate show"),
         ];
@@ -145,17 +196,27 @@ pub struct ShowPicker {
 
 impl ShowPicker {
     fn new(library_id: i64, from_show: i64, key: &str) -> Self {
-        Self { library_id, from_show, key: key.to_owned(), filter: String::new(), list: ListState::default() }
+        Self {
+            library_id,
+            from_show,
+            key: key.to_owned(),
+            filter: String::new(),
+            list: ListState::default(),
+        }
     }
 
     fn candidates(&self, sh: &Shared) -> Vec<(i64, String)> {
-        let Some(catalog) = sh.lib(self.library_id).and_then(|l| l.catalog()) else { return Vec::new() };
+        let Some(catalog) = sh.lib(self.library_id).and_then(|l| l.catalog()) else {
+            return Vec::new();
+        };
         let filter = flex_core::parse::normalize(&self.filter);
         catalog
             .shows
             .iter()
             .filter(|s| s.show.id != self.from_show)
-            .filter(|s| filter.is_empty() || flex_core::parse::normalize(&s.show.title).contains(&filter))
+            .filter(|s| {
+                filter.is_empty() || flex_core::parse::normalize(&s.show.title).contains(&filter)
+            })
             .map(|s| (s.show.id, s.show.title.clone()))
             .collect()
     }
@@ -188,7 +249,13 @@ impl Screen for ShowPicker {
     fn ui(&mut self, ui: &mut Ui, sh: &mut Shared, _rect: Rect, focused: bool) -> Nav {
         // Without the top bar the screen gets the whole window: keep to the safe area.
         let rect = theme::safe_rect(ui.ctx());
-        let body = widgets::header(ui.painter(), rect, "Move to another show", &self.key, ui.style());
+        let body = widgets::header(
+            ui.painter(),
+            rect,
+            "Move to another show",
+            &self.key,
+            ui.style(),
+        );
         let field = Rect::from_min_size(body.min, vec2(body.width().min(700.0), 56.0));
         let edit = egui::TextEdit::singleline(&mut self.filter)
             .id(Self::filter_id())
@@ -200,11 +267,18 @@ impl Screen for ShowPicker {
         if response.changed() {
             self.list.select(0);
         }
-        if response.has_focus() && ui.input(|i| i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::Enter)) {
+        if response.has_focus()
+            && ui.input(|i| i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::Enter))
+        {
             response.surrender_focus();
         }
-        let list_rect = Rect::from_min_max(egui::pos2(body.left(), field.bottom() + 16.0), body.max);
-        let rows: Vec<Row> = self.candidates(sh).into_iter().map(|(_, title)| Row::new(Icon::Folder, title)).collect();
+        let list_rect =
+            Rect::from_min_max(egui::pos2(body.left(), field.bottom() + 16.0), body.max);
+        let rows: Vec<Row> = self
+            .candidates(sh)
+            .into_iter()
+            .map(|(_, title)| Row::new(Icon::Folder, title))
+            .collect();
         if rows.is_empty() {
             widgets::message(ui.painter(), list_rect, "No matching shows", ui.style());
         }

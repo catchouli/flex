@@ -49,7 +49,8 @@ const ANIMATION: u32 = 16;
 impl Candidate {
     /// Plausibly anime: animated, or Japanese / Chinese / Korean.
     pub fn looks_like_anime(&self) -> bool {
-        self.genre_ids.contains(&ANIMATION) || matches!(self.original_language.as_str(), "ja" | "zh" | "ko")
+        self.genre_ids.contains(&ANIMATION)
+            || matches!(self.original_language.as_str(), "ja" | "zh" | "ko")
     }
 
     /// Stored as the show's provider id, e.g. "tv:12345".
@@ -94,13 +95,19 @@ pub struct Tmdb {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).build().into()
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .into()
 }
 
 impl Tmdb {
     /// `token` is the "API Read Access Token" from TMDB's settings.
     pub fn new(token: &str) -> Self {
-        Self { token: token.trim().to_owned(), agent: agent() }
+        Self {
+            token: token.trim().to_owned(),
+            agent: agent(),
+        }
     }
 
     pub fn search(&self, kind: Kind, query: &str, year: Option<i32>) -> Result<Vec<Candidate>> {
@@ -111,7 +118,11 @@ impl Tmdb {
             .query("query", query)
             .query("include_adult", "false");
         if let Some(y) = year {
-            let key = if kind == Kind::Tv { "first_air_date_year" } else { "year" };
+            let key = if kind == Kind::Tv {
+                "first_air_date_year"
+            } else {
+                "year"
+            };
             req = req.query(key, y.to_string());
         }
         let page: SearchPage = req
@@ -125,7 +136,10 @@ impl Tmdb {
             .into_iter()
             .map(|r| {
                 let title = r.name.or(r.title).unwrap_or_default();
-                let original_title = r.original_name.or(r.original_title).unwrap_or_else(|| title.clone());
+                let original_title = r
+                    .original_name
+                    .or(r.original_title)
+                    .unwrap_or_else(|| title.clone());
                 Candidate {
                     kind,
                     id: r.id,
@@ -225,12 +239,18 @@ fn opt_str(v: &serde_json::Value) -> Option<String> {
 
 impl Tmdb {
     fn get_json(&self, path: &str, query: &[(&str, &str)]) -> Result<serde_json::Value> {
-        let mut req =
-            self.agent.get(format!("{TMDB_API}{path}")).header("Authorization", format!("Bearer {}", self.token));
+        let mut req = self
+            .agent
+            .get(format!("{TMDB_API}{path}"))
+            .header("Authorization", format!("Bearer {}", self.token));
         for (k, v) in query {
             req = req.query(*k, *v);
         }
-        Ok(req.call().with_context(|| format!("TMDB {path}"))?.body_mut().read_json()?)
+        Ok(req
+            .call()
+            .with_context(|| format!("TMDB {path}"))?
+            .body_mut()
+            .read_json()?)
     }
 
     /// Details and cast for a matched entry ("tv:123" / "movie:456").
@@ -247,18 +267,33 @@ impl Tmdb {
             .map(|c| CastMember {
                 name: str_of(&c["name"]),
                 // TV credits list roles; films a single character.
-                role: c["roles"][0]["character"].as_str().map_or_else(|| str_of(&c["character"]), str::to_owned),
+                role: c["roles"][0]["character"]
+                    .as_str()
+                    .map_or_else(|| str_of(&c["character"]), str::to_owned),
                 image: opt_str(&c["profile_path"]),
                 person: c["id"].as_u64().map(|id| format!("tmdb:{id}")),
             })
             .collect();
-        let runtime = if tv { v["episode_run_time"][0].as_i64() } else { v["runtime"].as_i64() };
+        let runtime = if tv {
+            v["episode_run_time"][0].as_i64()
+        } else {
+            v["runtime"].as_i64()
+        };
         Ok(Details {
             title: str_of(if tv { &v["name"] } else { &v["title"] }),
             overview: str_of(&v["overview"]),
-            release_date: opt_str(if tv { &v["first_air_date"] } else { &v["release_date"] }),
+            release_date: opt_str(if tv {
+                &v["first_air_date"]
+            } else {
+                &v["release_date"]
+            }),
             runtime: runtime.filter(|r| *r > 0).map(|r| r as i32),
-            genres: v["genres"].as_array().into_iter().flatten().map(|g| str_of(&g["name"])).collect(),
+            genres: v["genres"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|g| str_of(&g["name"]))
+                .collect(),
             poster_path: opt_str(&v["poster_path"]),
             backdrop_path: opt_str(&v["backdrop_path"]),
             original_language: opt_str(&v["original_language"]),
@@ -308,7 +343,11 @@ pub fn map_episode(season: i32, episode: i32, seasons: &[SeasonInfo]) -> Option<
         return Some((season, episode));
     }
     // Absolute numbering only makes sense counted from the first regular season.
-    let first_regular = seasons.iter().filter(|s| s.number > 0).map(|s| s.number).min()?;
+    let first_regular = seasons
+        .iter()
+        .filter(|s| s.number > 0)
+        .map(|s| s.number)
+        .min()?;
     if season > first_regular || season == 0 {
         return None;
     }
@@ -347,7 +386,9 @@ pub fn anilist_info(title: &str) -> Result<AniListInfo> {
     };
     let media = &value["data"]["Media"];
     let mut titles: Vec<String> = Vec::new();
-    let names = ["romaji", "english", "native"].iter().map(|k| &media["title"][*k]);
+    let names = ["romaji", "english", "native"]
+        .iter()
+        .map(|k| &media["title"][*k]);
     for t in names.chain(media["synonyms"].as_array().into_iter().flatten()) {
         if let Some(t) = t.as_str().filter(|t| !t.is_empty())
             && !titles.iter().any(|x| x == t)
@@ -356,7 +397,11 @@ pub fn anilist_info(title: &str) -> Result<AniListInfo> {
         }
     }
     let mut cast = Vec::new();
-    for edge in media["characters"]["edges"].as_array().into_iter().flatten() {
+    for edge in media["characters"]["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
         let character = str_of(&edge["node"]["name"]["full"]);
         if let Some(va) = edge["voiceActors"].as_array().and_then(|v| v.first()) {
             cast.push(CastMember {
@@ -385,7 +430,11 @@ pub fn anilist_titles(query: &str) -> Result<Vec<String>> {
     }
     let value: serde_json::Value = response.context("AniList search")?.body_mut().read_json()?;
     let mut titles = Vec::new();
-    for media in value["data"]["Page"]["media"].as_array().into_iter().flatten() {
+    for media in value["data"]["Page"]["media"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
         for key in ["english", "romaji", "native"] {
             if let Some(t) = media["title"][key].as_str().filter(|t| !t.is_empty())
                 && !titles.iter().any(|x: &String| x == t)
@@ -438,10 +487,22 @@ const TALK_AND_NEWS: [u64; 2] = [10767, 10763];
 impl Tmdb {
     /// A person's details and acting credits (films and TV), most popular first.
     pub fn person(&self, id: &str) -> Result<Person> {
-        let v = self.get_json(&format!("/person/{id}"), &[("append_to_response", "combined_credits")])?;
+        let v = self.get_json(
+            &format!("/person/{id}"),
+            &[("append_to_response", "combined_credits")],
+        )?;
         let mut credits: Vec<(PersonCredit, f64)> = Vec::new();
-        for c in v["combined_credits"]["cast"].as_array().into_iter().flatten() {
-            let genres: Vec<u64> = c["genre_ids"].as_array().into_iter().flatten().filter_map(|g| g.as_u64()).collect();
+        for c in v["combined_credits"]["cast"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let genres: Vec<u64> = c["genre_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|g| g.as_u64())
+                .collect();
             if genres.iter().any(|g| TALK_AND_NEWS.contains(g)) {
                 continue;
             }
@@ -450,13 +511,29 @@ impl Tmdb {
                 Some("tv") => (CreditKind::Tv, &c["name"], &c["first_air_date"]),
                 _ => continue,
             };
-            let Some(tmdb_id) = c["id"].as_u64() else { continue };
-            let provider_id = format!("{}:{tmdb_id}", if kind == CreditKind::Movie { "movie" } else { "tv" });
+            let Some(tmdb_id) = c["id"].as_u64() else {
+                continue;
+            };
+            let provider_id = format!(
+                "{}:{tmdb_id}",
+                if kind == CreditKind::Movie {
+                    "movie"
+                } else {
+                    "tv"
+                }
+            );
             let role = str_of(&c["character"]);
             // Several roles in one entry are listed once.
-            if let Some((existing, _)) = credits.iter_mut().find(|(e, _)| e.provider_id.as_deref() == Some(provider_id.as_str())) {
+            if let Some((existing, _)) = credits
+                .iter_mut()
+                .find(|(e, _)| e.provider_id.as_deref() == Some(provider_id.as_str()))
+            {
                 if !role.is_empty() && !existing.role.split(", ").any(|r| r == role) {
-                    existing.role = if existing.role.is_empty() { role } else { format!("{}, {role}", existing.role) };
+                    existing.role = if existing.role.is_empty() {
+                        role
+                    } else {
+                        format!("{}, {role}", existing.role)
+                    };
                 }
                 continue;
             }
@@ -477,15 +554,29 @@ impl Tmdb {
                 _ => c["episode_count"].as_f64().unwrap_or(1.0).min(10.0) * 1e7 + votes,
             };
             // Appearing as themselves (award shows, documentaries) goes last.
-            let first_role = credit.role.split([',', '(', '-']).next().unwrap_or_default().trim().to_lowercase();
-            let as_self = matches!(first_role.as_str(), "self" | "himself" | "herself" | "themselves" | "themself");
+            let first_role = credit
+                .role
+                .split([',', '(', '-'])
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase();
+            let as_self = matches!(
+                first_role.as_str(),
+                "self" | "himself" | "herself" | "themselves" | "themself"
+            );
             credits.push((credit, if as_self { rank - 1e9 } else { rank }));
         }
         credits.sort_by(|a, b| b.1.total_cmp(&a.1));
         Ok(Person {
             name: str_of(&v["name"]),
             // TMDB copies Wikipedia, credit line and all.
-            biography: str_of(&v["biography"]).split("Description above from the Wikipedia").next().unwrap_or_default().trim().to_owned(),
+            biography: str_of(&v["biography"])
+                .split("Description above from the Wikipedia")
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
             born: opt_str(&v["birthday"]),
             birthplace: opt_str(&v["place_of_birth"]),
             image: opt_str(&v["profile_path"]),
@@ -497,12 +588,27 @@ impl Tmdb {
 /// Removes AniList's markdown, collapsed-block markers ("~!...!~", used for long lists of
 /// roles) and lines of nothing but links from a description.
 fn plain_text(s: &str) -> String {
-    static LINK: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
-    let s = s.replace("~!", "\n").replace("!~", "\n").replace("<br>", "\n");
+    static LINK: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
+    let s = s
+        .replace("~!", "\n")
+        .replace("!~", "\n")
+        .replace("<br>", "\n");
     let lines: Vec<String> = s
         .lines()
-        .filter(|l| !LINK.replace_all(l, "").trim_matches(|c: char| c == '|' || c.is_whitespace()).is_empty())
-        .map(|l| LINK.replace_all(l, "$1").replace("__", "").replace("**", "").trim().to_owned())
+        .filter(|l| {
+            !LINK
+                .replace_all(l, "")
+                .trim_matches(|c: char| c == '|' || c.is_whitespace())
+                .is_empty()
+        })
+        .map(|l| {
+            LINK.replace_all(l, "$1")
+                .replace("__", "")
+                .replace("**", "")
+                .trim()
+                .to_owned()
+        })
         .collect();
     lines.join("\n")
 }
@@ -514,7 +620,12 @@ pub fn anilist_person(id: &str) -> Result<Person> {
         "variables": { "id": id.parse::<i64>().context("bad AniList id")? },
     });
     anilist_wait();
-    let value: serde_json::Value = agent().post(ANILIST_API).send_json(&body).context("AniList lookup")?.body_mut().read_json()?;
+    let value: serde_json::Value = agent()
+        .post(ANILIST_API)
+        .send_json(&body)
+        .context("AniList lookup")?
+        .body_mut()
+        .read_json()?;
     let staff = &value["data"]["Staff"];
     let born = {
         let d = &staff["dateOfBirth"];
@@ -525,7 +636,11 @@ pub fn anilist_person(id: &str) -> Result<Person> {
         }
     };
     let mut credits = Vec::new();
-    for edge in staff["characterMedia"]["edges"].as_array().into_iter().flatten() {
+    for edge in staff["characterMedia"]["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
         let node = &edge["node"];
         if node["type"].as_str() != Some("ANIME") {
             continue;
@@ -533,8 +648,12 @@ pub fn anilist_person(id: &str) -> Result<Person> {
         let names = ["english", "romaji", "native"].map(|k| opt_str(&node["title"][k]));
         let mut titles = names.into_iter().flatten();
         let Some(title) = titles.next() else { continue };
-        let characters: Vec<String> =
-            edge["characters"].as_array().into_iter().flatten().filter_map(|c| opt_str(&c["name"]["full"])).collect();
+        let characters: Vec<String> = edge["characters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| opt_str(&c["name"]["full"]))
+            .collect();
         credits.push(PersonCredit {
             kind: CreditKind::Anime,
             provider_id: None,
@@ -571,7 +690,11 @@ pub fn score(query: &str, year: Option<i32>, c: &Candidate) -> f64 {
         .iter()
         .map(|t| {
             let t = normalize(t);
-            if t == q { 1.0 } else { strsim::jaro_winkler(&q, &t) }
+            if t == q {
+                1.0
+            } else {
+                strsim::jaro_winkler(&q, &t)
+            }
         })
         .fold(0.0, f64::max);
     let year_adj = match (year, c.year) {
@@ -586,7 +709,11 @@ pub fn score(query: &str, year: Option<i32>, c: &Candidate) -> f64 {
 pub const ACCEPT_SCORE: f64 = 0.9;
 
 /// The best candidate and its score, preferring popular entries on ties.
-pub fn best<'a>(query: &str, year: Option<i32>, candidates: &'a [Candidate]) -> Option<(&'a Candidate, f64)> {
+pub fn best<'a>(
+    query: &str,
+    year: Option<i32>,
+    candidates: &'a [Candidate],
+) -> Option<(&'a Candidate, f64)> {
     candidates
         .iter()
         .map(|c| (c, score(query, year, c)))
@@ -597,7 +724,11 @@ pub fn best<'a>(query: &str, year: Option<i32>, candidates: &'a [Candidate]) -> 
 /// `candidates` must be in TMDB's own relevance order: TMDB already searches alternative
 /// and translated titles, so its top hit is trusted when the year or the wording agrees,
 /// even if the title differs ("Rasen" → "The Spiral").
-pub fn choose<'a>(query: &str, year: Option<i32>, candidates: &'a [Candidate]) -> Option<&'a Candidate> {
+pub fn choose<'a>(
+    query: &str,
+    year: Option<i32>,
+    candidates: &'a [Candidate],
+) -> Option<&'a Candidate> {
     let first = candidates.first()?;
     if let Some((c, s)) = best(query, year, candidates)
         && s >= ACCEPT_SCORE
@@ -619,7 +750,8 @@ pub fn choose<'a>(query: &str, year: Option<i32>, candidates: &'a [Candidate]) -
     });
     let only = candidates.len() == 1;
     let resemblance = score(query, None, first) >= 0.4;
-    let accept = (year_ok && (only || contains || resemblance)) || (!year_conflict && (contains || (only && resemblance)));
+    let accept = (year_ok && (only || contains || resemblance))
+        || (!year_conflict && (contains || (only && resemblance)));
     accept.then_some(first)
 }
 
@@ -640,7 +772,11 @@ pub struct Lookup {
 /// extras that make them look like a series), and for anime retries with AniList's
 /// alternative titles. In anime libraries only animated / East Asian results count.
 pub fn lookup(tmdb: &Tmdb, item: &Lookup) -> Result<Option<Candidate>> {
-    let other = if item.kind == Kind::Tv { Kind::Movie } else { Kind::Tv };
+    let other = if item.kind == Kind::Tv {
+        Kind::Movie
+    } else {
+        Kind::Tv
+    };
     let attempt = |kind: Kind, title: &str| -> Result<Option<Candidate>> {
         let keep = |mut results: Vec<Candidate>| {
             if item.anime {
@@ -657,8 +793,11 @@ pub fn lookup(tmdb: &Tmdb, item: &Lookup) -> Result<Option<Candidate>> {
         if let Some(year) = item.year {
             let q = normalize(title);
             let close = |c: &Candidate| c.year.is_none_or(|y| (y - year).abs() <= 3);
-            let exact = |c: &Candidate| normalize(&c.title) == q || normalize(&c.original_title) == q;
-            return Ok(keep(tmdb.search(kind, title, None)?).into_iter().find(|c| exact(c) && close(c)));
+            let exact =
+                |c: &Candidate| normalize(&c.title) == q || normalize(&c.original_title) == q;
+            return Ok(keep(tmdb.search(kind, title, None)?)
+                .into_iter()
+                .find(|c| exact(c) && close(c)));
         }
         Ok(None)
     };
@@ -724,30 +863,70 @@ mod tests {
 
     #[test]
     fn trusts_tmdb_order_when_year_or_wording_agrees() {
-        let movie = |title: &str, original: &str, year| Candidate { kind: Kind::Movie, ..cand(title, original, year, 1.0) };
-        let lampoon = [movie("National Lampoon's Christmas Vacation", "", Some(1989))];
+        let movie = |title: &str, original: &str, year| Candidate {
+            kind: Kind::Movie,
+            ..cand(title, original, year, 1.0)
+        };
+        let lampoon = [movie(
+            "National Lampoon's Christmas Vacation",
+            "",
+            Some(1989),
+        )];
         assert!(choose("Christmas Vacation", Some(1989), &lampoon).is_some());
         let spiral = [movie("The Spiral", "らせん", Some(1998))];
-        assert!(choose("Rasen", Some(1998), &spiral).is_some(), "only result, right year");
+        assert!(
+            choose("Rasen", Some(1998), &spiral).is_some(),
+            "only result, right year"
+        );
         assert!(choose("Rasen", Some(2012), &spiral).is_none(), "wrong year");
-        let escaflowne = [cand("The Vision of Escaflowne", "天空のエスカフローネ", Some(1996), 1.0)];
-        assert!(choose("Tenkuu no Escaflowne", None, &escaflowne).is_some(), "only result, and it resembles the romaji title");
-        let unrelated = [cand("Friends", "", Some(1994), 99.0), cand("Frasier", "", Some(1993), 50.0)];
+        let escaflowne = [cand(
+            "The Vision of Escaflowne",
+            "天空のエスカフローネ",
+            Some(1996),
+            1.0,
+        )];
+        assert!(
+            choose("Tenkuu no Escaflowne", None, &escaflowne).is_some(),
+            "only result, and it resembles the romaji title"
+        );
+        let unrelated = [
+            cand("Friends", "", Some(1994), 99.0),
+            cand("Frasier", "", Some(1993), 50.0),
+        ];
         assert!(choose("Abd", None, &unrelated).is_none());
-        let mai = [cand("Ganga Mai Ki Betiyan", "", Some(2025), 3.0), cand("Other", "", None, 1.0)];
-        assert!(choose("Mai", None, &mai).is_none(), "single short word isn't enough");
+        let mai = [
+            cand("Ganga Mai Ki Betiyan", "", Some(2025), 3.0),
+            cand("Other", "", None, 1.0),
+        ];
+        assert!(
+            choose("Mai", None, &mai).is_none(),
+            "single short word isn't enough"
+        );
     }
 
     #[test]
     fn maps_absolute_episode_numbers_across_seasons() {
         let seasons = [
-            SeasonInfo { number: 0, episode_count: 5 },
-            SeasonInfo { number: 1, episode_count: 12 },
-            SeasonInfo { number: 2, episode_count: 13 },
+            SeasonInfo {
+                number: 0,
+                episode_count: 5,
+            },
+            SeasonInfo {
+                number: 1,
+                episode_count: 12,
+            },
+            SeasonInfo {
+                number: 2,
+                episode_count: 13,
+            },
         ];
         assert_eq!(map_episode(1, 5, &seasons), Some((1, 5)));
         assert_eq!(map_episode(2, 3, &seasons), Some((2, 3)));
-        assert_eq!(map_episode(1, 14, &seasons), Some((2, 2)), "absolute numbering");
+        assert_eq!(
+            map_episode(1, 14, &seasons),
+            Some((2, 2)),
+            "absolute numbering"
+        );
         assert_eq!(map_episode(1, 40, &seasons), None);
         assert_eq!(map_episode(3, 1, &seasons), None);
         assert_eq!(map_episode(0, 2, &seasons), Some((0, 2)));
@@ -756,12 +935,21 @@ mod tests {
     #[test]
     fn anilist_descriptions_become_plain_text() {
         let d = "[Profile](https://a) | [Twitter](https://b)\n__Height:__ 156 cm\n\nShe voiced [Mai](https://anilist.co/character/1).\n**Roles:**~!\n• A\n!~";
-        assert_eq!(plain_text(d), "Height: 156 cm\nShe voiced Mai.\nRoles:\n• A");
+        assert_eq!(
+            plain_text(d),
+            "Height: 156 cm\nShe voiced Mai.\nRoles:\n• A"
+        );
     }
 
     #[test]
     fn best_prefers_exact_then_popular() {
-        let cs = [cand("Lost Universe", "", Some(1998), 1.0), cand("Lost", "", Some(2004), 90.0)];
-        assert_eq!(best("Lost Universe", None, &cs).unwrap().0.title, "Lost Universe");
+        let cs = [
+            cand("Lost Universe", "", Some(1998), 1.0),
+            cand("Lost", "", Some(2004), 90.0),
+        ];
+        assert_eq!(
+            best("Lost Universe", None, &cs).unwrap().0.title,
+            "Lost Universe"
+        );
     }
 }

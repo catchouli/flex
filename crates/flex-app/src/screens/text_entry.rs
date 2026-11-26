@@ -31,7 +31,9 @@ pub struct TextEntry {
 impl TextEntry {
     /// `title` is e.g. "Name this library" (after adding) or "Rename library".
     pub fn rename_library(sh: &Shared, library_id: i64, title: &'static str) -> Self {
-        let text = sh.lib(library_id).map_or_else(String::new, |l| l.lib.name.clone());
+        let text = sh
+            .lib(library_id)
+            .map_or_else(String::new, |l| l.lib.name.clone());
         Self {
             purpose: Purpose::RenameLibrary(library_id),
             title: title.into(),
@@ -45,14 +47,22 @@ impl TextEntry {
         Self {
             purpose: Purpose::TmdbToken,
             title: "TMDB token".into(),
-            hint: "Paste the API Read Access Token from themoviedb.org → Settings → API, then Enter.".into(),
+            hint:
+                "Paste the API Read Access Token from themoviedb.org → Settings → API, then Enter."
+                    .into(),
             text: String::new(),
             focus_pending: true,
         }
     }
 
     /// `label` is the setting's name; `text` its current value.
-    pub fn plugin_setting(plugin: usize, key: &str, label: &str, text: String, secret: bool) -> Self {
+    pub fn plugin_setting(
+        plugin: usize,
+        key: &str,
+        label: &str,
+        text: String,
+        secret: bool,
+    ) -> Self {
         Self {
             purpose: Purpose::PluginSetting(plugin, key.to_owned(), secret),
             title: label.to_owned(),
@@ -76,7 +86,8 @@ impl TextEntry {
         Self {
             purpose: Purpose::YouTubeChannel,
             title: "Add a channel".into(),
-            hint: "Paste a link to the channel (or one of its videos), or its @handle, then Enter.".into(),
+            hint: "Paste a link to the channel (or one of its videos), or its @handle, then Enter."
+                .into(),
             text: String::new(),
             focus_pending: true,
         }
@@ -95,7 +106,9 @@ impl TextEntry {
     /// Where to go once saved: search results, or back.
     fn after_save(&self, sh: &mut Shared) -> Nav {
         match self.purpose {
-            Purpose::YouTubeSearch => Nav::replace(super::youtube::SearchResults::new(sh, &self.text)),
+            Purpose::YouTubeSearch => {
+                Nav::replace(super::youtube::SearchResults::new(sh, &self.text))
+            }
             _ => Nav::Pop,
         }
     }
@@ -109,7 +122,12 @@ impl TextEntry {
             Purpose::RenameLibrary(id) => sh.rename_library(*id, &self.text),
             Purpose::PluginSetting(plugin, key, _) => {
                 let (plugins, db) = sh.plugins_mut();
-                plugins.set_setting(*plugin, key, flex_plugin::serde_json::Value::String(self.text.clone()), db);
+                plugins.set_setting(
+                    *plugin,
+                    key,
+                    flex_plugin::serde_json::Value::String(self.text.clone()),
+                    db,
+                );
                 Ok(())
             }
             Purpose::YouTubeSearch => {
@@ -122,7 +140,10 @@ impl TextEntry {
                 Ok(())
             }
             Purpose::YouTubeChannel => {
-                anyhow::ensure!(!self.text.trim().is_empty(), "Paste a channel link or @handle first");
+                anyhow::ensure!(
+                    !self.text.trim().is_empty(),
+                    "Paste a channel link or @handle first"
+                );
                 sh.youtube.find_channel(self.text.trim());
                 sh.toast("Looking up that channel…");
                 Ok(())
@@ -157,7 +178,10 @@ impl Screen for TextEntry {
         let field = Rect::from_min_size(body.min, vec2(body.width().min(900.0), 64.0));
         let edit = egui::TextEdit::singleline(&mut self.text)
             .id(Self::id())
-            .password(matches!(self.purpose, Purpose::TmdbToken | Purpose::PluginSetting(_, _, true)))
+            .password(matches!(
+                self.purpose,
+                Purpose::TmdbToken | Purpose::PluginSetting(_, _, true)
+            ))
             .font(TextStyle::Body)
             .margin(vec2(18.0, 12.0))
             .desired_width(field.width());
@@ -166,7 +190,8 @@ impl Screen for TextEntry {
             response.request_focus();
         }
         if response.lost_focus() {
-            let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+            let (enter, escape) =
+                ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
             if escape {
                 return Nav::Pop;
             }

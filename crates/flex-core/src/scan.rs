@@ -63,7 +63,8 @@ fn is_ignored(name: &str) -> bool {
 }
 
 fn nanos(t: SystemTime) -> i64 {
-    t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos() as i64)
+    t.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as i64)
 }
 
 fn join(root: &Path, rel: &str) -> PathBuf {
@@ -73,7 +74,11 @@ fn join(root: &Path, rel: &str) -> PathBuf {
 }
 
 fn child(rel: &str, name: &str) -> String {
-    if rel.is_empty() { name.to_owned() } else { format!("{rel}/{name}") }
+    if rel.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{rel}/{name}")
+    }
 }
 
 fn parent(rel: &str) -> &str {
@@ -102,9 +107,17 @@ impl<'a> Index<'a> {
         let known = if previous.dirs.is_empty() {
             HashMap::new()
         } else {
-            previous.files.iter().map(|f| (f.rel_path.as_str(), f)).collect()
+            previous
+                .files
+                .iter()
+                .map(|f| (f.rel_path.as_str(), f))
+                .collect()
         };
-        Self { files, subdirs, known }
+        Self {
+            files,
+            subdirs,
+            known,
+        }
     }
 }
 
@@ -155,19 +168,46 @@ impl Queue {
 /// that stalled, a folder a downloader has locked) it keeps what the previous scan found
 /// in it, and is read again next time, so a passing error doesn't drop shows from the
 /// library until the next full scan.
-fn unreadable(rel: &str, path: &Path, e: std::io::Error, index: &Index, out: &mut Found) -> Vec<String> {
+fn unreadable(
+    rel: &str,
+    path: &Path,
+    e: std::io::Error,
+    index: &Index,
+    out: &mut Found,
+) -> Vec<String> {
     out.errors.push(format!("{}: {e}", path.display()));
     if e.kind() == std::io::ErrorKind::NotFound {
         return Vec::new();
     }
     out.dirs.push((rel.to_owned(), 0));
-    out.files.extend(index.files.get(rel).into_iter().flatten().map(|f| (*f).clone()));
-    index.subdirs.get(rel).into_iter().flatten().map(|d| (*d).to_owned()).collect()
+    out.files.extend(
+        index
+            .files
+            .get(rel)
+            .into_iter()
+            .flatten()
+            .map(|f| (*f).clone()),
+    );
+    index
+        .subdirs
+        .get(rel)
+        .into_iter()
+        .flatten()
+        .map(|d| (*d).to_owned())
+        .collect()
 }
 
 /// Looks at one folder: reuses the previous scan's findings if it hasn't changed, else
 /// reads it. Returns its subfolders.
-fn visit(root: &Path, kind: LibraryKind, rel: &str, previous: &Previous, index: &Index, settled: i64, out: &mut Found) -> Vec<String> {
+fn visit(
+    root: &Path,
+    kind: LibraryKind,
+    rel: &str,
+    previous: &Previous,
+    index: &Index,
+    settled: i64,
+    out: &mut Found,
+) -> Vec<String> {
     let path = join(root, rel);
     let mtime = match std::fs::metadata(&path).and_then(|m| m.modified()) {
         Ok(t) => nanos(t),
@@ -175,8 +215,21 @@ fn visit(root: &Path, kind: LibraryKind, rel: &str, previous: &Previous, index: 
     };
     if mtime != 0 && previous.dirs.get(rel) == Some(&mtime) {
         out.dirs.push((rel.to_owned(), mtime));
-        out.files.extend(index.files.get(rel).into_iter().flatten().map(|f| (*f).clone()));
-        return index.subdirs.get(rel).into_iter().flatten().map(|d| (*d).to_owned()).collect();
+        out.files.extend(
+            index
+                .files
+                .get(rel)
+                .into_iter()
+                .flatten()
+                .map(|f| (*f).clone()),
+        );
+        return index
+            .subdirs
+            .get(rel)
+            .into_iter()
+            .flatten()
+            .map(|d| (*d).to_owned())
+            .collect();
     }
     out.dirs_read += 1;
     let entries = match std::fs::read_dir(&path) {
@@ -230,7 +283,8 @@ fn visit(root: &Path, kind: LibraryKind, rel: &str, previous: &Previous, index: 
     }
     // Read it again next time if it changed just now or something in it couldn't be read.
     let trusted = mtime < settled && out.errors.len() == errors_before;
-    out.dirs.push((rel.to_owned(), if trusted { mtime } else { 0 }));
+    out.dirs
+        .push((rel.to_owned(), if trusted { mtime } else { 0 }));
     subdirs
 }
 
@@ -259,11 +313,17 @@ fn scan_settled(
     settle: Duration,
 ) -> Result<ScanResult> {
     if !root.is_dir() {
-        bail!("{} isn't available. Is the drive or share connected?", root.display());
+        bail!(
+            "{} isn't available. Is the drive or share connected?",
+            root.display()
+        );
     }
     let settled = nanos(SystemTime::now() - settle);
     let index = Index::new(previous);
-    let queue = Queue { todo: Mutex::new((vec![(String::new(), 0)], 0)), wake: Condvar::new() };
+    let queue = Queue {
+        todo: Mutex::new((vec![(String::new(), 0)], 0)),
+        wake: Condvar::new(),
+    };
     let found = AtomicUsize::new(0);
     let parts: Vec<Found> = std::thread::scope(|s| {
         let workers: Vec<_> = (0..THREADS)
@@ -274,7 +334,11 @@ fn scan_settled(
                         let before = out.files.len();
                         let subdirs = visit(root, kind, &rel, previous, &index, settled, &mut out);
                         found.fetch_add(out.files.len() - before, Ordering::Relaxed);
-                        let deeper = if depth < MAX_DEPTH { subdirs } else { Vec::new() };
+                        let deeper = if depth < MAX_DEPTH {
+                            subdirs
+                        } else {
+                            Vec::new()
+                        };
                         queue.done(deeper.into_iter().map(|d| (d, depth + 1)).collect());
                     }
                     out
@@ -285,7 +349,10 @@ fn scan_settled(
             progress(found.load(Ordering::Relaxed));
             std::thread::sleep(Duration::from_millis(100));
         }
-        workers.into_iter().map(|w| w.join().expect("scan thread panicked")).collect()
+        workers
+            .into_iter()
+            .map(|w| w.join().expect("scan thread panicked"))
+            .collect()
     });
     if cancel.load(Ordering::Relaxed) {
         bail!("scan cancelled");
@@ -300,7 +367,10 @@ fn scan_settled(
     result.files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     progress(result.files.len());
     if result.files.is_empty() && !previous.files.is_empty() {
-        bail!("{} is empty. Is the drive or share connected?", root.display());
+        bail!(
+            "{} is empty. Is the drive or share connected?",
+            root.display()
+        );
     }
     Ok(result)
 }
@@ -327,21 +397,51 @@ mod tests {
 
     /// A scan that trusts folder times straight away.
     fn rescan(dir: &Path, previous: &ScanResult) -> Result<ScanResult> {
-        let previous = Previous { files: previous.files.clone(), dirs: previous.dirs.iter().cloned().collect() };
-        scan_settled(dir, LibraryKind::Tv, &previous, &AtomicBool::new(false), |_| {}, Duration::ZERO)
+        let previous = Previous {
+            files: previous.files.clone(),
+            dirs: previous.dirs.iter().cloned().collect(),
+        };
+        scan_settled(
+            dir,
+            LibraryKind::Tv,
+            &previous,
+            &AtomicBool::new(false),
+            |_| {},
+            Duration::ZERO,
+        )
     }
 
     #[test]
     fn finds_videos_and_skips_junk() {
         let dir = temp_dir("junk");
-        for p in ["Show/Season 1/ep1.mkv", "Show/Season 1/ep1.nfo", ".hidden/x.mkv", "@eaDir/y.mp4", "movie.MP4"] {
+        for p in [
+            "Show/Season 1/ep1.mkv",
+            "Show/Season 1/ep1.nfo",
+            ".hidden/x.mkv",
+            "@eaDir/y.mp4",
+            "movie.MP4",
+        ] {
             touch(&dir, p);
         }
         let none = Previous::default();
-        let found = scan(&dir, LibraryKind::Tv, &none, &AtomicBool::new(false), |_| {}).unwrap();
+        let found = scan(
+            &dir,
+            LibraryKind::Tv,
+            &none,
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
         assert_eq!(paths(&found), ["Show/Season 1/ep1.mkv", "movie.MP4"]);
         touch(&dir, "song.opus");
-        let music = scan(&dir, LibraryKind::Music, &none, &AtomicBool::new(false), |_| {}).unwrap();
+        let music = scan(
+            &dir,
+            LibraryKind::Music,
+            &none,
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
         assert_eq!(paths(&music), ["song.opus"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -349,7 +449,12 @@ mod tests {
     #[test]
     fn rescans_read_only_changed_folders() {
         let dir = temp_dir("incremental");
-        for p in ["A/S1/1.mkv", "A/S1/2.mkv", "B/1.mkv", "Extras/Empty/readme.txt"] {
+        for p in [
+            "A/S1/1.mkv",
+            "A/S1/2.mkv",
+            "B/1.mkv",
+            "Extras/Empty/readme.txt",
+        ] {
             touch(&dir, p);
         }
         let first = rescan(&dir, &ScanResult::default()).unwrap();
@@ -357,13 +462,19 @@ mod tests {
         assert_eq!(first.dirs_read, 6, "root, A, A/S1, B, Extras, Extras/Empty");
 
         let same = rescan(&dir, &first).unwrap();
-        assert_eq!((same.files.clone(), same.dirs_read), (first.files.clone(), 0));
+        assert_eq!(
+            (same.files.clone(), same.dirs_read),
+            (first.files.clone(), 0)
+        );
 
         // A new episode deep down: only its folder is read again.
         std::thread::sleep(Duration::from_millis(20));
         touch(&dir, "A/S1/3.mkv");
         let added = rescan(&dir, &same).unwrap();
-        assert_eq!(paths(&added), ["A/S1/1.mkv", "A/S1/2.mkv", "A/S1/3.mkv", "B/1.mkv"]);
+        assert_eq!(
+            paths(&added),
+            ["A/S1/1.mkv", "A/S1/2.mkv", "A/S1/3.mkv", "B/1.mkv"]
+        );
         assert_eq!(added.dirs_read, 1);
 
         // A new folder in a folder with no videos, then a show removed.
@@ -371,7 +482,15 @@ mod tests {
         touch(&dir, "Extras/Empty/New/1.mkv");
         std::fs::remove_dir_all(dir.join("B")).unwrap();
         let changed = rescan(&dir, &added).unwrap();
-        assert_eq!(paths(&changed), ["A/S1/1.mkv", "A/S1/2.mkv", "A/S1/3.mkv", "Extras/Empty/New/1.mkv"]);
+        assert_eq!(
+            paths(&changed),
+            [
+                "A/S1/1.mkv",
+                "A/S1/2.mkv",
+                "A/S1/3.mkv",
+                "Extras/Empty/New/1.mkv"
+            ]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -381,8 +500,15 @@ mod tests {
         touch(&dir, "A/1.mkv");
         let mut first = rescan(&dir, &ScanResult::default()).unwrap();
         // Pretend the previous scan saw another file: with the folder unchanged it's kept.
-        first.files.push(ScannedFile { rel_path: "A/2.mkv".into(), size: 1, mtime: 0 });
-        assert_eq!(paths(&rescan(&dir, &first).unwrap()), ["A/1.mkv", "A/2.mkv"]);
+        first.files.push(ScannedFile {
+            rel_path: "A/2.mkv".into(),
+            size: 1,
+            mtime: 0,
+        });
+        assert_eq!(
+            paths(&rescan(&dir, &first).unwrap()),
+            ["A/1.mkv", "A/2.mkv"]
+        );
         // In a changed folder, files seen before aren't looked at again.
         std::thread::sleep(Duration::from_millis(20));
         touch(&dir, "A/3.mkv");
@@ -402,7 +528,14 @@ mod tests {
     fn recently_changed_folders_are_read_again() {
         let dir = temp_dir("settle");
         touch(&dir, "A/1.mkv");
-        let first = scan(&dir, LibraryKind::Tv, &Previous::default(), &AtomicBool::new(false), |_| {}).unwrap();
+        let first = scan(
+            &dir,
+            LibraryKind::Tv,
+            &Previous::default(),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
         assert!(first.dirs.iter().all(|(_, mtime)| *mtime == 0));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -411,17 +544,39 @@ mod tests {
     fn an_empty_folder_that_had_files_is_an_error() {
         let dir = temp_dir("unmounted");
         std::fs::create_dir_all(&dir).unwrap();
-        let previous = ScanResult { files: vec![ScannedFile { rel_path: "a.mkv".into(), size: 1, mtime: 0 }], ..Default::default() };
+        let previous = ScanResult {
+            files: vec![ScannedFile {
+                rel_path: "a.mkv".into(),
+                size: 1,
+                mtime: 0,
+            }],
+            ..Default::default()
+        };
         let err = rescan(&dir, &previous).unwrap_err().to_string();
         assert!(err.contains("is empty"), "{err}");
-        assert!(rescan(&dir, &ScanResult::default()).unwrap().files.is_empty(), "a new library may be empty");
+        assert!(
+            rescan(&dir, &ScanResult::default())
+                .unwrap()
+                .files
+                .is_empty(),
+            "a new library may be empty"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn cancel_stops_the_scan() {
         let dir = std::env::temp_dir();
-        assert!(scan(&dir, LibraryKind::Tv, &Previous::default(), &AtomicBool::new(true), |_| {}).is_err());
+        assert!(
+            scan(
+                &dir,
+                LibraryKind::Tv,
+                &Previous::default(),
+                &AtomicBool::new(true),
+                |_| {}
+            )
+            .is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -429,7 +584,11 @@ mod tests {
     fn a_folder_that_cant_be_read_keeps_its_files() {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp_dir("unreadable");
-        for p in ["Show/Season 1/ep1.mkv", "Show/Season 1/Extras/sp1.mkv", "Other/ep1.mkv"] {
+        for p in [
+            "Show/Season 1/ep1.mkv",
+            "Show/Season 1/Extras/sp1.mkv",
+            "Other/ep1.mkv",
+        ] {
             touch(&dir, p);
         }
         let first = rescan(&dir, &ScanResult::default()).unwrap();
@@ -447,7 +606,16 @@ mod tests {
         touch(&dir, "Show/Season 1/ep2.mkv");
         let third = rescan(&dir, &second).unwrap();
         assert!(third.errors.is_empty());
-        assert_eq!(paths(&third), ["Other/ep1.mkv", "Show/Season 1/Extras/sp1.mkv", "Show/Season 1/ep1.mkv", "Show/Season 1/ep2.mkv", "Show/Season 1/new.mkv"]);
+        assert_eq!(
+            paths(&third),
+            [
+                "Other/ep1.mkv",
+                "Show/Season 1/Extras/sp1.mkv",
+                "Show/Season 1/ep1.mkv",
+                "Show/Season 1/ep2.mkv",
+                "Show/Season 1/new.mkv"
+            ]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -467,6 +635,15 @@ mod tests {
     #[test]
     fn missing_root_is_an_error() {
         let none = Previous::default();
-        assert!(scan(Path::new("/definitely/not/here"), LibraryKind::Tv, &none, &AtomicBool::new(false), |_| {}).is_err());
+        assert!(
+            scan(
+                Path::new("/definitely/not/here"),
+                LibraryKind::Tv,
+                &none,
+                &AtomicBool::new(false),
+                |_| {}
+            )
+            .is_err()
+        );
     }
 }

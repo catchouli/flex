@@ -20,14 +20,30 @@ const LANGUAGES: &[(&str, &[&str], &[&str])] = &[
     ("ja", &["ja", "jp", "jpn"], &["japanese", "日本語"]),
     ("en", &["en", "eng"], &["english"]),
     ("ko", &["ko", "kor"], &["korean", "한국어"]),
-    ("zh", &["zh", "chi", "zho", "cmn"], &["chinese", "mandarin", "中文", "國語", "国语", "普通话"]),
+    (
+        "zh",
+        &["zh", "chi", "zho", "cmn"],
+        &["chinese", "mandarin", "中文", "國語", "国语", "普通话"],
+    ),
     // TMDB's code for Cantonese.
     ("cn", &["yue", "chi", "zho"], &["cantonese", "粵語", "粤语"]),
-    ("fr", &["fr", "fre", "fra"], &["french", "français", "francais"]),
+    (
+        "fr",
+        &["fr", "fre", "fra"],
+        &["french", "français", "francais"],
+    ),
     ("de", &["de", "ger", "deu"], &["german", "deutsch"]),
-    ("es", &["es", "spa"], &["spanish", "español", "espanol", "castellano"]),
+    (
+        "es",
+        &["es", "spa"],
+        &["spanish", "español", "espanol", "castellano"],
+    ),
     ("it", &["it", "ita"], &["italian", "italiano"]),
-    ("pt", &["pt", "por"], &["portuguese", "português", "portugues"]),
+    (
+        "pt",
+        &["pt", "por"],
+        &["portuguese", "português", "portugues"],
+    ),
     ("ru", &["ru", "rus"], &["russian", "русский"]),
     ("hi", &["hi", "hin"], &["hindi", "हिन्दी"]),
     ("ta", &["ta", "tam"], &["tamil"]),
@@ -53,11 +69,16 @@ pub fn name(tag: &str) -> Option<String> {
     if tag.is_empty() || tag == "und" {
         return None;
     }
-    let found = LANGUAGES.iter().find(|(code, tags, _)| *code == tag || tags.contains(&tag.as_str()));
+    let found = LANGUAGES
+        .iter()
+        .find(|(code, tags, _)| *code == tag || tags.contains(&tag.as_str()));
     Some(match found.and_then(|(_, _, names)| names.first()) {
         Some(english) => {
             let mut chars = english.chars();
-            chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+            chars
+                .next()
+                .map(|c| c.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
         }
         None => tag.to_uppercase(),
     })
@@ -70,12 +91,20 @@ pub fn pick(tracks: &[Track], language: &str) -> Option<i64> {
     if language.is_empty() {
         return None;
     }
-    let (tags, names): (Vec<&str>, &[&str]) = match LANGUAGES.iter().find(|(code, _, _)| *code == language) {
-        Some((_, tags, names)) => (tags.to_vec(), names),
-        None => (vec![language.as_str()], &[]),
-    };
-    let usable: Vec<&Track> = tracks.iter().filter(|t| !t.title.to_lowercase().contains("commentary")).collect();
-    let by_tag: Vec<&Track> = usable.iter().copied().filter(|t| tags.contains(&t.lang.trim().to_lowercase().as_str())).collect();
+    let (tags, names): (Vec<&str>, &[&str]) =
+        match LANGUAGES.iter().find(|(code, _, _)| *code == language) {
+            Some((_, tags, names)) => (tags.to_vec(), names),
+            None => (vec![language.as_str()], &[]),
+        };
+    let usable: Vec<&Track> = tracks
+        .iter()
+        .filter(|t| !t.title.to_lowercase().contains("commentary"))
+        .collect();
+    let by_tag: Vec<&Track> = usable
+        .iter()
+        .copied()
+        .filter(|t| tags.contains(&t.lang.trim().to_lowercase().as_str()))
+        .collect();
     let matches = if by_tag.is_empty() {
         // A name in the title, but only for tracks without a (different) language tag.
         usable
@@ -90,7 +119,11 @@ pub fn pick(tracks: &[Track], language: &str) -> Option<i64> {
     } else {
         by_tag
     };
-    matches.iter().find(|t| t.default).or(matches.first()).map(|t| t.id)
+    matches
+        .iter()
+        .find(|t| t.default)
+        .or(matches.first())
+        .map(|t| t.id)
 }
 
 #[cfg(test)]
@@ -107,12 +140,20 @@ mod tests {
     }
 
     fn track(id: i64, lang: &str, title: &str, default: bool) -> Track {
-        Track { id, lang: lang.into(), title: title.into(), default }
+        Track {
+            id,
+            lang: lang.into(),
+            title: title.into(),
+            default,
+        }
     }
 
     #[test]
     fn picks_by_language_tag() {
-        let tracks = [track(1, "eng", "English 5.1", true), track(2, "jpn", "", false)];
+        let tracks = [
+            track(1, "eng", "English 5.1", true),
+            track(2, "jpn", "", false),
+        ];
         assert_eq!(pick(&tracks, "ja"), Some(2));
         assert_eq!(pick(&tracks, "en"), Some(1));
         assert_eq!(pick(&tracks, "JA"), Some(2), "case doesn't matter");
@@ -120,7 +161,10 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_title() {
-        let tracks = [track(1, "", "English dub", true), track(2, "und", "Japanese (original)", false)];
+        let tracks = [
+            track(1, "", "English dub", true),
+            track(2, "und", "Japanese (original)", false),
+        ];
         assert_eq!(pick(&tracks, "ja"), Some(2));
         // A track tagged as another language isn't picked for its title.
         let tracks = [track(1, "eng", "English (Japanese songs)", true)];
@@ -135,7 +179,10 @@ mod tests {
             track(3, "jpn", "5.1", true),
         ];
         assert_eq!(pick(&tracks, "ja"), Some(3));
-        let tracks = [track(1, "jpn", "Director's commentary", true), track(2, "jpn", "", false)];
+        let tracks = [
+            track(1, "jpn", "Director's commentary", true),
+            track(2, "jpn", "", false),
+        ];
         assert_eq!(pick(&tracks, "ja"), Some(2));
     }
 
@@ -144,6 +191,10 @@ mod tests {
         let tracks = [track(1, "eng", "", true)];
         assert_eq!(pick(&tracks, "ja"), None, "no Japanese track: leave it");
         assert_eq!(pick(&tracks, ""), None);
-        assert_eq!(pick(&[track(1, "xx", "", false)], "xx"), Some(1), "codes not in the table still match tags");
+        assert_eq!(
+            pick(&[track(1, "xx", "", false)], "xx"),
+            Some(1),
+            "codes not in the table still match tags"
+        );
     }
 }

@@ -12,9 +12,19 @@ fn main() -> anyhow::Result<()> {
         (Kind::Movie, "Rasen", Some(1998)),
     ] {
         let results = tmdb.search(kind, q, year)?;
-        let best = metadata::best(q, year, &results).map(|(c, s)| format!("{} ({:?}) {}, score {s:.2}", c.title, c.year, c.provider_id()));
+        let best = metadata::best(q, year, &results).map(|(c, s)| {
+            format!(
+                "{} ({:?}) {}, score {s:.2}",
+                c.title,
+                c.year,
+                c.provider_id()
+            )
+        });
         println!("{q:?}: {} results, best: {best:?}", results.len());
     }
-    println!("AniList for 'Shingeki no Kyojin': {:?}", metadata::anilist_titles("Shingeki no Kyojin")?);
+    println!(
+        "AniList for 'Shingeki no Kyojin': {:?}",
+        metadata::anilist_titles("Shingeki no Kyojin")?
+    );
     Ok(())
 }

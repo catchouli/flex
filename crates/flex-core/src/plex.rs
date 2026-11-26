@@ -46,9 +46,17 @@ pub struct PlexData {
 /// Reads the account with the most history (the household's main account).
 pub fn read(path: &Path) -> Result<PlexData> {
     // immutable: never touch the copy (no -wal/-shm files), even on a read-only share.
-    let uri = format!("file:{}?mode=ro&immutable=1", path.to_string_lossy().replace('?', "%3f").replace('#', "%23"));
-    let conn = Connection::open_with_flags(&uri, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)
-        .with_context(|| format!("opening {}", path.display()))?;
+    let uri = format!(
+        "file:{}?mode=ro&immutable=1",
+        path.to_string_lossy()
+            .replace('?', "%3f")
+            .replace('#', "%23")
+    );
+    let conn = Connection::open_with_flags(
+        &uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .with_context(|| format!("opening {}", path.display()))?;
     let (account_id, account): (i64, String) = conn
         .query_row(
             "SELECT v.account_id, COALESCE(a.name, '') FROM metadata_item_views v
@@ -61,7 +69,8 @@ pub fn read(path: &Path) -> Result<PlexData> {
 
     let roots = {
         let mut stmt = conn.prepare("SELECT root_path FROM section_locations")?;
-        stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?
     };
     // Plex stores times as text like "2026-10-08 21:07:31" (UTC).
     let items = {
@@ -96,7 +105,12 @@ pub fn read(path: &Path) -> Result<PlexData> {
              JOIN media_parts p ON p.media_item_id = mi.id
              WHERE v.account_id = ?1 AND v.viewed_at IS NOT NULL",
         )?;
-        let rows = stmt.query_map([account_id], |r| Ok(PlexView { file: r.get(0)?, viewed_at: r.get(1)? }))?;
+        let rows = stmt.query_map([account_id], |r| {
+            Ok(PlexView {
+                file: r.get(0)?,
+                viewed_at: r.get(1)?,
+            })
+        })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     let added = {
@@ -116,12 +130,23 @@ pub fn read(path: &Path) -> Result<PlexData> {
         [account_id],
         |r| r.get(0),
     )?;
-    Ok(PlexData { account, roots, items, views, orphan_views, added })
+    Ok(PlexData {
+        account,
+        roots,
+        items,
+        views,
+        orphan_views,
+        added,
+    })
 }
 
 /// Comparable form of a relative path: '/'-separated, Unicode NFC, lower case.
 fn path_key(rel: &str) -> String {
-    rel.replace('\\', "/").trim_matches('/').nfc().collect::<String>().to_lowercase()
+    rel.replace('\\', "/")
+        .trim_matches('/')
+        .nfc()
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn file_key(rel: &str) -> String {
@@ -163,9 +188,16 @@ pub fn plan(data: &PlexData, libraries: &[(i64, &Tree)]) -> ImportPlan {
         .map(|(id, tree)| {
             let mut by_name: HashMap<String, Option<i64>> = HashMap::new();
             for f in tree.files() {
-                by_name.entry(file_key(&f.rel_path)).and_modify(|e| *e = None).or_insert(Some(f.id));
+                by_name
+                    .entry(file_key(&f.rel_path))
+                    .and_modify(|e| *e = None)
+                    .or_insert(Some(f.id));
             }
-            let by_path = tree.files().iter().map(|f| (path_key(&f.rel_path), f.id)).collect();
+            let by_path = tree
+                .files()
+                .iter()
+                .map(|f| (path_key(&f.rel_path), f.id))
+                .collect();
             (*id, LibIndex { by_path, by_name })
         })
         .collect();
@@ -182,7 +214,9 @@ pub fn plan(data: &PlexData, libraries: &[(i64, &Tree)]) -> ImportPlan {
     let mut counts: HashMap<(usize, i64), usize> = HashMap::new();
     let mut totals: HashMap<usize, usize> = HashMap::new();
     for item in &data.items {
-        let Some((root, rel)) = split(&item.file) else { continue };
+        let Some((root, rel)) = split(&item.file) else {
+            continue;
+        };
         *totals.entry(root).or_default() += 1;
         for (lib, index) in &indexes {
             if index.by_path.contains_key(&rel) {
@@ -205,7 +239,11 @@ pub fn plan(data: &PlexData, libraries: &[(i64, &Tree)]) -> ImportPlan {
         let (root, rel) = split(file)?;
         let (lib, _) = library_for(root)?;
         let index = &indexes.iter().find(|(id, _)| *id == lib)?.1;
-        index.by_path.get(&rel).copied().or_else(|| index.by_name.get(&file_key(&rel)).copied().flatten())
+        index
+            .by_path
+            .get(&rel)
+            .copied()
+            .or_else(|| index.by_name.get(&file_key(&rel)).copied().flatten())
     };
 
     let mut plan = ImportPlan::default();
@@ -228,7 +266,11 @@ pub fn plan(data: &PlexData, libraries: &[(i64, &Tree)]) -> ImportPlan {
         }
     }
     plan.unmatched_views += data.orphan_views;
-    plan.added = data.added.iter().filter_map(|(file, at)| Some((find(file)?, *at))).collect();
+    plan.added = data
+        .added
+        .iter()
+        .filter_map(|(file, at)| Some((find(file)?, *at)))
+        .collect();
     plan.sections = roots
         .iter()
         .enumerate()
@@ -270,29 +312,46 @@ mod tests {
         Tree::new(
             paths
                 .iter()
-                .map(|(id, p)| MediaFile { id: *id, rel_path: (*p).into(), ..Default::default() })
+                .map(|(id, p)| MediaFile {
+                    id: *id,
+                    rel_path: (*p).into(),
+                    ..Default::default()
+                })
                 .collect(),
         )
     }
 
     fn item(file: &str) -> PlexItem {
-        PlexItem { file: file.into(), watched: true, offset_secs: None, duration_secs: None, last_viewed: Some(100) }
+        PlexItem {
+            file: file.into(),
+            watched: true,
+            offset_secs: None,
+            duration_secs: None,
+            last_viewed: Some(100),
+        }
     }
 
     #[test]
     fn maps_plex_roots_to_flex_libraries_by_relative_path() {
-        let anime = tree(&[(1, "Dorohedoro/ep01.mkv"), (2, "Dorohedoro/ep02.mkv"), (3, "Café/ep01.mkv")]);
+        let anime = tree(&[
+            (1, "Dorohedoro/ep01.mkv"),
+            (2, "Dorohedoro/ep02.mkv"),
+            (3, "Café/ep01.mkv"),
+        ]);
         let tv = tree(&[(10, "South Park/S19E06.mkv"), (11, "Dorohedoro/ep01.mkv")]);
         let data = PlexData {
             roots: vec!["/data/Media/Anime".into(), "/data/Media/TV".into()],
             items: vec![
                 item("/data/Media/Anime/Dorohedoro/ep01.mkv"),
                 item("/data/Media/Anime/dorohedoro/EP02.mkv"), // case differs
-                item("/data/Media/Anime/Cafe\u{301}/ep01.mkv"),  // decomposed é (NFD)
+                item("/data/Media/Anime/Cafe\u{301}/ep01.mkv"), // decomposed é (NFD)
                 item("/data/Media/TV/South Park/S19E06.mkv"),
                 item("/data/Media/TV/Gone/x.mkv"),
             ],
-            views: vec![PlexView { file: "/data/Media/TV/South Park/S19E06.mkv".into(), viewed_at: 5 }],
+            views: vec![PlexView {
+                file: "/data/Media/TV/South Park/S19E06.mkv".into(),
+                viewed_at: 5,
+            }],
             ..Default::default()
         };
         let plan = plan(&data, &[(100, &anime), (200, &tv)]);
@@ -300,18 +359,47 @@ mod tests {
         assert_eq!(ids, [1, 2, 3, 10]);
         assert_eq!(plan.unmatched_items, 1);
         assert_eq!(plan.history, [(10, 5)]);
-        let anime_section = plan.sections.iter().find(|s| s.root.ends_with("Anime")).unwrap();
-        assert_eq!((anime_section.library_id, anime_section.matched, anime_section.total), (Some(100), 3, 3));
+        let anime_section = plan
+            .sections
+            .iter()
+            .find(|s| s.root.ends_with("Anime"))
+            .unwrap();
+        assert_eq!(
+            (
+                anime_section.library_id,
+                anime_section.matched,
+                anime_section.total
+            ),
+            (Some(100), 3, 3)
+        );
     }
 
     #[test]
     fn merging_keeps_the_newer_position() {
-        let flex = Progress { position: Some(30.0), duration: Some(100.0), watched: false, last_played: Some(200) };
-        let older = PlexItem { file: String::new(), watched: false, offset_secs: Some(80.0), duration_secs: Some(100.0), last_viewed: Some(100) };
+        let flex = Progress {
+            position: Some(30.0),
+            duration: Some(100.0),
+            watched: false,
+            last_played: Some(200),
+        };
+        let older = PlexItem {
+            file: String::new(),
+            watched: false,
+            offset_secs: Some(80.0),
+            duration_secs: Some(100.0),
+            last_viewed: Some(100),
+        };
         assert_eq!(merge(flex, &older), flex);
-        let newer = PlexItem { last_viewed: Some(300), ..older };
+        let newer = PlexItem {
+            last_viewed: Some(300),
+            ..older
+        };
         assert_eq!(merge(flex, &newer).position, Some(80.0));
-        let watched = PlexItem { watched: true, offset_secs: None, ..newer };
+        let watched = PlexItem {
+            watched: true,
+            offset_secs: None,
+            ..newer
+        };
         let m = merge(flex, &watched);
         assert!(m.watched && m.position.is_none());
     }

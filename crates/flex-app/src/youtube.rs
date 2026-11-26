@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use flex_core::youtube::feeds::{self, FeedVideo, Listed};
 use flex_core::youtube::listing::Entry;
-use flex_core::youtube::{recommend, related};
 use flex_core::youtube::sponsorblock::{self, Segment};
 use flex_core::youtube::tools::{self, Tool};
 use flex_core::youtube::{Tools, Video};
+use flex_core::youtube::{recommend, related};
 
 pub const ENABLED_SETTING: &str = "youtube";
 pub const QUALITY_SETTING: &str = "youtube_quality";
@@ -66,7 +66,10 @@ pub enum Msg {
     ForYou(Result<Vec<Listed>, String>),
     /// Lengths of subscriptions' videos: the videos asked about, then (channel id, video
     /// id, seconds) for those found.
-    Durations(Vec<(String, Vec<String>)>, Result<Vec<(String, String, f64)>, String>),
+    Durations(
+        Vec<(String, Vec<String>)>,
+        Result<Vec<(String, String, f64)>, String>,
+    ),
 }
 
 /// A search (or a video's related videos): the query (or video), and its results once in.
@@ -140,7 +143,8 @@ impl YouTube {
         }
         self.tools_busy = true;
         self.spawn(move |tx| {
-            let result = tools::update(force, crate::shared::now_unix()).map_err(|e| format!("{e:#}"));
+            let result =
+                tools::update(force, crate::shared::now_unix()).map_err(|e| format!("{e:#}"));
             let _ = tx.send(Msg::Tools(result));
         });
     }
@@ -148,11 +152,16 @@ impl YouTube {
     /// Starts finding a video's streams and SponsorBlock segments, unless that's done or
     /// under way. Called when a video is highlighted, so it's usually ready by OK.
     pub fn prepare(&mut self, id: &str, max_height: u32, h264: bool, categories: Vec<String>) {
-        let fresh = self.resolved.get(id).is_some_and(|(at, r)| r.is_ok() && at.elapsed() < RESOLVED_FOR);
+        let fresh = self
+            .resolved
+            .get(id)
+            .is_some_and(|(at, r)| r.is_ok() && at.elapsed() < RESOLVED_FOR);
         if fresh || self.resolving.contains(id) {
             return;
         }
-        let Some(tools) = self.tools.clone() else { return };
+        let Some(tools) = self.tools.clone() else {
+            return;
+        };
         self.resolved.remove(id);
         self.resolving.insert(id.to_owned());
         let video_id = id.to_owned();
@@ -168,7 +177,10 @@ impl YouTube {
                     result = tools.resolve(&video_id, max_height, h264);
                 }
             }
-            let _ = tx.send(Msg::Resolved(video_id, result.map_err(|e| format!("{e:#}"))));
+            let _ = tx.send(Msg::Resolved(
+                video_id,
+                result.map_err(|e| format!("{e:#}")),
+            ));
         });
         if !self.segments.contains_key(id) {
             let video_id = id.to_owned();
@@ -246,7 +258,9 @@ impl YouTube {
         if reusable(&self.search, &query) {
             return;
         }
-        let Some(tools) = self.tools.clone().filter(|_| !query.is_empty()) else { return };
+        let Some(tools) = self.tools.clone().filter(|_| !query.is_empty()) else {
+            return;
+        };
         self.search = Some((query.clone(), None));
         self.spawn(move |tx| {
             let result = tools.search(&query, 30).map_err(|e| format!("{e:#}"));
@@ -274,7 +288,13 @@ impl YouTube {
 
     /// Finds suggestions in the background from each seed's related videos (see
     /// [`recommend`]). Fails only if every seed's related videos did.
-    pub fn start_for_you(&mut self, seeds: Vec<(String, f32)>, exclude: HashSet<String>, subscribed: HashSet<String>, shorts: bool) {
+    pub fn start_for_you(
+        &mut self,
+        seeds: Vec<(String, f32)>,
+        exclude: HashSet<String>,
+        subscribed: HashSet<String>,
+        shorts: bool,
+    ) {
         if self.for_you_busy {
             return;
         }
@@ -282,8 +302,20 @@ impl YouTube {
         self.for_you_at = Some(Instant::now());
         self.spawn(move |tx| {
             let results: Vec<(f32, anyhow::Result<Vec<Listed>>)> = std::thread::scope(|s| {
-                let handles: Vec<_> = seeds.iter().map(|(id, weight)| (*weight, s.spawn(move || related::related(id)))).collect();
-                handles.into_iter().map(|(w, h)| (w, h.join().unwrap_or_else(|_| Err(anyhow::anyhow!("panicked"))))).collect()
+                let handles: Vec<_> = seeds
+                    .iter()
+                    .map(|(id, weight)| (*weight, s.spawn(move || related::related(id))))
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|(w, h)| {
+                        (
+                            w,
+                            h.join()
+                                .unwrap_or_else(|_| Err(anyhow::anyhow!("panicked"))),
+                        )
+                    })
+                    .collect()
             });
             let mut lists = Vec::new();
             let mut error = None;
@@ -311,11 +343,15 @@ impl YouTube {
         if self.durations_busy || missing.is_empty() {
             return;
         }
-        let Some(tools) = self.tools.clone() else { return };
+        let Some(tools) = self.tools.clone() else {
+            return;
+        };
         self.durations_busy = true;
         self.spawn(move |tx| {
             let channels: Vec<String> = missing.iter().map(|(c, _)| c.clone()).collect();
-            let result = tools.latest_durations(&channels).map_err(|e| format!("{e:#}"));
+            let result = tools
+                .latest_durations(&channels)
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(Msg::Durations(missing, result));
         });
     }
@@ -328,7 +364,9 @@ impl YouTube {
 
     /// Looks up a channel from a link or @handle (then subscribes, see `Shared`).
     pub fn find_channel(&self, input: &str) {
-        let Some(tools) = self.tools.clone() else { return };
+        let Some(tools) = self.tools.clone() else {
+            return;
+        };
         let input = input.to_owned();
         self.spawn(move |tx| {
             let result = match feeds::channel_id(&input).filter(|_| !input.contains('@')) {
@@ -370,7 +408,8 @@ impl YouTube {
                 }
                 Msg::FeedsDone(refused) => {
                     self.refreshing = false;
-                    self.notices.extend(self.feeds.finished(Instant::now(), refused.as_deref()));
+                    self.notices
+                        .extend(self.feeds.finished(Instant::now(), refused.as_deref()));
                     out.push(Msg::FeedsDone(refused));
                 }
                 Msg::Durations(missing, result) => {
@@ -411,7 +450,9 @@ impl FeedSchedule {
     fn finished(&mut self, now: Instant, refused: Option<&str>) -> Option<String> {
         match refused {
             Some(reason) => {
-                let wait = self.backoff.map_or(BACKOFF_FIRST, |b| (b * 2).min(BACKOFF_MAX));
+                let wait = self
+                    .backoff
+                    .map_or(BACKOFF_FIRST, |b| (b * 2).min(BACKOFF_MAX));
                 self.backoff = Some(wait);
                 self.next = Some(now + wait);
                 let hours = wait.as_secs() / 3600;
@@ -422,7 +463,9 @@ impl FeedSchedule {
             }
             None => {
                 self.next = Some(now + REFRESH_EVERY);
-                self.backoff.take().map(|_| "YouTube is listing new videos again".to_owned())
+                self.backoff
+                    .take()
+                    .map(|_| "YouTube is listing new videos again".to_owned())
             }
         }
     }
@@ -475,7 +518,10 @@ impl Lazy {
                 }
                 let Some(entry) = listing.next() else { break };
                 if sent == 0 {
-                    log::info!("youtube: listing {url}: first entry after {:.1}s", started.elapsed().as_secs_f64());
+                    log::info!(
+                        "youtube: listing {url}: first entry after {:.1}s",
+                        started.elapsed().as_secs_f64()
+                    );
                 }
                 if tx.send(Ok(entry)).is_err() {
                     return;
@@ -483,14 +529,24 @@ impl Lazy {
                 sent += 1;
                 ctx.request_repaint();
             }
-            log::info!("youtube: listed {sent} from {url} in {:.1}s", started.elapsed().as_secs_f64());
+            log::info!(
+                "youtube: listed {sent} from {url} in {:.1}s",
+                started.elapsed().as_secs_f64()
+            );
             if let Err(e) = listing.finish() {
                 log::warn!("youtube: listing {url}: {e:#}");
                 let _ = tx.send(Err(format!("{e:#}")));
             }
             ctx.request_repaint();
         });
-        Self { entries: Vec::new(), done: false, error: None, rx, want_tx, wanted: LAZY_FIRST }
+        Self {
+            entries: Vec::new(),
+            done: false,
+            error: None,
+            rx,
+            want_tx,
+            wanted: LAZY_FIRST,
+        }
     }
 
     /// Takes entries that came in; returns whether any did.
@@ -542,7 +598,9 @@ pub fn open_in_browser(url: &str) {
 
 /// Whether `current` is for `key` and hasn't failed (so needn't run again).
 fn reusable(current: &Option<Search>, key: &str) -> bool {
-    current.as_ref().is_some_and(|(k, result)| k == key && !matches!(result, Some(Err(_))))
+    current
+        .as_ref()
+        .is_some_and(|(k, result)| k == key && !matches!(result, Some(Err(_))))
 }
 
 /// "3 hours ago", "2 days ago", "5 months ago".
@@ -574,16 +632,28 @@ mod tests {
         assert_eq!(s.finished(now, None), None);
         assert!(!s.due(now + REFRESH_EVERY - hour) && s.due(now + REFRESH_EVERY));
         let told = s.finished(now, Some("http status: 404")).unwrap();
-        assert!(told.contains("http status: 404") && told.ends_with("in 1 hour"), "{told}");
+        assert!(
+            told.contains("http status: 404") && told.ends_with("in 1 hour"),
+            "{told}"
+        );
         assert!(!s.due(now + hour / 2) && s.due(now + hour));
         assert!(s.finished(now, Some("x")).unwrap().ends_with("in 2 hours"));
         for _ in 0..5 {
             s.finished(now, Some("x"));
         }
-        assert!(s.finished(now, Some("x")).unwrap().ends_with("in 12 hours"), "capped");
-        assert_eq!(s.finished(now, None).as_deref(), Some("YouTube is listing new videos again"));
+        assert!(
+            s.finished(now, Some("x")).unwrap().ends_with("in 12 hours"),
+            "capped"
+        );
+        assert_eq!(
+            s.finished(now, None).as_deref(),
+            Some("YouTube is listing new videos again")
+        );
         assert_eq!(s.finished(now, None), None, "only once");
-        assert!(s.finished(now, Some("x")).unwrap().ends_with("in 1 hour"), "starts over");
+        assert!(
+            s.finished(now, Some("x")).unwrap().ends_with("in 1 hour"),
+            "starts over"
+        );
     }
 
     #[test]

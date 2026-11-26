@@ -21,14 +21,24 @@ const SHORT_SECS: f64 = 60.0;
 /// The videos to ask for related videos of, with how much each counts: recently played
 /// ones (more if watched through, less if given up on early), then subscriptions' newest
 /// unwatched videos. `history` is most recent first, `latest` newest first.
-pub fn seeds(history: &[(String, WatchProgress)], latest: &[Video], progress: &HashMap<String, WatchProgress>) -> Vec<(String, f32)> {
+pub fn seeds(
+    history: &[(String, WatchProgress)],
+    latest: &[Video],
+    progress: &HashMap<String, WatchProgress>,
+) -> Vec<(String, f32)> {
     let mut out: Vec<(String, f32)> = Vec::new();
     for (i, (id, p)) in history.iter().take(FROM_HISTORY).enumerate() {
         let fraction = match (p.position, p.duration) {
             (Some(pos), Some(dur)) if dur > 0.0 => pos / dur,
             _ => 0.0,
         };
-        let interest = if p.watched { 1.0 } else if fraction > 0.3 { 0.8 } else { 0.4 };
+        let interest = if p.watched {
+            1.0
+        } else if fraction > 0.3 {
+            0.8
+        } else {
+            0.4
+        };
         out.push((id.clone(), interest * RECENCY_DECAY.powi(i as i32)));
     }
     let new: Vec<(String, f32)> = latest
@@ -46,15 +56,26 @@ pub fn seeds(history: &[(String, WatchProgress)], latest: &[Video], progress: &H
 /// list. A video scores for every seed that suggests it, more near the top of that list.
 /// Leaves out `exclude` (e.g. watched videos and the seeds), Shorts unless `shorts`, and
 /// more than a few videos from one channel.
-pub fn rank(lists: &[(f32, Vec<Listed>)], exclude: &HashSet<String>, subscribed: &HashSet<String>, shorts: bool) -> Vec<Listed> {
+pub fn rank(
+    lists: &[(f32, Vec<Listed>)],
+    exclude: &HashSet<String>,
+    subscribed: &HashSet<String>,
+    shorts: bool,
+) -> Vec<Listed> {
     let mut scores: HashMap<&str, (f32, usize, &Listed)> = HashMap::new();
     let mut order = 0;
     for (weight, list) in lists {
         for (rank, video) in list.iter().enumerate() {
-            if exclude.contains(&video.id) || (!shorts && video.duration.is_some_and(|d| d <= SHORT_SECS)) {
+            if exclude.contains(&video.id)
+                || (!shorts && video.duration.is_some_and(|d| d <= SHORT_SECS))
+            {
                 continue;
             }
-            let bonus = if subscribed.contains(&video.channel_id) { SUBSCRIBED_BONUS } else { 1.0 };
+            let bonus = if subscribed.contains(&video.channel_id) {
+                SUBSCRIBED_BONUS
+            } else {
+                1.0
+            };
             let score = weight * bonus / (1.0 + rank as f32 / 4.0);
             let entry = scores.entry(&video.id).or_insert_with(|| {
                 order += 1;
@@ -69,7 +90,11 @@ pub fn rank(lists: &[(f32, Vec<Listed>)], exclude: &HashSet<String>, subscribed:
     ranked
         .into_iter()
         .filter(|(_, _, v)| {
-            let key = if v.channel_id.is_empty() { v.channel.as_str() } else { v.channel_id.as_str() };
+            let key = if v.channel_id.is_empty() {
+                v.channel.as_str()
+            } else {
+                v.channel_id.as_str()
+            };
             let n = per_channel.entry(key).or_default();
             *n += 1;
             *n <= PER_CHANNEL
@@ -83,11 +108,26 @@ mod tests {
     use super::*;
 
     fn listed(id: &str, channel: &str) -> Listed {
-        Listed { id: id.into(), title: id.into(), channel: channel.into(), channel_id: format!("UC{channel}"), duration: Some(600.0), views: None, published: None }
+        Listed {
+            id: id.into(),
+            title: id.into(),
+            channel: channel.into(),
+            channel_id: format!("UC{channel}"),
+            duration: Some(600.0),
+            views: None,
+            published: None,
+        }
     }
 
     fn played(id: &str, position: f64, watched: bool) -> (String, WatchProgress) {
-        let p = WatchProgress { title: id.into(), channel: "c".into(), position: Some(position), duration: Some(100.0), watched, updated_at: 0 };
+        let p = WatchProgress {
+            title: id.into(),
+            channel: "c".into(),
+            position: Some(position),
+            duration: Some(100.0),
+            watched,
+            updated_at: 0,
+        };
         (id.into(), p)
     }
 
@@ -97,7 +137,10 @@ mod tests {
             (1.0, vec![listed("a", "x"), listed("b", "y")]),
             (1.0, vec![listed("c", "z"), listed("b", "y")]),
         ];
-        let ids: Vec<String> = rank(&lists, &HashSet::new(), &HashSet::new(), true).into_iter().map(|v| v.id).collect();
+        let ids: Vec<String> = rank(&lists, &HashSet::new(), &HashSet::new(), true)
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
         assert_eq!(ids, ["b", "a", "c"]);
     }
 
@@ -105,18 +148,47 @@ mod tests {
     fn leaves_out_excluded_shorts_and_too_much_of_one_channel() {
         let mut short = listed("s", "y");
         short.duration = Some(30.0);
-        let list = vec![listed("w", "y"), short, listed("1", "x"), listed("2", "x"), listed("3", "x"), listed("4", "x")];
+        let list = vec![
+            listed("w", "y"),
+            short,
+            listed("1", "x"),
+            listed("2", "x"),
+            listed("3", "x"),
+            listed("4", "x"),
+        ];
         let exclude = HashSet::from(["w".to_owned()]);
-        let ids: Vec<String> = rank(&[(1.0, list)], &exclude, &HashSet::new(), false).into_iter().map(|v| v.id).collect();
+        let ids: Vec<String> = rank(&[(1.0, list)], &exclude, &HashSet::new(), false)
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
         assert_eq!(ids, ["1", "2", "3"]);
     }
 
     #[test]
     fn seeds_weigh_recent_and_finished_videos_more() {
-        let history = vec![played("given-up", 5.0, false), played("finished", 100.0, true)];
+        let history = vec![
+            played("given-up", 5.0, false),
+            played("finished", 100.0, true),
+        ];
         let latest = vec![
-            Video { id: "new".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false, duration: None },
-            Video { id: "finished".into(), title: "t".into(), channel_id: "UCx".into(), channel: "x".into(), published: 0, short: false, duration: None },
+            Video {
+                id: "new".into(),
+                title: "t".into(),
+                channel_id: "UCx".into(),
+                channel: "x".into(),
+                published: 0,
+                short: false,
+                duration: None,
+            },
+            Video {
+                id: "finished".into(),
+                title: "t".into(),
+                channel_id: "UCx".into(),
+                channel: "x".into(),
+                published: 0,
+                short: false,
+                duration: None,
+            },
         ];
         let seeds = seeds(&history, &latest, &HashMap::new());
         let ids: Vec<&str> = seeds.iter().map(|(id, _)| id.as_str()).collect();
@@ -128,8 +200,10 @@ mod tests {
     #[test]
     #[ignore]
     fn suggests_online() {
-        let lists: Vec<(f32, Vec<Listed>)> =
-            ["aqz-KE-bpKQ", "eRsGyueVLvQ"].iter().map(|id| (1.0, super::super::related::related(id).unwrap())).collect();
+        let lists: Vec<(f32, Vec<Listed>)> = ["aqz-KE-bpKQ", "eRsGyueVLvQ"]
+            .iter()
+            .map(|id| (1.0, super::super::related::related(id).unwrap()))
+            .collect();
         let ranked = rank(&lists, &HashSet::new(), &HashSet::new(), false);
         for v in ranked.iter().take(10) {
             eprintln!("{} · {} · {}", v.id, v.channel, v.title);

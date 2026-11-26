@@ -17,9 +17,17 @@ use crate::media::{AudioMode, MediaInfo, StreamRequest, VideoMode};
 use crate::{Change, LibrarySnapshot, State};
 
 /// A library file: its library, the file, and its full path.
-fn locate(state: &State, library_id: i64, file_id: i64) -> Option<(LibrarySnapshot, flex_core::MediaFile, std::path::PathBuf)> {
+fn locate(
+    state: &State,
+    library_id: i64,
+    file_id: i64,
+) -> Option<(LibrarySnapshot, flex_core::MediaFile, std::path::PathBuf)> {
     let snapshot = state.snapshot();
-    let l = snapshot.libraries.iter().find(|l| l.lib.id == library_id)?.clone();
+    let l = snapshot
+        .libraries
+        .iter()
+        .find(|l| l.lib.id == library_id)?
+        .clone();
     let file = l.tree.file(file_id)?.clone();
     let path = file.abs_path(&l.lib.root);
     Some((l, file, path))
@@ -27,8 +35,13 @@ fn locate(state: &State, library_id: i64, file_id: i64) -> Option<(LibrarySnapsh
 
 /// Why a file can't be played in the browser, if it can't.
 fn unsupported(file: &flex_core::MediaFile) -> Option<&'static str> {
-    let iso = file.rel_path.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("iso"));
-    (iso || flex_core::parse::disc_folder(&file.rel_path).is_some()).then_some("Discs (DVD and Blu-ray) only play in the Flex app for now.")
+    let iso = file
+        .rel_path
+        .rsplit('.')
+        .next()
+        .is_some_and(|e| e.eq_ignore_ascii_case("iso"));
+    (iso || flex_core::parse::disc_folder(&file.rel_path).is_some())
+        .then_some("Discs (DVD and Blu-ray) only play in the Flex app for now.")
 }
 
 #[derive(Serialize)]
@@ -62,29 +75,49 @@ pub struct PlayInfo {
 /// The subtitle track to show at first: a forced or default one, as mpv would.
 fn default_subtitles(media: &MediaInfo) -> Option<usize> {
     let tracks = &media.subtitles;
-    tracks.iter().find(|s| s.forced).or_else(|| tracks.iter().find(|s| s.default)).map(|s| s.index)
+    tracks
+        .iter()
+        .find(|s| s.forced)
+        .or_else(|| tracks.iter().find(|s| s.default))
+        .map(|s| s.index)
 }
 
 /// The next episode in the same season (the app's rule: none for films, none past the
 /// end of a season).
 fn next_up(snapshot: &crate::Snapshot, l: &LibrarySnapshot, file_id: i64) -> Option<NextUp> {
-    let id = match l.catalog.as_ref().filter(|c| c.show_of_file(file_id).is_some()) {
+    let id = match l
+        .catalog
+        .as_ref()
+        .filter(|c| c.show_of_file(file_id).is_some())
+    {
         Some(c) if c.show_of_file(file_id)?.is_series() => c.neighbour_in_season(file_id, 1)?,
         Some(_) => return None,
         None if !l.lib.kind.is_episodic() => return None,
         None => l.tree.next_in_folder(file_id)?.id,
     };
     let titles = flex_core::titles::titles(&l.tree, l.catalog.as_deref(), &snapshot.series, id)?;
-    Some(NextUp { file: id, title: titles.episode.unwrap_or(titles.name) })
+    Some(NextUp {
+        file: id,
+        title: titles.episode.unwrap_or(titles.name),
+    })
 }
 
-pub async fn info(AxState(state): AxState<Arc<State>>, Path((library_id, file_id)): Path<(i64, i64)>) -> Result<Json<PlayInfo>, StatusCode> {
+pub async fn info(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, file_id)): Path<(i64, i64)>,
+) -> Result<Json<PlayInfo>, StatusCode> {
     let snapshot = state.snapshot();
     let (l, file, path) = locate(&state, library_id, file_id).ok_or(StatusCode::NOT_FOUND)?;
-    let titles = flex_core::titles::titles(&l.tree, l.catalog.as_deref(), &snapshot.series, file_id).ok_or(StatusCode::NOT_FOUND)?;
+    let titles =
+        flex_core::titles::titles(&l.tree, l.catalog.as_deref(), &snapshot.series, file_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
     let (media, error) = match unsupported(&file) {
         Some(why) => (None, Some(why.to_owned())),
-        None => match state.tools.probe((file.id, file.size, file.mtime), &path).await {
+        None => match state
+            .tools
+            .probe((file.id, file.size, file.mtime), &path)
+            .await
+        {
             Ok(info) => (Some(info), None),
             Err(e) => {
                 log::warn!("web: probing {}: {e:#}", path.display());
@@ -92,22 +125,36 @@ pub async fn info(AxState(state): AxState<Arc<State>>, Path((library_id, file_id
             }
         },
     };
-    let duration = media.as_ref().and_then(|m| m.duration).or(file.progress.duration);
+    let duration = media
+        .as_ref()
+        .and_then(|m| m.duration)
+        .or(file.progress.duration);
     // Start extracting the subtitles likely to be shown, so they're ready when playback starts.
     if let Some(m) = &media
         && let Some(index) = default_subtitles(m).filter(|i| !m.subtitles[*i].image)
-        && let Err(e) = state.tools.subtitles(&state.cache_dir, (file.id, file.size), &path, index)
+        && let Err(e) = state
+            .tools
+            .subtitles(&state.cache_dir, (file.id, file.size), &path, index)
     {
         log::warn!("web: extracting subtitles: {e:#}");
     }
     let fonts = media
         .as_ref()
-        .map(|m| m.fonts.iter().map(|(i, _)| format!("/fonts/{library_id}/{file_id}/{i}")).collect())
+        .map(|m| {
+            m.fonts
+                .iter()
+                .map(|(i, _)| format!("/fonts/{library_id}/{file_id}/{i}"))
+                .collect()
+        })
         .unwrap_or_default();
     Ok(Json(PlayInfo {
         library: library_id,
         file: file_id,
-        show: l.catalog.as_ref().and_then(|c| c.show_of_file(file_id)).map(|e| e.show.id),
+        show: l
+            .catalog
+            .as_ref()
+            .and_then(|c| c.show_of_file(file_id))
+            .map(|e| e.show.id),
         title: titles.show.clone().unwrap_or_else(|| titles.name.clone()),
         episode: titles.show.as_ref().and(titles.episode.clone()),
         position: file.progress.position,
@@ -121,12 +168,21 @@ pub async fn info(AxState(state): AxState<Arc<State>>, Path((library_id, file_id
 }
 
 /// `/media/{library}/{file}`: the file as is, with seeking (HTTP ranges).
-pub async fn file(AxState(state): AxState<Arc<State>>, Path((library_id, file_id)): Path<(i64, i64)>, req: Request) -> Response {
-    let Some((_, file, path)) = locate(&state, library_id, file_id) else { return StatusCode::NOT_FOUND.into_response() };
+pub async fn file(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, file_id)): Path<(i64, i64)>,
+    req: Request,
+) -> Response {
+    let Some((_, file, path)) = locate(&state, library_id, file_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     if unsupported(&file).is_some() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match tower_http::services::ServeFile::new(path).oneshot(req).await {
+    match tower_http::services::ServeFile::new(path)
+        .oneshot(req)
+        .await
+    {
         Ok(res) => res.into_response(),
         Err(e) => {
             log::warn!("web: serving a file: {e}");
@@ -156,16 +212,35 @@ pub async fn stream(
     Path((library_id, file_id)): Path<(i64, i64)>,
     Query(q): Query<StreamQuery>,
 ) -> Response {
-    let Some((_, file, path)) = locate(&state, library_id, file_id) else { return StatusCode::NOT_FOUND.into_response() };
+    let Some((_, file, path)) = locate(&state, library_id, file_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     if unsupported(&file).is_some() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let info = match state.tools.probe((file.id, file.size, file.mtime), &path).await {
+    let info = match state
+        .tools
+        .probe((file.id, file.size, file.mtime), &path)
+        .await
+    {
         Ok(info) => info,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
     };
-    let text_burn = match q.burn.filter(|b| info.subtitles.get(*b).is_some_and(|s| !s.image)) {
-        Some(index) => match state.tools.text_burn(&state.cache_dir, (file.id, file.size), &path, index, &info.fonts).await {
+    let text_burn = match q
+        .burn
+        .filter(|b| info.subtitles.get(*b).is_some_and(|s| !s.image))
+    {
+        Some(index) => match state
+            .tools
+            .text_burn(
+                &state.cache_dir,
+                (file.id, file.size),
+                &path,
+                index,
+                &info.fonts,
+            )
+            .await
+        {
             Ok(burn) => burn,
             Err(e) => {
                 log::warn!("web: preparing subtitles to burn in: {e:#}");
@@ -192,8 +267,16 @@ pub async fn stream(
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response();
         }
     };
-    log::info!("web: streaming {} from {:.0}s (video {:?}, audio {:?})", file.rel_path, q.start, q.video, q.audio_mode);
-    let Some(stdout) = child.stdout.take() else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    log::info!(
+        "web: streaming {} from {:.0}s (video {:?}, audio {:?})",
+        file.rel_path,
+        q.start,
+        q.video,
+        q.audio_mode
+    );
+    let Some(stdout) = child.stdout.take() else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
     // The stream owns ffmpeg: when the browser stops reading, both are dropped and
     // ffmpeg is killed.
     let body = tokio_util::io::ReaderStream::with_capacity(stdout, 256 * 1024).map(move |chunk| {
@@ -201,7 +284,11 @@ pub async fn stream(
         chunk
     });
     (
-        [(header::CONTENT_TYPE, "video/mp4"), (header::CACHE_CONTROL, "no-store"), (header::ACCEPT_RANGES, "none")],
+        [
+            (header::CONTENT_TYPE, "video/mp4"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::ACCEPT_RANGES, "none"),
+        ],
         Body::from_stream(body),
     )
         .into_response()
@@ -235,10 +322,17 @@ pub struct ProgressReply {
 
 /// Saves how far the browser has got, with the app's rules (the watched threshold, and
 /// nothing for a few seconds of sampling).
-pub async fn progress(AxState(state): AxState<Arc<State>>, Json(r): Json<ProgressReport>) -> Result<Json<ProgressReply>, StatusCode> {
+pub async fn progress(
+    AxState(state): AxState<Arc<State>>,
+    Json(r): Json<ProgressReport>,
+) -> Result<Json<ProgressReply>, StatusCode> {
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<ProgressReply>> {
-        let Some((_, file, _)) = locate(&state, r.library, r.file) else { return Ok(None) };
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let Some((_, file, _)) = locate(&state, r.library, r.file) else {
+            return Ok(None);
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
         let threshold = flex_core::progress::watched_threshold(&db);
         let old = file.progress;
@@ -246,15 +340,35 @@ pub async fn progress(AxState(state): AxState<Arc<State>>, Json(r): Json<Progres
         if let Some(p) = new.filter(|p| *p != old) {
             db.set_progress(r.file, &p)?;
             state.patch_files(r.library, &[r.file], |f| f.progress = p);
-            (state.on_change)(Change::Progress { library_id: r.library, file_id: r.file, progress: p });
+            (state.on_change)(Change::Progress {
+                library_id: r.library,
+                file_id: r.file,
+                progress: p,
+            });
         }
         let recorded = new.is_some();
         let became_watched = new.is_some_and(|p: Progress| p.watched && p.position.is_none());
         if r.end && (recorded || r.recorded) {
-            let position = if became_watched || r.completed { r.duration } else { r.position };
-            db.add_history(r.file, if r.session_start > 0 { r.session_start } else { now }, Some(position), became_watched || r.completed)?;
+            let position = if became_watched || r.completed {
+                r.duration
+            } else {
+                r.position
+            };
+            db.add_history(
+                r.file,
+                if r.session_start > 0 {
+                    r.session_start
+                } else {
+                    now
+                },
+                Some(position),
+                became_watched || r.completed,
+            )?;
         }
-        Ok(Some(ProgressReply { recorded, watched: became_watched }))
+        Ok(Some(ProgressReply {
+            recorded,
+            watched: became_watched,
+        }))
     })
     .await;
     match result {
@@ -280,10 +394,18 @@ pub struct Start {
 
 /// `/api/start/{library}/{file}?t=…`: where a copied stream asked to start at `t` really
 /// starts (the keyframe before it), so the player can line up its clock and subtitles.
-pub async fn start(AxState(state): AxState<Arc<State>>, Path((library_id, file_id)): Path<(i64, i64)>, Query(q): Query<StartQuery>) -> Result<Json<Start>, StatusCode> {
+pub async fn start(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, file_id)): Path<(i64, i64)>,
+    Query(q): Query<StartQuery>,
+) -> Result<Json<Start>, StatusCode> {
     let (_, _, path) = locate(&state, library_id, file_id).ok_or(StatusCode::NOT_FOUND)?;
     let t = q.t.max(0.0);
-    let start = if t > 0.0 { state.tools.keyframe_before(&path, t).await.unwrap_or(t) } else { 0.0 };
+    let start = if t > 0.0 {
+        state.tools.keyframe_before(&path, t).await.unwrap_or(t)
+    } else {
+        0.0
+    };
     Ok(Json(Start { start }))
 }
 
@@ -302,13 +424,25 @@ pub async fn subtitles(
     Path((library_id, file_id, index)): Path<(i64, i64, usize)>,
     Query(q): Query<SubtitlesQuery>,
 ) -> Response {
-    let Some((_, file, path)) = locate(&state, library_id, file_id) else { return StatusCode::NOT_FOUND.into_response() };
-    let headers = [(header::CONTENT_TYPE, "text/plain; charset=utf-8"), (header::CACHE_CONTROL, "no-store")];
-    match state.tools.subtitles(&state.cache_dir, (file.id, file.size), &path, index) {
-        Ok(growing) if growing.is_complete() || q.from < 1.0 => (headers, Body::from_stream(growing.stream())).into_response(),
+    let Some((_, file, path)) = locate(&state, library_id, file_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let headers = [
+        (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+        (header::CACHE_CONTROL, "no-store"),
+    ];
+    match state
+        .tools
+        .subtitles(&state.cache_dir, (file.id, file.size), &path, index)
+    {
+        Ok(growing) if growing.is_complete() || q.from < 1.0 => {
+            (headers, Body::from_stream(growing.stream())).into_response()
+        }
         Ok(_) => match state.tools.subtitles_from(&path, index, q.from) {
             Ok(mut child) => {
-                let Some(stdout) = child.stdout.take() else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+                let Some(stdout) = child.stdout.take() else {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                };
                 let body = tokio_util::io::ReaderStream::new(stdout).map(move |chunk| {
                     let _keep_alive = &child;
                     chunk
@@ -328,13 +462,37 @@ pub async fn subtitles(
 }
 
 /// `/fonts/{library}/{file}/{index}`: a font attached to the file.
-pub async fn font(AxState(state): AxState<Arc<State>>, Path((library_id, file_id, index)): Path<(i64, i64, usize)>) -> Response {
-    let Some((_, file, path)) = locate(&state, library_id, file_id) else { return StatusCode::NOT_FOUND.into_response() };
-    let Ok(info) = state.tools.probe((file.id, file.size, file.mtime), &path).await else { return StatusCode::NOT_FOUND.into_response() };
-    let Some((_, name)) = info.fonts.iter().find(|(i, _)| *i == index) else { return StatusCode::NOT_FOUND.into_response() };
-    match state.tools.font(&state.cache_dir, (file.id, file.size), &path, index, name).await {
+pub async fn font(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, file_id, index)): Path<(i64, i64, usize)>,
+) -> Response {
+    let Some((_, file, path)) = locate(&state, library_id, file_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(info) = state
+        .tools
+        .probe((file.id, file.size, file.mtime), &path)
+        .await
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some((_, name)) = info.fonts.iter().find(|(i, _)| *i == index) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match state
+        .tools
+        .font(&state.cache_dir, (file.id, file.size), &path, index, name)
+        .await
+    {
         Ok(out) => match tokio::fs::read(&out).await {
-            Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream"), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response(),
+            Ok(bytes) => (
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream"),
+                    (header::CACHE_CONTROL, "private, max-age=604800"),
+                ],
+                bytes,
+            )
+                .into_response(),
             Err(_) => StatusCode::NOT_FOUND.into_response(),
         },
         Err(e) => {
@@ -346,9 +504,18 @@ pub async fn font(AxState(state): AxState<Arc<State>>, Path((library_id, file_id
 
 /// `/fonts/fallback`: a system font with CJK characters.
 pub async fn fallback_font() -> Response {
-    let Some((path, _)) = crate::media::cjk_fallback_font() else { return StatusCode::NOT_FOUND.into_response() };
+    let Some((path, _)) = crate::media::cjk_fallback_font() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     match tokio::fs::read(&path).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream"), (header::CACHE_CONTROL, "public, max-age=2592000")], bytes).into_response(),
+        Ok(bytes) => (
+            [
+                (header::CONTENT_TYPE, "application/octet-stream"),
+                (header::CACHE_CONTROL, "public, max-age=2592000"),
+            ],
+            bytes,
+        )
+            .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -356,14 +523,36 @@ pub async fn fallback_font() -> Response {
 /// `/vendor/jassub/{name}`: the subtitle renderer (see scripts/vendor-jassub.sh).
 pub async fn jassub(Path(name): Path<String>) -> Response {
     let (body, kind): (&'static [u8], &str) = match name.as_str() {
-        "jassub.js" => (include_bytes!("../web/vendor/jassub/jassub.js"), "text/javascript; charset=utf-8"),
-        "worker.js" => (include_bytes!("../web/vendor/jassub/worker.js"), "text/javascript; charset=utf-8"),
-        "jassub-worker.wasm" => (include_bytes!("../web/vendor/jassub/jassub-worker.wasm"), "application/wasm"),
-        "jassub-worker-modern.wasm" => (include_bytes!("../web/vendor/jassub/jassub-worker-modern.wasm"), "application/wasm"),
-        "default.woff2" => (include_bytes!("../web/vendor/jassub/default.woff2"), "font/woff2"),
+        "jassub.js" => (
+            include_bytes!("../web/vendor/jassub/jassub.js"),
+            "text/javascript; charset=utf-8",
+        ),
+        "worker.js" => (
+            include_bytes!("../web/vendor/jassub/worker.js"),
+            "text/javascript; charset=utf-8",
+        ),
+        "jassub-worker.wasm" => (
+            include_bytes!("../web/vendor/jassub/jassub-worker.wasm"),
+            "application/wasm",
+        ),
+        "jassub-worker-modern.wasm" => (
+            include_bytes!("../web/vendor/jassub/jassub-worker-modern.wasm"),
+            "application/wasm",
+        ),
+        "default.woff2" => (
+            include_bytes!("../web/vendor/jassub/default.woff2"),
+            "font/woff2",
+        ),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "public, max-age=86400")], body).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, kind),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 #[derive(Serialize)]
@@ -375,8 +564,17 @@ pub struct SubsReady {
 
 /// `/api/subs-ready/{library}/{file}/{index}`: whether a text track is fully extracted
 /// (and so can be burned in). Starts extracting it if it isn't yet.
-pub async fn subs_ready(AxState(state): AxState<Arc<State>>, Path((library_id, file_id, index)): Path<(i64, i64, usize)>) -> Result<Json<SubsReady>, StatusCode> {
+pub async fn subs_ready(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, file_id, index)): Path<(i64, i64, usize)>,
+) -> Result<Json<SubsReady>, StatusCode> {
     let (_, file, path) = locate(&state, library_id, file_id).ok_or(StatusCode::NOT_FOUND)?;
-    let growing = state.tools.subtitles(&state.cache_dir, (file.id, file.size), &path, index).map_err(|_| StatusCode::NOT_FOUND)?;
-    Ok(Json(SubsReady { complete: growing.is_complete(), burnable: state.tools.can_burn_text().await }))
+    let growing = state
+        .tools
+        .subtitles(&state.cache_dir, (file.id, file.size), &path, index)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(SubsReady {
+        complete: growing.is_complete(),
+        burnable: state.tools.can_burn_text().await,
+    }))
 }

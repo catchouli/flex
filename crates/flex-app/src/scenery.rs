@@ -6,7 +6,9 @@ use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, pos2, vec2}
 
 /// A repeatable hash: 0..1 for (x, y, seed).
 pub fn noise(x: usize, y: usize, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(374_761_393) ^ (y as u32).wrapping_mul(668_265_263) ^ seed.wrapping_mul(2_246_822_519);
+    let mut h = (x as u32).wrapping_mul(374_761_393)
+        ^ (y as u32).wrapping_mul(668_265_263)
+        ^ seed.wrapping_mul(2_246_822_519);
     h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
     ((h ^ (h >> 16)) & 0xff) as f32 / 255.0
 }
@@ -42,7 +44,15 @@ pub fn make_pattern(name: &str, base: Color32) -> Option<egui::ColorImage> {
         "stone" => Some(stone(base)),
         "pinstripes" => {
             // Two pixels light, two a shade darker.
-            let pixels = (0..8 * 8).map(|i| if (i / 8) % 4 < 2 { base } else { scale(base, 0.955) }).collect();
+            let pixels = (0..8 * 8)
+                .map(|i| {
+                    if (i / 8) % 4 < 2 {
+                        base
+                    } else {
+                        scale(base, 0.955)
+                    }
+                })
+                .collect();
             Some(egui::ColorImage::new([8, 8], pixels))
         }
         "rain" => Some(rain(base)),
@@ -57,7 +67,10 @@ fn mottle(base: Color32) -> egui::ColorImage {
     let pixels = (0..SIZE * SIZE)
         .map(|i| {
             let (x, y) = (i % SIZE, i / SIZE);
-            scale(base, 0.94 + noise(x / 4, y / 4, 37) * 0.08 + noise(x, y, 41) * 0.04)
+            scale(
+                base,
+                0.94 + noise(x / 4, y / 4, 37) * 0.08 + noise(x, y, 41) * 0.04,
+            )
         })
         .collect();
     egui::ColorImage::new([SIZE, SIZE], pixels)
@@ -88,7 +101,10 @@ fn stone(base: Color32) -> egui::ColorImage {
             let block = row.iter().rposition(|&c| c <= x).unwrap_or(row.len() - 1);
             let shade = 0.78 + noise(block, course, 7) * 0.32;
             let grain = 0.92 + noise(x / 2, y / 2, 1) * 0.16;
-            let (dy, dx) = (y % COURSE, row.iter().map(|&c| x.abs_diff(c)).min().unwrap_or(99));
+            let (dy, dx) = (
+                y % COURSE,
+                row.iter().map(|&c| x.abs_diff(c)).min().unwrap_or(99),
+            );
             let f = if dy < 2 || dx < 2 {
                 0.5
             } else if dy == 2 || dx == 2 {
@@ -166,7 +182,13 @@ fn rain(base: Color32) -> egui::ColorImage {
 // Painted scenes
 
 /// Draws a painted scene over the background's colours; false if `name` isn't one.
-pub fn paint_scene(painter: &Painter, rect: Rect, name: &str, hill: Color32, hill_bottom: Color32) -> bool {
+pub fn paint_scene(
+    painter: &Painter,
+    rect: Rect,
+    name: &str,
+    hill: Color32,
+    hill_bottom: Color32,
+) -> bool {
     match name {
         "hills" => paint_hills(painter, rect, hill, hill_bottom),
         "farmyard" => paint_farmyard(painter, rect),
@@ -191,10 +213,26 @@ fn stone_block(painter: &Painter, r: Rect, shade: f32) {
     painter.rect_filled(r, CornerRadius::ZERO, outline);
     let inner = r.shrink(1.5);
     painter.rect_filled(inner, CornerRadius::ZERO, scale(mid, shade));
-    painter.rect_filled(Rect::from_min_size(inner.min, vec2(inner.width(), edge)), CornerRadius::ZERO, scale(light, shade));
-    painter.rect_filled(Rect::from_min_size(inner.min, vec2(edge, inner.height())), CornerRadius::ZERO, scale(light, shade));
-    painter.rect_filled(Rect::from_min_max(pos2(inner.left(), inner.bottom() - edge), inner.max), CornerRadius::ZERO, scale(dark, shade));
-    painter.rect_filled(Rect::from_min_max(pos2(inner.right() - edge, inner.top() + edge), inner.max), CornerRadius::ZERO, scale(dark, shade));
+    painter.rect_filled(
+        Rect::from_min_size(inner.min, vec2(inner.width(), edge)),
+        CornerRadius::ZERO,
+        scale(light, shade),
+    );
+    painter.rect_filled(
+        Rect::from_min_size(inner.min, vec2(edge, inner.height())),
+        CornerRadius::ZERO,
+        scale(light, shade),
+    );
+    painter.rect_filled(
+        Rect::from_min_max(pos2(inner.left(), inner.bottom() - edge), inner.max),
+        CornerRadius::ZERO,
+        scale(dark, shade),
+    );
+    painter.rect_filled(
+        Rect::from_min_max(pos2(inner.right() - edge, inner.top() + edge), inner.max),
+        CornerRadius::ZERO,
+        scale(dark, shade),
+    );
 }
 
 /// A band of stone blocks of uneven width across `r`.
@@ -203,7 +241,11 @@ fn stone_band(painter: &Painter, r: Rect, seed: u32) {
     let mut i = 0;
     while x < r.right() {
         let w = r.height() * (1.6 + noise(i, 1, seed) * 1.8);
-        stone_block(painter, Rect::from_min_max(pos2(x, r.top()), pos2(x + w, r.bottom())), 0.85 + noise(i, 2, seed) * 0.25);
+        stone_block(
+            painter,
+            Rect::from_min_max(pos2(x, r.top()), pos2(x + w, r.bottom())),
+            0.85 + noise(i, 2, seed) * 0.25,
+        );
         x += w;
         i += 1;
     }
@@ -214,7 +256,10 @@ fn pillar(painter: &Painter, r: Rect, seed: u32) {
     let [light, mid, dark, outline] = STONE;
     let w = r.width();
     let cap_h = w * 0.55;
-    let shaft = Rect::from_min_max(pos2(r.left(), r.top() + cap_h * 1.4), pos2(r.right(), r.bottom() - cap_h * 1.4));
+    let shaft = Rect::from_min_max(
+        pos2(r.left(), r.top() + cap_h * 1.4),
+        pos2(r.right(), r.bottom() - cap_h * 1.4),
+    );
     painter.rect_filled(shaft.expand2(vec2(1.5, 0.0)), CornerRadius::ZERO, outline);
     // Drums of stone, each a little different, with flutes running down them.
     const FLUTES: [(f32, usize); 5] = [(0.16, 2), (0.2, 1), (0.28, 0), (0.2, 1), (0.16, 2)];
@@ -227,32 +272,75 @@ fn pillar(painter: &Painter, r: Rect, seed: u32) {
         let mut x = shaft.left();
         for (frac, tone) in FLUTES {
             let colour = scale([light, mid, dark][tone], shade);
-            painter.rect_filled(Rect::from_min_size(pos2(x, top), vec2(w * frac, drum_h)), CornerRadius::ZERO, colour);
+            painter.rect_filled(
+                Rect::from_min_size(pos2(x, top), vec2(w * frac, drum_h)),
+                CornerRadius::ZERO,
+                colour,
+            );
             x += w * frac;
         }
         if d > 0 {
             // The joint: a dark seam with a lit edge under it.
-            painter.rect_filled(Rect::from_min_size(pos2(shaft.left(), top - 1.0), vec2(w, 2.0)), CornerRadius::ZERO, outline);
-            painter.rect_filled(Rect::from_min_size(pos2(shaft.left(), top + 1.0), vec2(w, 1.5)), CornerRadius::ZERO, scale(light, shade * 1.1));
+            painter.rect_filled(
+                Rect::from_min_size(pos2(shaft.left(), top - 1.0), vec2(w, 2.0)),
+                CornerRadius::ZERO,
+                outline,
+            );
+            painter.rect_filled(
+                Rect::from_min_size(pos2(shaft.left(), top + 1.0), vec2(w, 1.5)),
+                CornerRadius::ZERO,
+                scale(light, shade * 1.1),
+            );
         }
     }
     // Capital and base: a wide slab and a narrower collar against the shaft.
-    for (slab_y, collar_y) in [(r.top(), r.top() + cap_h * 0.75), (r.bottom() - cap_h * 0.75, shaft.bottom())] {
-        stone_block(painter, Rect::from_min_size(pos2(r.left() - w * 0.18, slab_y), vec2(w * 1.36, cap_h * 0.75)), 1.0);
-        stone_block(painter, Rect::from_min_size(pos2(r.left() - w * 0.06, collar_y), vec2(w * 1.12, cap_h * 0.65)), 0.92);
+    for (slab_y, collar_y) in [
+        (r.top(), r.top() + cap_h * 0.75),
+        (r.bottom() - cap_h * 0.75, shaft.bottom()),
+    ] {
+        stone_block(
+            painter,
+            Rect::from_min_size(
+                pos2(r.left() - w * 0.18, slab_y),
+                vec2(w * 1.36, cap_h * 0.75),
+            ),
+            1.0,
+        );
+        stone_block(
+            painter,
+            Rect::from_min_size(
+                pos2(r.left() - w * 0.06, collar_y),
+                vec2(w * 1.12, cap_h * 0.65),
+            ),
+            0.92,
+        );
     }
 }
 
 /// A stone frame in the screen's overscan margin: a band of blocks along the top and
 /// bottom, and a pillar down each side.
 fn paint_stone_frame(painter: &Painter, rect: Rect) {
-    let (mx, my) = (rect.width() * crate::theme::SAFE_MARGIN, rect.height() * crate::theme::SAFE_MARGIN);
+    let (mx, my) = (
+        rect.width() * crate::theme::SAFE_MARGIN,
+        rect.height() * crate::theme::SAFE_MARGIN,
+    );
     let band = (my * 0.7).clamp(10.0, 34.0);
-    stone_band(painter, Rect::from_min_size(rect.min, vec2(rect.width(), band)), 43);
-    stone_band(painter, Rect::from_min_max(pos2(rect.left(), rect.bottom() - band), rect.max), 47);
+    stone_band(
+        painter,
+        Rect::from_min_size(rect.min, vec2(rect.width(), band)),
+        43,
+    );
+    stone_band(
+        painter,
+        Rect::from_min_max(pos2(rect.left(), rect.bottom() - band), rect.max),
+        47,
+    );
     let w = (mx * 0.72).clamp(12.0, 56.0);
     for (side, x) in [(0, rect.left() + mx / 2.0), (1, rect.right() - mx / 2.0)] {
-        let r = Rect::from_min_max(pos2(x - w / 2.0, rect.top() + band), pos2(x + w / 2.0, rect.bottom() - band));
+        let r = Rect::from_min_max(
+            pos2(x - w / 2.0, rect.top() + band),
+            pos2(x + w / 2.0, rect.bottom() - band),
+        );
         pillar(painter, r, 53 + side);
     }
 }
@@ -260,7 +348,13 @@ fn paint_stone_frame(painter: &Painter, rect: Rect) {
 /// A soft cloud of overlapping puffs.
 fn soft_cloud(painter: &Painter, c: Pos2, size: f32) {
     let white = Color32::from_white_alpha(70);
-    for (dx, dy, r) in [(-0.9, 0.15, 0.5), (-0.35, -0.2, 0.7), (0.35, -0.1, 0.65), (0.9, 0.2, 0.45), (0.0, 0.25, 0.6)] {
+    for (dx, dy, r) in [
+        (-0.9, 0.15, 0.5),
+        (-0.35, -0.2, 0.7),
+        (0.35, -0.1, 0.65),
+        (0.9, 0.2, 0.45),
+        (0.0, 0.25, 0.6),
+    ] {
         painter.circle_filled(c + vec2(dx, dy) * size, r * size, white);
     }
 }
@@ -268,12 +362,23 @@ fn soft_cloud(painter: &Painter, c: Pos2, size: f32) {
 /// Two rolling green hills under a sky with soft clouds.
 fn paint_hills(painter: &Painter, rect: Rect, hill: Color32, hill_bottom: Color32) {
     let (w, h) = (rect.width(), rect.height());
-    for (x, y, s) in [(0.18, 0.16, 70.0), (0.55, 0.09, 50.0), (0.8, 0.22, 85.0), (0.38, 0.3, 40.0)] {
+    for (x, y, s) in [
+        (0.18, 0.16, 70.0),
+        (0.55, 0.09, 50.0),
+        (0.8, 0.22, 85.0),
+        (0.38, 0.3, 40.0),
+    ] {
         soft_cloud(painter, rect.min + vec2(x * w, y * h), s);
     }
     // The far hill paler (hazier), the near one in full colour.
-    let far = (lerp(hill, Color32::from_rgb(200, 230, 255), 0.25), lerp(hill_bottom, hill, 0.4));
-    let hills = [(0.6, 0.07, 1.3, 0.8, far), (0.7, 0.09, 0.9, 2.6, (hill, hill_bottom))];
+    let far = (
+        lerp(hill, Color32::from_rgb(200, 230, 255), 0.25),
+        lerp(hill_bottom, hill, 0.4),
+    );
+    let hills = [
+        (0.6, 0.07, 1.3, 0.8, far),
+        (0.7, 0.09, 0.9, 2.6, (hill, hill_bottom)),
+    ];
     for (base, amp, freq, phase, (top, bottom)) in hills {
         const STEPS: usize = 96;
         let mut mesh = egui::Mesh::default();
@@ -295,7 +400,14 @@ fn paint_hills(painter: &Painter, rect: Rect, hill: Color32, hill_bottom: Color3
 
 /// Pixel art: each string is a row, each character a pixel coloured by `palette`
 /// ('.' and unknown characters are clear). `flip` mirrors it left to right.
-fn sprite(painter: &Painter, top_left: Pos2, px: f32, rows: &[&str], palette: &dyn Fn(char) -> Option<Color32>, flip: bool) {
+fn sprite(
+    painter: &Painter,
+    top_left: Pos2,
+    px: f32,
+    rows: &[&str],
+    palette: &dyn Fn(char) -> Option<Color32>,
+    flip: bool,
+) {
     let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
     for (y, row) in rows.iter().enumerate() {
         let chars: Vec<char> = row.chars().collect();
@@ -306,7 +418,10 @@ fn sprite(painter: &Painter, top_left: Pos2, px: f32, rows: &[&str], palette: &d
             let run = chars[x..].iter().take_while(|&&d| d == c).count();
             if let Some(colour) = palette(c) {
                 let left = if flip { width - x - run } else { x };
-                let r = Rect::from_min_size(top_left + vec2(left as f32 * px, y as f32 * px), vec2(run as f32 * px, px));
+                let r = Rect::from_min_size(
+                    top_left + vec2(left as f32 * px, y as f32 * px),
+                    vec2(run as f32 * px, px),
+                );
                 painter.rect_filled(r, CornerRadius::ZERO, colour);
             }
             x += run;
@@ -351,9 +466,21 @@ const DUCK: [&str; 16] = [
 
 /// Body, shade and eye colours of hens and ducks: white, buff and black.
 const FEATHERS: [(Color32, Color32, Color32); 3] = [
-    (Color32::from_rgb(0xfb, 0xf7, 0xec), Color32::from_rgb(0xe4, 0xd9, 0xc4), Color32::from_rgb(0x2b, 0x2b, 0x2b)),
-    (Color32::from_rgb(0xd8, 0xa9, 0x6c), Color32::from_rgb(0xb5, 0x85, 0x4e), Color32::from_rgb(0x2b, 0x2b, 0x2b)),
-    (Color32::from_rgb(0x46, 0x41, 0x3c), Color32::from_rgb(0x2e, 0x2b, 0x28), Color32::from_rgb(0xef, 0xe6, 0xc0)),
+    (
+        Color32::from_rgb(0xfb, 0xf7, 0xec),
+        Color32::from_rgb(0xe4, 0xd9, 0xc4),
+        Color32::from_rgb(0x2b, 0x2b, 0x2b),
+    ),
+    (
+        Color32::from_rgb(0xd8, 0xa9, 0x6c),
+        Color32::from_rgb(0xb5, 0x85, 0x4e),
+        Color32::from_rgb(0x2b, 0x2b, 0x2b),
+    ),
+    (
+        Color32::from_rgb(0x46, 0x41, 0x3c),
+        Color32::from_rgb(0x2e, 0x2b, 0x28),
+        Color32::from_rgb(0xef, 0xe6, 0xc0),
+    ),
 ];
 
 fn bird_palette(feathers: usize) -> impl Fn(char) -> Option<Color32> {
@@ -370,11 +497,25 @@ fn bird_palette(feathers: usize) -> impl Fn(char) -> Option<Color32> {
 
 /// A hen standing with her feet on `ground` at `x` (her left edge).
 pub fn hen(painter: &Painter, x: f32, ground: f32, px: f32, feathers: usize, facing_left: bool) {
-    sprite(painter, pos2(x, ground - HEN.len() as f32 * px), px, &HEN, &bird_palette(feathers), facing_left);
+    sprite(
+        painter,
+        pos2(x, ground - HEN.len() as f32 * px),
+        px,
+        &HEN,
+        &bird_palette(feathers),
+        facing_left,
+    );
 }
 
 fn duck(painter: &Painter, x: f32, ground: f32, px: f32, feathers: usize, facing_left: bool) {
-    sprite(painter, pos2(x, ground - DUCK.len() as f32 * px), px, &DUCK, &bird_palette(feathers), facing_left);
+    sprite(
+        painter,
+        pos2(x, ground - DUCK.len() as f32 * px),
+        px,
+        &DUCK,
+        &bird_palette(feathers),
+        facing_left,
+    );
 }
 
 /// The hen pointer: a small hen whose beak is at `tip`.
@@ -383,7 +524,9 @@ pub fn hen_pointer(painter: &Painter, tip: Pos2) {
     hen(painter, tip.x - 13.0 * px, tip.y + 8.0 * px, px, 0, false);
 }
 
-const LEAF: [&str; 6] = ["..LL...", ".LMML..", "LMMDML.", ".LMDMML", "..LMML.", "...LL.."];
+const LEAF: [&str; 6] = [
+    "..LL...", ".LMML..", "LMMDML.", ".LMDMML", "..LMML.", "...LL..",
+];
 const TOMATO: [&str; 5] = ["..G..", ".RRR.", "RRHRR", "RRRRR", ".RRR."];
 const PUMPKIN: [&str; 5] = ["...G...", ".OoOoO.", "OOoOoOO", "OOoOoOO", ".OoOoO."];
 const FLOWER: [&str; 3] = [".P.", "PCP", ".P."];
@@ -429,8 +572,14 @@ fn coop_palette(c: char) -> Option<Color32> {
 fn pixel_cloud(painter: &Painter, at: Pos2, b: f32) {
     let body = Color32::from_rgba_unmultiplied(0xff, 0xfb, 0xed, 210);
     let shade = Color32::from_rgba_unmultiplied(0xbf, 0xd9, 0xe7, 210);
-    for (row, (from, to, colour)) in [(5, 10, body), (2, 14, body), (0, 19, body), (1, 18, shade)].into_iter().enumerate() {
-        let r = Rect::from_min_max(at + vec2(from as f32 * b, row as f32 * b), at + vec2(to as f32 * b, (row + 1) as f32 * b));
+    for (row, (from, to, colour)) in [(5, 10, body), (2, 14, body), (0, 19, body), (1, 18, shade)]
+        .into_iter()
+        .enumerate()
+    {
+        let r = Rect::from_min_max(
+            at + vec2(from as f32 * b, row as f32 * b),
+            at + vec2(to as f32 * b, (row + 1) as f32 * b),
+        );
         painter.rect_filled(r, CornerRadius::ZERO, colour);
     }
 }
@@ -438,18 +587,39 @@ fn pixel_cloud(painter: &Painter, at: Pos2, b: f32) {
 /// A climbing plant up one side of the screen, leaves and fruit along it.
 fn side_plant(painter: &Painter, rect: Rect, right: bool, px: f32) {
     let stem = Color32::from_rgb(0x4b, 0x70, 0x44);
-    let edge = |x: f32| if right { rect.right() - x } else { rect.left() + x };
+    let edge = |x: f32| {
+        if right {
+            rect.right() - x
+        } else {
+            rect.left() + x
+        }
+    };
     let mut y = rect.top() - 10.0;
     let mut i = 0;
     while y < rect.bottom() {
         // A wavy stem, a pixel column at a time.
         let x = 26.0 + (y / 90.0 + if right { 1.7 } else { 0.0 }).sin() * 10.0;
-        painter.rect_filled(Rect::from_min_size(pos2(edge(x) - px / 2.0, y), vec2(px, 8.0)), CornerRadius::ZERO, stem);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(edge(x) - px / 2.0, y), vec2(px, 8.0)),
+            CornerRadius::ZERO,
+            stem,
+        );
         if i % 6 == 0 {
             // Leaves alternate sides; fruit hangs between some of them.
             let out = (i / 6) % 2 == 0;
-            let lx = if out == right { edge(x) } else { edge(x) - 7.0 * px };
-            sprite(painter, pos2(lx, y - 3.0 * px), px, &LEAF, &garden_palette, out == right);
+            let lx = if out == right {
+                edge(x)
+            } else {
+                edge(x) - 7.0 * px
+            };
+            sprite(
+                painter,
+                pos2(lx, y - 3.0 * px),
+                px,
+                &LEAF,
+                &garden_palette,
+                out == right,
+            );
             let pick = noise(i, right as usize, 23);
             let fruit: Option<&[&str]> = if pick < 0.22 {
                 Some(if right { &PUMPKIN } else { &TOMATO })
@@ -459,8 +629,16 @@ fn side_plant(painter: &Painter, rect: Rect, right: bool, px: f32) {
                 None
             };
             if let Some(fruit) = fruit {
-                let fx = edge(x + if right { -px * 2.0 } else { px * 2.0 }) - fruit[0].len() as f32 * px / 2.0;
-                sprite(painter, pos2(fx, y + 4.0 * px), px, fruit, &garden_palette, false);
+                let fx = edge(x + if right { -px * 2.0 } else { px * 2.0 })
+                    - fruit[0].len() as f32 * px / 2.0;
+                sprite(
+                    painter,
+                    pos2(fx, y + 4.0 * px),
+                    px,
+                    fruit,
+                    &garden_palette,
+                    false,
+                );
             }
         }
         y += 8.0;
@@ -496,23 +674,47 @@ fn farmyard_front(painter: &Painter, rect: Rect) {
     let ground_h = GROUND_H;
     let ground = rect.bottom() - ground_h;
     let soil = Rect::from_min_max(pos2(rect.left(), ground), rect.max);
-    painter.rect_filled(soil, CornerRadius::ZERO, Color32::from_rgb(0x7a, 0x5c, 0x43));
+    painter.rect_filled(
+        soil,
+        CornerRadius::ZERO,
+        Color32::from_rgb(0x7a, 0x5c, 0x43),
+    );
     let speck = Color32::from_rgb(0x5c, 0x42, 0x32);
     for i in 0..(w / 18.0) as usize {
         let x = rect.left() + i as f32 * 18.0 + noise(i, 0, 29) * 10.0;
         let y = ground + 20.0 + noise(i, 1, 29) * (ground_h - 24.0);
-        painter.rect_filled(Rect::from_min_size(pos2(x, y), vec2(px * (1.0 + noise(i, 2, 29).round()), px)), CornerRadius::ZERO, speck);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(x, y), vec2(px * (1.0 + noise(i, 2, 29).round()), px)),
+            CornerRadius::ZERO,
+            speck,
+        );
     }
-    for (offset, height, colour) in [(0.0, px, (0x88, 0xad, 0x5b)), (px, px * 2.0, (0x63, 0x8d, 0x48)), (px * 3.0, px, (0x3f, 0x65, 0x3a))] {
+    for (offset, height, colour) in [
+        (0.0, px, (0x88, 0xad, 0x5b)),
+        (px, px * 2.0, (0x63, 0x8d, 0x48)),
+        (px * 3.0, px, (0x3f, 0x65, 0x3a)),
+    ] {
         let (r, g, b) = colour;
-        painter.rect_filled(Rect::from_min_size(pos2(rect.left(), ground + offset), vec2(w, height)), CornerRadius::ZERO, Color32::from_rgb(r, g, b));
+        painter.rect_filled(
+            Rect::from_min_size(pos2(rect.left(), ground + offset), vec2(w, height)),
+            CornerRadius::ZERO,
+            Color32::from_rgb(r, g, b),
+        );
     }
     // Grass tufts poking up.
     for i in 0..(w / 26.0) as usize {
         let x = rect.left() + i as f32 * 26.0 + noise(i, 3, 31) * 14.0;
-        let colour = if i % 2 == 0 { Color32::from_rgb(0x63, 0x8d, 0x48) } else { Color32::from_rgb(0x88, 0xad, 0x5b) };
+        let colour = if i % 2 == 0 {
+            Color32::from_rgb(0x63, 0x8d, 0x48)
+        } else {
+            Color32::from_rgb(0x88, 0xad, 0x5b)
+        };
         let tall = px * (1.0 + (noise(i, 4, 31) * 2.0).floor());
-        painter.rect_filled(Rect::from_min_size(pos2(x, ground - tall), vec2(px * 0.75, tall)), CornerRadius::ZERO, colour);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(x, ground - tall), vec2(px * 0.75, tall)),
+            CornerRadius::ZERO,
+            colour,
+        );
     }
 
     // The pond on the right: a stepped basin with water in it.
@@ -522,20 +724,44 @@ fn farmyard_front(painter: &Painter, rect: Rect) {
     let water = Color32::from_rgb(0x7f, 0xb4, 0xc7);
     const BASIN: [(f32, f32); 4] = [(0.0, 0.62), (0.04, 0.78), (0.11, 0.91), (0.22, 1.0)];
     for (inset, depth) in BASIN {
-        let basin = Rect::from_min_max(pos2(pond_l + pond_w * inset, ground), pos2(pond_l + pond_w * (1.0 - inset), ground + 40.0 * depth));
+        let basin = Rect::from_min_max(
+            pos2(pond_l + pond_w * inset, ground),
+            pos2(pond_l + pond_w * (1.0 - inset), ground + 40.0 * depth),
+        );
         painter.rect_filled(basin.expand(px), CornerRadius::ZERO, bed);
     }
     for (inset, depth) in BASIN {
-        let basin = Rect::from_min_max(pos2(pond_l + pond_w * inset, ground + px * 2.0), pos2(pond_l + pond_w * (1.0 - inset), ground + 40.0 * depth));
+        let basin = Rect::from_min_max(
+            pos2(pond_l + pond_w * inset, ground + px * 2.0),
+            pos2(pond_l + pond_w * (1.0 - inset), ground + 40.0 * depth),
+        );
         painter.rect_filled(basin, CornerRadius::ZERO, water);
     }
     let shine = Color32::from_rgb(0xa5, 0xcd, 0xd9);
-    painter.rect_filled(Rect::from_min_size(pos2(pond_l, ground + px * 2.0), vec2(pond_w, px * 0.75)), CornerRadius::ZERO, shine);
-    painter.rect_filled(Rect::from_min_size(pos2(pond_l + pond_w * 0.15, ground + px * 4.0), vec2(pond_w * 0.25, px * 0.5)), CornerRadius::ZERO, shine);
+    painter.rect_filled(
+        Rect::from_min_size(pos2(pond_l, ground + px * 2.0), vec2(pond_w, px * 0.75)),
+        CornerRadius::ZERO,
+        shine,
+    );
+    painter.rect_filled(
+        Rect::from_min_size(
+            pos2(pond_l + pond_w * 0.15, ground + px * 4.0),
+            vec2(pond_w * 0.25, px * 0.5),
+        ),
+        CornerRadius::ZERO,
+        shine,
+    );
 
     // The coop, and the flock: hens, then runner ducks, then more hens heading home.
     let coop_x = rect.left() + w * 0.03 + 70.0;
-    sprite(painter, pos2(coop_x, ground - COOP.len() as f32 * px * 1.2 + px), px * 1.2, &COOP, &coop_palette, false);
+    sprite(
+        painter,
+        pos2(coop_x, ground - COOP.len() as f32 * px * 1.2 + px),
+        px * 1.2,
+        &COOP,
+        &coop_palette,
+        false,
+    );
     let feet = ground + px;
     let px = 3.5;
     for (i, x) in [0.17, 0.25, 0.33].into_iter().enumerate() {
@@ -549,8 +775,14 @@ fn farmyard_front(painter: &Painter, rect: Rect) {
     }
     // A duck having a swim.
     let swim = pos2(pond_l + pond_w * 0.45, ground + px * 2.0);
-    sprite(painter, swim - vec2(0.0, 9.0 * px), px, &DUCK[..9], &bird_palette(0), true);
-
+    sprite(
+        painter,
+        swim - vec2(0.0, 9.0 * px),
+        px,
+        &DUCK[..9],
+        &bird_palette(0),
+        true,
+    );
 }
 
 /// Blue sky with blocky clouds and plants climbing both sides (the ground and birds are
@@ -559,9 +791,24 @@ fn paint_farmyard(painter: &Painter, rect: Rect) {
     let (w, h) = (rect.width(), rect.height());
     let px = 4.0;
     // Sky: zenith, then middle at 56%, then the horizon.
-    let (top, middle, horizon) = (Color32::from_rgb(0x77, 0xb8, 0xe3), Color32::from_rgb(0xb6, 0xdd, 0xee), Color32::from_rgb(0xe3, 0xef, 0xdf));
+    let (top, middle, horizon) = (
+        Color32::from_rgb(0x77, 0xb8, 0xe3),
+        Color32::from_rgb(0xb6, 0xdd, 0xee),
+        Color32::from_rgb(0xe3, 0xef, 0xdf),
+    );
     let split = rect.top() + h * 0.56;
-    for (r, a, b) in [(Rect::from_min_max(rect.min, pos2(rect.right(), split)), top, middle), (Rect::from_min_max(pos2(rect.left(), split), rect.max), middle, horizon)] {
+    for (r, a, b) in [
+        (
+            Rect::from_min_max(rect.min, pos2(rect.right(), split)),
+            top,
+            middle,
+        ),
+        (
+            Rect::from_min_max(pos2(rect.left(), split), rect.max),
+            middle,
+            horizon,
+        ),
+    ] {
         let mut mesh = egui::Mesh::default();
         mesh.colored_vertex(r.left_top(), a);
         mesh.colored_vertex(r.right_top(), a);
@@ -571,13 +818,29 @@ fn paint_farmyard(painter: &Painter, rect: Rect) {
         mesh.add_triangle(0, 2, 3);
         painter.add(mesh);
     }
-    for (x, y, b) in [(0.10, 0.07, 11.0), (0.70, 0.22, 7.5), (0.36, 0.40, 13.0), (0.84, 0.60, 8.5), (0.18, 0.76, 6.5)] {
+    for (x, y, b) in [
+        (0.10, 0.07, 11.0),
+        (0.70, 0.22, 7.5),
+        (0.36, 0.40, 13.0),
+        (0.84, 0.60, 8.5),
+        (0.18, 0.76, 6.5),
+    ] {
         pixel_cloud(painter, rect.min + vec2(x * w, y * h), b);
     }
 
     let ground = rect.bottom() - GROUND_H;
-    side_plant(painter, Rect::from_min_max(rect.min, pos2(rect.right(), ground)), false, px);
-    side_plant(painter, Rect::from_min_max(rect.min, pos2(rect.right(), ground)), true, px);
+    side_plant(
+        painter,
+        Rect::from_min_max(rect.min, pos2(rect.right(), ground)),
+        false,
+        px,
+    );
+    side_plant(
+        painter,
+        Rect::from_min_max(rect.min, pos2(rect.right(), ground)),
+        true,
+        px,
+    );
 }
 
 #[cfg(test)]
@@ -587,9 +850,15 @@ mod tests {
     #[test]
     fn patterns_are_made() {
         for name in ["stone", "pinstripes", "rain", "osrs"] {
-            assert!(make_pattern(name, Color32::from_rgb(60, 50, 40)).is_some(), "{name}");
+            assert!(
+                make_pattern(name, Color32::from_rgb(60, 50, 40)).is_some(),
+                "{name}"
+            );
         }
-        assert!(make_pattern("farmyard", Color32::BLACK).is_none(), "scenes are painted, not tiled");
+        assert!(
+            make_pattern("farmyard", Color32::BLACK).is_none(),
+            "scenes are painted, not tiled"
+        );
     }
 
     #[test]

@@ -19,16 +19,73 @@ const MAX_CONTINUE: usize = 20;
 pub fn router(state: Arc<State>) -> axum::Router {
     axum::Router::new()
         .route("/", get(index))
-        .route("/app.js", get(|| asset(include_str!("../web/app.js"), "text/javascript; charset=utf-8")))
-        .route("/app.css", get(|| asset(include_str!("../web/app.css"), "text/css; charset=utf-8")))
-        .route("/player.js", get(|| asset(include_str!("../web/player.js"), "text/javascript; charset=utf-8")))
-        .route("/subtitles.js", get(|| asset(include_str!("../web/subtitles.js"), "text/javascript; charset=utf-8")))
+        .route(
+            "/app.js",
+            get(|| {
+                asset(
+                    include_str!("../web/app.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
+        .route(
+            "/app.css",
+            get(|| asset(include_str!("../web/app.css"), "text/css; charset=utf-8")),
+        )
+        .route(
+            "/player.js",
+            get(|| {
+                asset(
+                    include_str!("../web/player.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
+        .route(
+            "/subtitles.js",
+            get(|| {
+                asset(
+                    include_str!("../web/subtitles.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
         .route("/icon.png", get(icon))
-        .route("/remote.js", get(|| asset(include_str!("../web/remote.js"), "text/javascript; charset=utf-8")))
-        .route("/manifest.webmanifest", get(|| asset(include_str!("../web/manifest.webmanifest"), "application/manifest+json")))
-        .route("/sw.js", get(|| asset(include_str!("../web/sw.js"), "text/javascript; charset=utf-8")))
-        .route("/icon-192.png", get(|| png(include_bytes!("../../../assets/icon-192.png"))))
-        .route("/icon-512.png", get(|| png(include_bytes!("../../../assets/icon-512.png"))))
+        .route(
+            "/remote.js",
+            get(|| {
+                asset(
+                    include_str!("../web/remote.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
+        .route(
+            "/manifest.webmanifest",
+            get(|| {
+                asset(
+                    include_str!("../web/manifest.webmanifest"),
+                    "application/manifest+json",
+                )
+            }),
+        )
+        .route(
+            "/sw.js",
+            get(|| {
+                asset(
+                    include_str!("../web/sw.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
+        .route(
+            "/icon-192.png",
+            get(|| png(include_bytes!("../../../assets/icon-192.png"))),
+        )
+        .route(
+            "/icon-512.png",
+            get(|| png(include_bytes!("../../../assets/icon-512.png"))),
+        )
         .route("/api/remote", get(crate::remote::status))
         .route("/api/remote/key", post(crate::remote::key))
         .route("/api/remote/play", post(crate::remote::play))
@@ -38,7 +95,15 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/api/music/{id}", get(crate::music::albums))
         .route("/api/album/{id}", get(crate::music::album))
         .route("/cover/{id}", get(crate::music::cover))
-        .route("/music.js", get(|| asset(include_str!("../web/music.js"), "text/javascript; charset=utf-8")))
+        .route(
+            "/music.js",
+            get(|| {
+                asset(
+                    include_str!("../web/music.js"),
+                    "text/javascript; charset=utf-8",
+                )
+            }),
+        )
         .route("/api/library/{id}", get(library))
         .route("/api/show/{library}/{show}", get(show))
         .route("/api/watched", post(set_watched))
@@ -47,8 +112,14 @@ pub fn router(state: Arc<State>) -> axum::Router {
         .route("/media/{library}/{file}", get(crate::play::file))
         .route("/stream/{library}/{file}", get(crate::play::stream))
         .route("/api/start/{library}/{file}", get(crate::play::start))
-        .route("/api/subs-ready/{library}/{file}/{index}", get(crate::play::subs_ready))
-        .route("/subs/{library}/{file}/{index}", get(crate::play::subtitles))
+        .route(
+            "/api/subs-ready/{library}/{file}/{index}",
+            get(crate::play::subs_ready),
+        )
+        .route(
+            "/subs/{library}/{file}/{index}",
+            get(crate::play::subtitles),
+        )
         .route("/fonts/fallback", get(crate::play::fallback_font))
         .route("/fonts/{library}/{file}/{index}", get(crate::play::font))
         .route("/vendor/jassub/{name}", get(crate::play::jassub))
@@ -59,12 +130,23 @@ pub fn router(state: Arc<State>) -> axum::Router {
 }
 
 async fn index() -> Response {
-    asset(include_str!("../web/index.html"), "text/html; charset=utf-8").await
+    asset(
+        include_str!("../web/index.html"),
+        "text/html; charset=utf-8",
+    )
+    .await
 }
 
 async fn asset(body: &'static str, kind: &'static str) -> Response {
     // Small files: always check for a newer version (after updating Flex).
-    ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "no-cache")], body).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, kind),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 async fn icon() -> Response {
@@ -72,7 +154,14 @@ async fn icon() -> Response {
 }
 
 async fn png(bytes: &'static [u8]) -> Response {
-    ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=86400")], bytes).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 fn lib(snapshot: &Snapshot, id: i64) -> Option<&LibrarySnapshot> {
@@ -117,7 +206,12 @@ struct HomePage {
 
 /// The picture for a file's card: its episode's still or the film's backdrop, else a
 /// screenshot the app has taken.
-fn card_image(state: &State, snapshot: &Snapshot, l: &LibrarySnapshot, file_id: i64) -> Option<String> {
+fn card_image(
+    state: &State,
+    snapshot: &Snapshot,
+    l: &LibrarySnapshot,
+    file_id: i64,
+) -> Option<String> {
     let entry = l.catalog.as_ref().and_then(|c| c.show_of_file(file_id));
     let tmdb = match entry {
         Some(e) if e.is_series() => l
@@ -138,7 +232,10 @@ fn card_image(state: &State, snapshot: &Snapshot, l: &LibrarySnapshot, file_id: 
 async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
     let snapshot = state.snapshot();
     // Like the app: per show for organised libraries, per folder for the rest.
-    let organised = snapshot.libraries.iter().filter_map(|l| l.catalog.as_deref().map(|c| (&l.lib, &*l.tree, c)));
+    let organised = snapshot
+        .libraries
+        .iter()
+        .filter_map(|l| l.catalog.as_deref().map(|c| (&l.lib, &*l.tree, c)));
     let mut items = progress::continue_watching_shows(organised, MAX_CONTINUE);
     let pending = snapshot
         .libraries
@@ -147,7 +244,12 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
         .map(|l| (&l.lib, &*l.tree));
     items.extend(progress::continue_watching(pending, MAX_CONTINUE));
     // Removed on the TV (hold OK → Remove from Continue Watching): hidden here too.
-    let hidden = state.db.lock().unwrap_or_else(|e| e.into_inner()).continue_hidden().unwrap_or_default();
+    let hidden = state
+        .db
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .continue_hidden()
+        .unwrap_or_default();
     let mut items = progress::without_hidden(items, &hidden);
     items.truncate(MAX_CONTINUE);
 
@@ -156,24 +258,47 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
         .filter_map(|item| {
             let l = lib(&snapshot, item.library_id)?;
             let file = l.tree.file(item.file_id)?;
-            let titles = flex_core::titles::titles(&l.tree, l.catalog.as_deref(), &snapshot.series, item.file_id)?;
+            let titles = flex_core::titles::titles(
+                &l.tree,
+                l.catalog.as_deref(),
+                &snapshot.series,
+                item.file_id,
+            )?;
             // The show's (matched) title once organised; the top folder name until then.
             let title = match (&titles.show, file.rel_path.split_once('/')) {
                 (Some(s), _) => s.clone(),
                 (None, Some((top, _))) => flex_core::library::display_name(top, false),
                 (None, None) => titles.name.clone(),
             };
-            let episode = titles.episode.clone().unwrap_or_else(|| if titles.show.is_none() { titles.name.clone() } else { String::new() });
+            let episode = titles.episode.clone().unwrap_or_else(|| {
+                if titles.show.is_none() {
+                    titles.name.clone()
+                } else {
+                    String::new()
+                }
+            });
             let resume = item.kind == ContinueKind::Resume;
             Some(Card {
                 library: l.lib.id,
                 file: item.file_id,
-                show: l.catalog.as_ref().and_then(|c| c.show_of_file(item.file_id)).map(|e| e.show.id),
+                show: l
+                    .catalog
+                    .as_ref()
+                    .and_then(|c| c.show_of_file(item.file_id))
+                    .map(|e| e.show.id),
                 title,
                 episode,
                 next: !resume,
-                remaining: if resume { file.progress.remaining_secs() } else { None },
-                fraction: if resume { file.progress.fraction() } else { None },
+                remaining: if resume {
+                    file.progress.remaining_secs()
+                } else {
+                    None
+                },
+                fraction: if resume {
+                    file.progress.fraction()
+                } else {
+                    None
+                },
                 image: card_image(&state, &snapshot, l, item.file_id),
             })
         })
@@ -187,7 +312,10 @@ async fn home(AxState(state): AxState<Arc<State>>) -> Json<HomePage> {
             kind: l.lib.kind.as_str(),
             videos: l.tree.len(),
             organised: l.catalog.is_some() || l.music.is_some(),
-            albums: l.music.as_ref().map(|m| m.albums.iter().filter(|a| !a.singles).count()),
+            albums: l
+                .music
+                .as_ref()
+                .map(|m| m.albums.iter().filter(|a| !a.singles).count()),
         })
         .collect();
     Json(HomePage { cont, libraries })
@@ -221,10 +349,16 @@ struct LibraryPage {
 
 fn regular_episodes(entry: &ShowEntry) -> impl Iterator<Item = &flex_core::catalog::Episode> {
     let has_regular = entry.episodes.iter().any(|e| e.season != 0);
-    entry.episodes.iter().filter(move |e| !has_regular || e.season != 0)
+    entry
+        .episodes
+        .iter()
+        .filter(move |e| !has_regular || e.season != 0)
 }
 
-async fn library(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>) -> Result<Json<LibraryPage>, StatusCode> {
+async fn library(
+    AxState(state): AxState<Arc<State>>,
+    Path(id): Path<i64>,
+) -> Result<Json<LibraryPage>, StatusCode> {
     let snapshot = state.snapshot();
     let l = lib(&snapshot, id).ok_or(StatusCode::NOT_FOUND)?;
     let shows = l
@@ -234,7 +368,9 @@ async fn library(AxState(state): AxState<Arc<State>>, Path(id): Path<i64>) -> Re
             c.shows
                 .iter()
                 .map(|e| {
-                    let files: Vec<_> = regular_episodes(e).filter_map(|ep| l.tree.file(ep.file_id)).collect();
+                    let files: Vec<_> = regular_episodes(e)
+                        .filter_map(|ep| l.tree.file(ep.file_id))
+                        .collect();
                     ShowSummary {
                         id: e.show.id,
                         title: e.show.title.clone(),
@@ -299,7 +435,10 @@ struct ShowPage {
     seasons: Vec<Season>,
 }
 
-async fn show(AxState(state): AxState<Arc<State>>, Path((library_id, show_id)): Path<(i64, i64)>) -> Result<Json<ShowPage>, StatusCode> {
+async fn show(
+    AxState(state): AxState<Arc<State>>,
+    Path((library_id, show_id)): Path<(i64, i64)>,
+) -> Result<Json<ShowPage>, StatusCode> {
     let snapshot = state.snapshot();
     let l = lib(&snapshot, library_id).ok_or(StatusCode::NOT_FOUND)?;
     let catalog = l.catalog.as_ref().ok_or(StatusCode::NOT_FOUND)?;
@@ -313,18 +452,32 @@ async fn show(AxState(state): AxState<Arc<State>>, Path((library_id, show_id)): 
                 .season_episodes(season)
                 .filter_map(|ep| {
                     let file = l.tree.file(ep.file_id)?;
-                    let titles = flex_core::titles::titles(&l.tree, Some(catalog), &snapshot.series, ep.file_id)?;
-                    let meta = flex_core::titles::episode_meta(catalog, &snapshot.series, ep.file_id);
+                    let titles = flex_core::titles::titles(
+                        &l.tree,
+                        Some(catalog),
+                        &snapshot.series,
+                        ep.file_id,
+                    )?;
+                    let meta =
+                        flex_core::titles::episode_meta(catalog, &snapshot.series, ep.file_id);
                     let p = file.progress;
                     Some(EpisodeInfo {
                         file: ep.file_id,
                         number: ep.number,
                         // For films, the file name tells versions/parts apart.
-                        title: if series { titles.name } else { flex_core::library::display_name(file.file_name(), true) },
+                        title: if series {
+                            titles.name
+                        } else {
+                            flex_core::library::display_name(file.file_name(), true)
+                        },
                         overview: meta.map(|m| m.overview.clone()).filter(|o| !o.is_empty()),
-                        image: meta.and_then(|m| m.still.as_deref()).map(|s| images::url(s, "w780")).or_else(|| {
-                            has_shot(&state, file).then(|| format!("/shot/{library_id}/{}", ep.file_id))
-                        }),
+                        image: meta
+                            .and_then(|m| m.still.as_deref())
+                            .map(|s| images::url(s, "w780"))
+                            .or_else(|| {
+                                has_shot(&state, file)
+                                    .then(|| format!("/shot/{library_id}/{}", ep.file_id))
+                            }),
                         watched: p.watched,
                         fraction: p.fraction(),
                         remaining: p.position.and(p.remaining_secs()),
@@ -337,7 +490,11 @@ async fn show(AxState(state): AxState<Arc<State>>, Path((library_id, show_id)): 
                 _ if !series => "Files".to_owned(),
                 s => format!("Season {s}"),
             };
-            Season { season, label, episodes }
+            Season {
+                season,
+                label,
+                episodes,
+            }
         })
         .collect();
     let s = &entry.show;
@@ -367,21 +524,39 @@ struct WatchedRequest {
     watched: bool,
 }
 
-async fn set_watched(AxState(state): AxState<Arc<State>>, Json(req): Json<WatchedRequest>) -> StatusCode {
+async fn set_watched(
+    AxState(state): AxState<Arc<State>>,
+    Json(req): Json<WatchedRequest>,
+) -> StatusCode {
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
         let snapshot = state.snapshot();
-        let Some(l) = lib(&snapshot, req.library) else { return Ok(false) };
+        let Some(l) = lib(&snapshot, req.library) else {
+            return Ok(false);
+        };
         // Only files of that library.
-        let ids: Vec<i64> = req.files.iter().copied().filter(|id| l.tree.file(*id).is_some()).collect();
+        let ids: Vec<i64> = req
+            .files
+            .iter()
+            .copied()
+            .filter(|id| l.tree.file(*id).is_some())
+            .collect();
         if ids.is_empty() {
             return Ok(false);
         }
-        state.db.lock().unwrap_or_else(|e| e.into_inner()).set_watched(&ids, req.watched)?;
+        state
+            .db
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_watched(&ids, req.watched)?;
         state.patch_files(req.library, &ids, |f| {
             f.progress.watched = req.watched;
             f.progress.position = None;
         });
-        (state.on_change)(Change::Watched { library_id: req.library, file_ids: ids, watched: req.watched });
+        (state.on_change)(Change::Watched {
+            library_id: req.library,
+            file_ids: ids,
+            watched: req.watched,
+        });
         Ok(true)
     })
     .await;
